@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}التداول - Orion{% endblock %}
+{% block content %}
+
+<div class="warn">
+  ⚠️ تفعيل «التداول الآلي» ينفّذ صفقات حقيقية على حسابك في OKX بدون تدخل يدوي. ابدأ دائماً بوضع Demo/Testnet
+  للتجربة قبل التفعيل على حساب حقيقي، وتحمّل المسؤولية الكاملة عن أي مخاطر مالية ناتجة عن التداول التلقائي.
+</div>
+
+<form method="post" action="/trading">
+  <div class="card">
+    <h3>ربط حساب OKX</h3>
+    <div class="row">
+      <div><label>API Key</label><input type="text" name="okx_api_key" value="{{ s.okx_api_key }}"></div>
+      <div><label>API Secret</label><input type="password" name="okx_api_secret" value="{{ s.okx_api_secret }}"></div>
+      <div><label>Passphrase</label><input type="password" name="okx_passphrase" value="{{ s.okx_passphrase }}"></div>
+    </div>
+    <div class="switch" style="margin-top:10px;"><input type="checkbox" name="okx_is_testnet" {{ 'checked' if s.okx_is_testnet }}> <label style="margin:0;">وضع تجريبي (Demo / Simulated Trading)</label></div>
+    <div style="margin-top:14px;"><button type="submit">حفظ ومزامنة</button></div>
+  </div>
+</form>
+
+<div class="card">
+  <div class="flex-between"><h3>حالة الاتصال والرصيد</h3><button class="btn secondary" onclick="testConn()">اختبار الاتصال</button></div>
+  <div id="conn-result" class="muted"></div>
+  <div class="row" style="margin-top:10px;">
+    <div class="card" style="flex:1;"><div class="muted">إجمالي الرصيد (Equity)</div><div id="equity" style="font-size:22px;font-weight:800;">—</div></div>
+    <div class="card" style="flex:1;"><div class="muted">المتاح للتداول</div><div id="available" style="font-size:22px;font-weight:800;">—</div></div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>المراكز المفتوحة</h3>
+  <table id="positions-table">
+    <thead><tr><th>الرمز</th><th>الاتجاه</th><th>الحجم</th><th>سعر الدخول</th><th>الرافعة</th><th>الربح/الخسارة</th></tr></thead>
+    <tbody><tr><td colspan="6" class="muted">اضغط "اختبار الاتصال" لعرض المراكز</td></tr></tbody>
+  </table>
+</div>
+
+<form method="post" action="/trading/execution">
+  <div class="card">
+    <h3>إعدادات التنفيذ الآلي</h3>
+    <div class="switch"><input type="checkbox" name="okx_is_auto_trading_enabled" {{ 'checked' if s.okx_is_auto_trading_enabled }}> <label style="margin:0; color:var(--red); font-weight:700;">تفعيل تنفيذ الإشارات تلقائياً كصفقات حقيقية</label></div>
+    <div class="row" style="margin-top:10px;">
+      <div><label>الرافعة المالية (Leverage)</label><input type="number" name="okx_leverage" value="{{ s.okx_leverage }}"></div>
+      <div><label>حجم الصفقة (USDT)</label><input type="number" step="0.1" name="okx_volume_usdt" value="{{ s.okx_volume_usdt }}"></div>
+      <div>
+        <label>وضع الهامش</label>
+        <select name="okx_margin_mode">
+          <option value="cross" {{ 'selected' if s.okx_margin_mode=='cross' }}>Cross</option>
+          <option value="isolated" {{ 'selected' if s.okx_margin_mode=='isolated' }}>Isolated</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:14px;"><button type="submit">حفظ إعدادات التنفيذ</button></div>
+  </div>
+</form>
+
+<script>
+async function testConn(){
+  document.getElementById('conn-result').innerText = 'جاري الاختبار...';
+  const r = await fetch('/api/trading/test', {method:'POST'});
+  const data = await r.json();
+  document.getElementById('conn-result').innerText = data.message;
+  document.getElementById('equity').innerText = data.equity !== undefined ? data.equity + ' USDT' : '—';
+  document.getElementById('available').innerText = data.available !== undefined ? data.available + ' USDT' : '—';
+  const tbody = document.querySelector('#positions-table tbody');
+  if(data.positions && data.positions.length){
+    tbody.innerHTML = data.positions.map(p => `<tr><td>${p.inst_id}</td><td>${p.pos_side}</td><td>${p.pos}</td><td>${p.avg_px}</td><td>${p.leverage}</td><td>${p.upl}</td></tr>`).join('');
+  } else {
+    tbody.innerHTML = '<tr><td colspan="6" class="muted">لا توجد مراكز مفتوحة حالياً</td></tr>';
+  }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}Orion Trading Bot{% endblock %}</title>
+<style>
+  :root{
+    --bg:#0b0e14; --card:#131722; --dark-accent:#1c2130; --cyan:#22d3ee; --purple:#a78bfa;
+    --green:#22c55e; --red:#ef4444; --gold:#fbbf24; --text:#e5e7eb; --text-sec:#94a3b8;
+  }
+  *{box-sizing:border-box;}
+  body{background:var(--bg); color:var(--text); font-family:-apple-system,Segoe UI,Tahoma,Arial,sans-serif; margin:0;}
+  .topbar{display:flex; align-items:center; justify-content:space-between; padding:14px 20px; background:var(--card); border-bottom:1px solid var(--dark-accent);}
+  .topbar .brand{font-weight:800; display:flex; align-items:center; gap:8px;}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--green);}
+  nav a{color:var(--text-sec); text-decoration:none; margin-inline-start:18px; font-size:14px; font-weight:600;}
+  nav a.active, nav a:hover{color:var(--cyan);}
+  .container{max-width:1000px; margin:0 auto; padding:20px;}
+  .card{background:var(--card); border:1px solid var(--dark-accent); border-radius:14px; padding:18px; margin-bottom:16px;}
+  h1,h2,h3{margin-top:0;}
+  label{display:block; font-size:13px; color:var(--text-sec); margin:10px 0 4px;}
+  input[type=text],input[type=number],input[type=password],select,textarea{
+    width:100%; padding:10px; border-radius:8px; border:1px solid var(--dark-accent); background:#0f1320; color:var(--text); font-size:14px;
+  }
+  .row{display:flex; gap:14px; flex-wrap:wrap;}
+  .row > div{flex:1; min-width:200px;}
+  button, .btn{
+    background:linear-gradient(90deg, var(--cyan), var(--purple)); color:#04141a; border:none; border-radius:10px;
+    padding:10px 18px; font-weight:800; cursor:pointer; font-size:14px;
+  }
+  .btn.secondary{background:var(--dark-accent); color:var(--text);}
+  .btn.danger{background:var(--red); color:white;}
+  table{width:100%; border-collapse:collapse; font-size:13px;}
+  th,td{padding:8px; text-align:right; border-bottom:1px solid var(--dark-accent);}
+  th{color:var(--text-sec); font-weight:600;}
+  .badge{padding:3px 10px; border-radius:20px; font-size:11px; font-weight:700;}
+  .badge.long{background:rgba(34,197,94,.15); color:var(--green);}
+  .badge.short{background:rgba(239,68,68,.15); color:var(--red);}
+  .status-pill{padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;}
+  .status-PENDING{background:rgba(251,191,36,.15); color:var(--gold);}
+  .status-ACTIVE{background:rgba(34,211,238,.15); color:var(--cyan);}
+  .status-HIT_TP{background:rgba(34,197,94,.15); color:var(--green);}
+  .status-HIT_SL{background:rgba(239,68,68,.15); color:var(--red);}
+  .status-CANCELLED{background:rgba(148,163,184,.15); color:var(--text-sec);}
+  .terminal{background:#030508; border-radius:12px; border:1px solid var(--dark-accent); padding:10px; height:340px; overflow-y:auto; font-family:monospace; font-size:12px;}
+  .terminal div{padding:2px 4px;}
+  .flex-between{display:flex; justify-content:space-between; align-items:center;}
+  .muted{color:var(--text-sec); font-size:12px;}
+  .switch{display:flex; align-items:center; gap:8px;}
+  .warn{background:rgba(239,68,68,.08); border:1px solid rgba(239,68,68,.3); color:#fca5a5; padding:10px 14px; border-radius:10px; font-size:13px; margin-bottom:14px;}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="brand"><span class="dot"></span> Orion Trading Bot</div>
+  <nav>
+    <a href="/" class="{{ 'active' if active=='dashboard' else '' }}">اللوحة الرئيسية</a>
+    <a href="/settings" class="{{ 'active' if active=='settings' else '' }}">الإعدادات</a>
+    <a href="/trading" class="{{ 'active' if active=='trading' else '' }}">التداول</a>
+    <a href="/logout">تسجيل الخروج</a>
+  </nav>
+</div>
+<div class="container">
+{% block content %}{% endblock %}
+</div>
+</body>
+</html>

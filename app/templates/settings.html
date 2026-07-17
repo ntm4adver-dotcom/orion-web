@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}الإعدادات - Orion{% endblock %}
+{% block content %}
+<form method="post" action="/settings">
+  <div class="card">
+    <h3>إعدادات الفحص العامة</h3>
+    <div class="row">
+      <div>
+        <label>الفاصل الزمني بين كل دورة فحص (ثانية)</label>
+        <input type="number" name="scan_interval_seconds" value="{{ s.scan_interval_seconds }}">
+      </div>
+      <div>
+        <label>الحد الأدنى لنسبة النجاح (%)</label>
+        <input type="number" name="min_probability" value="{{ s.min_probability }}">
+      </div>
+      <div>
+        <label>عدد العملات المفحوصة (الأعلى حجماً)</label>
+        <input type="number" name="symbols_limit" value="{{ s.symbols_limit }}">
+      </div>
+    </div>
+    <div class="row">
+      <div class="switch"><input type="checkbox" name="is_auto_scanning" {{ 'checked' if s.is_auto_scanning }}> <label style="margin:0;">تفعيل الفحص التلقائي</label></div>
+    </div>
+    <label>مصدر بيانات السوق</label>
+    <select name="exchange">
+      <option value="binance" {{ 'selected' if s.exchange=='binance' }}>Binance Futures</option>
+      <option value="okx" {{ 'selected' if s.exchange=='okx' }}>OKX</option>
+    </select>
+  </div>
+
+  <div class="card">
+    <h3>العملات</h3>
+    <div class="switch"><input type="checkbox" name="is_single_coin_mode_enabled" {{ 'checked' if s.is_single_coin_mode_enabled }}> <label style="margin:0;">وضع مراقبة عملات محددة فقط</label></div>
+    <label>رموز العملات (مفصولة بفاصلة) — تُستخدم في وضع المراقبة المخصصة</label>
+    <input type="text" name="single_coin_symbol" value="{{ s.single_coin_symbol }}">
+  </div>
+
+  <div class="card">
+    <h3>تنبيهات تيليجرام</h3>
+    <div class="switch"><input type="checkbox" name="is_telegram_enabled" {{ 'checked' if s.is_telegram_enabled }}> <label style="margin:0;">تفعيل تنبيهات تيليجرام</label></div>
+    <label>Telegram Bot Token</label>
+    <input type="text" name="telegram_token" value="{{ s.telegram_token }}" placeholder="123456:ABC-DEF...">
+    <label>Chat IDs (مفصولة بفاصلة)</label>
+    <input type="text" name="telegram_chat_ids" value="{{ s.telegram_chat_ids }}" placeholder="-100123456,987654321">
+  </div>
+
+  <div class="card">
+    <h3>فلاتر إضافية</h3>
+    <div class="switch"><input type="checkbox" name="is_volume_filter_enabled" {{ 'checked' if s.is_volume_filter_enabled }}> <label style="margin:0;">فلتر الحجم — حد أدنى</label></div>
+    <input type="number" step="0.1" name="min_volume_ratio" value="{{ s.min_volume_ratio }}">
+
+    <div class="switch" style="margin-top:14px;"><input type="checkbox" name="is_vwap_filter_enabled" {{ 'checked' if s.is_vwap_filter_enabled }}> <label style="margin:0;">فلتر اتجاه VWAP (4H)</label></div>
+
+    <div class="switch" style="margin-top:14px;"><input type="checkbox" name="is_4h_buyers_filter_enabled" {{ 'checked' if s.is_4h_buyers_filter_enabled }}> <label style="margin:0;">فلتر نسبة مشتري 4 ساعات</label></div>
+    <input type="number" name="min_4h_buyers_percentage" value="{{ s.min_4h_buyers_percentage }}">
+
+    <div class="switch" style="margin-top:14px;"><input type="checkbox" name="is_cancel_if_exceeds_target_enabled" {{ 'checked' if s.is_cancel_if_exceeds_target_enabled }}> <label style="margin:0;">إلغاء الصفقة إذا تجاوز السعر الهدف قبل الدخول</label></div>
+  </div>
+
+  <button type="submit">حفظ الإعدادات</button>
+  {% if saved %}<span class="muted" style="margin-inline-start:12px;">✅ تم الحفظ</span>{% endif %}
+</form>
+{% endblock %}

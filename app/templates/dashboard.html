@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}اللوحة الرئيسية - Orion{% endblock %}
+{% block content %}
+
+<div class="card flex-between">
+  <div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span class="dot" id="status-dot" style="background:var(--red);"></span>
+      <strong>منصة أوريون للتحليل الفني والكمي</strong>
+    </div>
+    <div class="muted" style="font-family:monospace; margin-top:2px;">Orion Quantitative AI Scanner Engine — Web</div>
+  </div>
+  <div id="status-badge" class="badge">متوقف</div>
+</div>
+
+<div class="card">
+  <div class="row">
+    <button id="toggle-scan-btn" onclick="toggleScan()">تشغيل الفحص</button>
+    <button class="btn secondary" onclick="triggerScan()">⚡ فحص خاطف</button>
+  </div>
+  <div class="muted" id="countdown-text" style="margin-top:10px;"></div>
+</div>
+
+<div class="card">
+  <div class="flex-between">
+    <h3>لوحة تتبع العمليات الفورية (Live Scan Log)</h3>
+    <span class="muted" style="cursor:pointer;" onclick="clearLogs()">مسح الكونسول</span>
+  </div>
+  <div class="terminal" id="log-terminal">
+    <div class="muted">لا توجد سجلات بعد...</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>الإشارات الأخيرة</h3>
+  <table id="signals-table">
+    <thead>
+      <tr><th>العملة</th><th>الاتجاه</th><th>الدخول</th><th>الهدف</th><th>الستوب</th><th>الاحتمالية</th><th>الحالة</th></tr>
+    </thead>
+    <tbody><tr><td colspan="7" class="muted">لا توجد إشارات بعد</td></tr></tbody>
+  </table>
+</div>
+
+<script>
+let isScanning = false;
+
+async function fetchStatus(){
+  const r = await fetch('/api/status'); const s = await r.json();
+  isScanning = s.is_scanning_active;
+  document.getElementById('status-dot').style.background = isScanning ? 'var(--green)' : 'var(--red)';
+  document.getElementById('status-badge').innerText = isScanning ? (s.is_currently_working ? 'جاري الفحص...' : 'الفاحص نشط 📡') : 'متوقف مؤقتاً ⏸️';
+  document.getElementById('toggle-scan-btn').innerText = isScanning ? 'إيقاف الفحص' : 'تشغيل الفحص';
+  document.getElementById('countdown-text').innerText = (isScanning && !s.is_currently_working && s.countdown_seconds > 0)
+    ? `الفحص القادم خلال: ${Math.round(s.countdown_seconds)} ثانية` : '';
+}
+
+async function fetchLogs(){
+  const r = await fetch('/api/logs'); const logs = await r.json();
+  const el = document.getElementById('log-terminal');
+  if(logs.length === 0){ el.innerHTML = '<div class="muted">لا توجد سجلات بعد...</div>'; return; }
+  el.innerHTML = logs.map(l => `<div>${l.message}</div>`).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+async function fetchSignals(){
+  const r = await fetch('/api/signals'); const signals = await r.json();
+  const tbody = document.querySelector('#signals-table tbody');
+  if(signals.length === 0){ tbody.innerHTML = '<tr><td colspan="7" class="muted">لا توجد إشارات بعد</td></tr>'; return; }
+  tbody.innerHTML = signals.map(s => `
+    <tr>
+      <td>${s.symbol}</td>
+      <td><span class="badge ${s.side==='Long'?'long':'short'}">${s.side}</span></td>
+      <td>${s.entry_price}</td>
+      <td>${s.take_profit}</td>
+      <td>${s.stop_loss}</td>
+      <td>${s.probability}% (${s.quality})</td>
+      <td><span class="status-pill status-${s.status}">${s.status}</span></td>
+    </tr>`).join('');
+}
+
+async function toggleScan(){
+  await fetch(isScanning ? '/api/scan/stop' : '/api/scan/start', {method:'POST'});
+  refreshAll();
+}
+async function triggerScan(){ await fetch('/api/scan/trigger', {method:'POST'}); }
+async function clearLogs(){ await fetch('/api/logs/clear', {method:'POST'}); fetchLogs(); }
+
+function refreshAll(){ fetchStatus(); fetchLogs(); fetchSignals(); }
+refreshAll();
+setInterval(refreshAll, 3000);
+</script>
+{% endblock %}

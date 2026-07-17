@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>تسجيل الدخول - Orion Trading Bot</title>
+<style>
+  body{background:#0b0e14; color:#e5e7eb; font-family:-apple-system,Segoe UI,Tahoma,Arial,sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0;}
+  .card{background:#131722; border:1px solid #1c2130; border-radius:16px; padding:32px; width:320px;}
+  h1{font-size:18px; text-align:center; margin-bottom:20px;}
+  input{width:100%; padding:12px; border-radius:8px; border:1px solid #1c2130; background:#0f1320; color:#e5e7eb; margin-bottom:14px; font-size:14px; box-sizing:border-box;}
+  button{width:100%; background:linear-gradient(90deg,#22d3ee,#a78bfa); color:#04141a; border:none; border-radius:10px; padding:12px; font-weight:800; cursor:pointer;}
+  .error{color:#ef4444; font-size:13px; text-align:center; margin-bottom:10px;}
+</style>
+</head>
+<body>
+<form class="card" method="post" action="/login">
+  <h1>🔒 منصة أوريون — تسجيل الدخول</h1>
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  <input type="password" name="password" placeholder="كلمة المرور" autofocus required>
+  <button type="submit">دخول</button>
+</form>
+</body>
+</html>

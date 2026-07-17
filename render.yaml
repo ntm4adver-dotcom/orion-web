@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: orion-trading-bot
+    env: docker
+    plan: starter
+    region: oregon
+    healthCheckPath: /login
+    envVars:
+      - key: ORION_APP_PASSWORD
+        sync: false
+      - key: ORION_SECRET_KEY
+        generateValue: true
+      - key: ORION_DB_PATH
+        value: /srv/data/orion.db
+    disk:
+      name: orion-data
+      mountPath: /srv/data
+      sizeGB: 1

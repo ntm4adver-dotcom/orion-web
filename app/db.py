@@ -1,0 +1,194 @@
+"""طبقة قاعدة بيانات SQLite بسيطة — تعادل Room DB (AppSettings, TradeSignal) في التطبيق الأصلي."""
+import os
+import sqlite3
+import time
+import threading
+from typing import Optional, List, Dict, Any
+
+DB_PATH = os.environ.get("ORION_DB_PATH", os.path.join(os.path.dirname(__file__), "..", "data", "orion.db"))
+os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+
+_lock = threading.Lock()
+
+DEFAULT_SETTINGS: Dict[str, Any] = {
+    "scan_interval_seconds": 30,
+    "telegram_token": "",
+    "telegram_chat_ids": "",
+    "min_probability": 70,
+    "is_auto_scanning": 1,
+    "is_telegram_enabled": 1,
+    "selected_symbols": "BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,DOGEUSDT,XRPUSDT,ADAUSDT",
+    "is_single_coin_mode_enabled": 0,
+    "single_coin_symbol": "BTCUSDT",
+    "symbols_limit": 10,
+    "is_volume_filter_enabled": 0,
+    "min_volume_ratio": 0.8,
+    "is_vwap_filter_enabled": 0,
+    "is_4h_buyers_filter_enabled": 0,
+    "min_4h_buyers_percentage": 60,
+    "is_cancel_if_exceeds_target_enabled": 1,
+    "exchange": "binance",  # 'binance' or 'okx' for market data source
+    # OKX trading connection
+    "okx_api_key": "",
+    "okx_api_secret": "",
+    "okx_passphrase": "",
+    "okx_is_testnet": 1,
+    "okx_is_auto_trading_enabled": 0,
+    "okx_leverage": 10,
+    "okx_volume_usdt": 10.0,
+    "okx_margin_mode": "cross",
+}
+
+
+def _connect():
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    with _lock, _connect() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS trade_signals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp INTEGER,
+                symbol TEXT,
+                side TEXT,
+                entry_price REAL,
+                stop_loss REAL,
+                take_profit REAL,
+                rr REAL,
+                probability INTEGER,
+                quality TEXT,
+                behavior TEXT,
+                volume_analysis TEXT,
+                status TEXT,
+                update_timestamp INTEGER,
+                current_price REAL DEFAULT 0,
+                last_notified_status TEXT DEFAULT ''
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS scan_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp INTEGER,
+                message TEXT
+            )
+        """)
+        conn.commit()
+        # seed defaults if missing
+        cur = conn.execute("SELECT key FROM app_settings")
+        existing = {row["key"] for row in cur.fetchall()}
+        for k, v in DEFAULT_SETTINGS.items():
+            if k not in existing:
+                conn.execute("INSERT INTO app_settings (key, value) VALUES (?, ?)", (k, str(v)))
+        conn.commit()
+
+
+def get_settings() -> Dict[str, Any]:
+    with _lock, _connect() as conn:
+        cur = conn.execute("SELECT key, value FROM app_settings")
+        raw = {row["key"]: row["value"] for row in cur.fetchall()}
+    settings = dict(DEFAULT_SETTINGS)
+    for k, v in raw.items():
+        if k not in DEFAULT_SETTINGS:
+            continue
+        default = DEFAULT_SETTINGS[k]
+        try:
+            if isinstance(default, bool):
+                settings[k] = v in ("1", "True", "true")
+            elif isinstance(default, int):
+                settings[k] = int(float(v))
+            elif isinstance(default, float):
+                settings[k] = float(v)
+            else:
+                settings[k] = v
+        except Exception:
+            settings[k] = default
+    # normalize booleans stored as 0/1 ints
+    for bkey in ("is_auto_scanning", "is_telegram_enabled", "is_single_coin_mode_enabled",
+                 "is_volume_filter_enabled", "is_vwap_filter_enabled", "is_4h_buyers_filter_enabled",
+                 "is_cancel_if_exceeds_target_enabled", "okx_is_testnet", "okx_is_auto_trading_enabled"):
+        settings[bkey] = bool(int(settings.get(bkey, 0)))
+    return settings
+
+
+def update_settings(updates: Dict[str, Any]):
+    with _lock, _connect() as conn:
+        for k, v in updates.items():
+            if k not in DEFAULT_SETTINGS:
+                continue
+            conn.execute(
+                "INSERT INTO app_settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (k, str(v)),
+            )
+        conn.commit()
+
+
+def add_signal(signal: Dict[str, Any]) -> int:
+    with _lock, _connect() as conn:
+        cur = conn.execute("""
+            INSERT INTO trade_signals
+            (timestamp, symbol, side, entry_price, stop_loss, take_profit, rr, probability,
+             quality, behavior, volume_analysis, status, update_timestamp, current_price, last_notified_status)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            int(time.time() * 1000), signal["symbol"], signal["side"], signal["entry_price"],
+            signal["stop_loss"], signal["take_profit"], signal["rr"], signal["probability"],
+            signal["quality"], signal["behavior"], signal["volume_analysis"], "PENDING",
+            int(time.time() * 1000), signal["entry_price"], "",
+        ))
+        conn.commit()
+        return cur.lastrowid
+
+
+def get_signals(limit: int = 100) -> List[Dict[str, Any]]:
+    with _lock, _connect() as conn:
+        cur = conn.execute("SELECT * FROM trade_signals ORDER BY id DESC LIMIT ?", (limit,))
+        return [dict(row) for row in cur.fetchall()]
+
+
+def get_open_signals() -> List[Dict[str, Any]]:
+    with _lock, _connect() as conn:
+        cur = conn.execute("SELECT * FROM trade_signals WHERE status IN ('PENDING','ACTIVE')")
+        return [dict(row) for row in cur.fetchall()]
+
+
+def update_signal_status(signal_id: int, status: str, current_price: float, last_notified_status: str):
+    with _lock, _connect() as conn:
+        conn.execute(
+            "UPDATE trade_signals SET status=?, current_price=?, update_timestamp=?, last_notified_status=? WHERE id=?",
+            (status, current_price, int(time.time() * 1000), last_notified_status, signal_id),
+        )
+        conn.commit()
+
+
+def add_log(message: str, max_logs: int = 300):
+    with _lock, _connect() as conn:
+        conn.execute("INSERT INTO scan_logs (timestamp, message) VALUES (?, ?)", (int(time.time() * 1000), message))
+        conn.execute("""
+            DELETE FROM scan_logs WHERE id NOT IN (
+                SELECT id FROM scan_logs ORDER BY id DESC LIMIT ?
+            )
+        """, (max_logs,))
+        conn.commit()
+
+
+def get_logs(limit: int = 200) -> List[Dict[str, Any]]:
+    with _lock, _connect() as conn:
+        cur = conn.execute("SELECT * FROM scan_logs ORDER BY id DESC LIMIT ?", (limit,))
+        rows = [dict(row) for row in cur.fetchall()]
+        return list(reversed(rows))
+
+
+def clear_logs():
+    with _lock, _connect() as conn:
+        conn.execute("DELETE FROM scan_logs")
+        conn.commit()
