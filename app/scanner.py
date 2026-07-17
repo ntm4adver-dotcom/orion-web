@@ -12,6 +12,7 @@ from . import okx_client
 from . import telegram_alert
 from . import learning
 from .analyzer import analyze, MarketMicrostructure
+from .ict_strategy import analyze_ict_smart_sweep
 
 
 class ScannerState:
@@ -155,7 +156,8 @@ class ScannerState:
                     ob_imbalance=exchange.fetch_order_book_imbalance(symbol),
                 )
 
-                result = analyze(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro)
+                strategy_fn = analyze_ict_smart_sweep if settings.get("active_strategy") == "ict_smart_sweep" else analyze
+                result = strategy_fn(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro)
 
                 if result is None:
                     db.add_log(f"▫️ {symbol}: ليس له اتجاه كافٍ حالياً.")

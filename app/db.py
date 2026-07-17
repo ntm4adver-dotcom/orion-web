@@ -28,6 +28,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "min_4h_buyers_percentage": 60,
     "is_cancel_if_exceeds_target_enabled": 1,
     "exchange": "binance",  # 'binance' or 'okx' for market data source
+    "active_strategy": "explosive_breakout",  # 'explosive_breakout' أو 'ict_smart_sweep'
     # OKX trading connection
     "okx_api_key": "",
     "okx_api_secret": "",
