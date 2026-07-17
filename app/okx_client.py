@@ -370,3 +370,43 @@ def fetch_order_book_imbalance(symbol: str, depth: int = 20) -> Optional[float]:
         return (bid_qty - ask_qty) / total if total > 0 else None
     except Exception:
         return None
+
+
+def fetch_taker_pressure(symbol: str, limit: int = 100) -> Optional[float]:
+    """ضغط المتداولين الفعليين (Taker Buy/Sell Pressure): يفحص آخر الصفقات المنفَّذة
+    فعلياً بالسوق (مو مجرد أوامر معلّقة بالـ order book) ويحسب هل الأغلبية اشترت
+    بأوامر سوق (taker buy) أو باعت (taker sell). إشارة أقوى وأدق من فوليوم الشمعة
+    العادي لتأكيد إن الاختراق مدعوم بضغط شراء/بيع حقيقي، وليس مجرد تقلب عابر.
+    ترجع رقم بين -1 (ضغط بيع كامل) و 1 (ضغط شراء كامل)."""
+    inst_id = _to_inst_id(symbol)
+    resp = _public_get(f"/api/v5/market/trades?instId={inst_id}&limit={limit}")
+    if not resp or resp.get("code") != "0" or not resp.get("data"):
+        return None
+    try:
+        buy_vol = 0.0
+        sell_vol = 0.0
+        for t in resp["data"]:
+            sz = float(t.get("sz", 0) or 0)
+            if t.get("side") == "buy":
+                buy_vol += sz
+            elif t.get("side") == "sell":
+                sell_vol += sz
+        total = buy_vol + sell_vol
+        return (buy_vol - sell_vol) / total if total > 0 else None
+    except Exception:
+        return None
+
+
+def fetch_long_short_ratio(symbol: str) -> Optional[float]:
+    """نسبة تمركز الحسابات (Long/Short Account Ratio): تكشف هل أغلب المتداولين على
+    هذه العملة متمركزين شراء أو بيع حالياً. ازدحام شديد باتجاه واحد (نسبة متطرفة)
+    يزيد احتمال انعكاس مفاجئ بسبب تصفية المراكز المزدحمة (Liquidation Squeeze)،
+    فنستخدمها كفلتر حذر إضافي مشابه لفلتر معدل التمويل الحالي."""
+    inst_id = _to_inst_id(symbol)
+    resp = _public_get(f"/api/v5/rubik/stat/contracts/long-short-account-ratio-contract?instId={inst_id}&period=5m&limit=1")
+    if not resp or resp.get("code") != "0" or not resp.get("data"):
+        return None
+    try:
+        return float(resp["data"][0][1])
+    except Exception:
+        return None

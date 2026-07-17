@@ -154,6 +154,8 @@ class ScannerState:
                     oi_change_pct=exchange.fetch_open_interest_change_pct(symbol),
                     funding_rate=exchange.fetch_funding_rate(symbol),
                     ob_imbalance=exchange.fetch_order_book_imbalance(symbol),
+                    taker_pressure=exchange.fetch_taker_pressure(symbol) if hasattr(exchange, "fetch_taker_pressure") else None,
+                    long_short_ratio=exchange.fetch_long_short_ratio(symbol) if hasattr(exchange, "fetch_long_short_ratio") else None,
                 )
 
                 strategy_fn = analyze_ict_smart_sweep if settings.get("active_strategy") == "ict_smart_sweep" else analyze

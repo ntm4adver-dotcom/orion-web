@@ -28,6 +28,8 @@ class MarketMicrostructure:
     oi_change_pct: Optional[float] = None
     funding_rate: Optional[float] = None
     ob_imbalance: Optional[float] = None
+    taker_pressure: Optional[float] = None    # ضغط المتداولين الفعليين (-1 بيع كامل .. 1 شراء كامل)
+    long_short_ratio: Optional[float] = None  # نسبة تمركز الحسابات (>1 أغلبية شراء، <1 أغلبية بيع)
 
 
 @dataclass
@@ -390,6 +392,16 @@ def analyze_explosive_breakout(
         if side == "Short" and ob_imbalance > 0.15:
             return None
 
+    # ضغط المتداولين الفعليين (Taker Pressure) — فلتر إضافي بمرحلة الدخول المبكر فقط،
+    # لأنه أكثر حساسية لحظياً من عمق السوق العادي. نرفض الدخول المبكر لو الضغط الفعلي
+    # يتحرك بقوة عكس اتجاهنا (يعني السوق فعلياً يبيع بينما نحاول الشراء أو العكس).
+    taker_pressure = micro.taker_pressure if micro else None
+    if is_early_entry and taker_pressure is not None:
+        if side == "Long" and taker_pressure < -0.2:
+            return None
+        if side == "Short" and taker_pressure > 0.2:
+            return None
+
     entry_price = last_price
     sl = structural_stop_loss(k5m, side, entry_price, effective_atr, lookback=8)
     risk_distance = abs(entry_price - sl)
@@ -427,6 +439,20 @@ def analyze_explosive_breakout(
     )
     if funding_crowded:
         prob -= 4
+
+    # تأكيد إضافي: ضغط المتداولين الفعليين متوافق مع اتجاهنا (مو مجرد فوليوم شمعة عادي)
+    if taker_pressure is not None:
+        taker_aligned = (side == "Long" and taker_pressure > 0.15) or (side == "Short" and taker_pressure < -0.15)
+        if taker_aligned:
+            prob += 3
+
+    # فلتر ازدحام: أغلبية الحسابات متمركزة فعلاً بنفس اتجاهنا (خطر تصفية مزدحمة قريبة)
+    long_short_ratio = micro.long_short_ratio if micro else None
+    if long_short_ratio is not None:
+        crowded_same_side = (side == "Long" and long_short_ratio > 2.2) or (side == "Short" and long_short_ratio < 0.45)
+        if crowded_same_side:
+            prob -= 3
+
     prob = max(70, min(95, prob))
 
     parts = []
@@ -444,6 +470,11 @@ def analyze_explosive_breakout(
         parts.append(f"📖 توازن دفتر الأوامر الحي (Order Book): {ob_imbalance:.2f}")
     if funding_crowded:
         parts.append("⚠️ تنبيه: معدل التمويل (Funding) مزدحم بنفس اتجاه الصفقة - خطر ارتداد مفاجئ أعلى من المعتاد")
+    if taker_pressure is not None:
+        parts.append(f"💥 ضغط المتداولين الفعليين (Taker Pressure): {taker_pressure:.2f} - {'متوافق مع الصفقة (تأكيد قوة حقيقية)' if (side=='Long' and taker_pressure>0.15) or (side=='Short' and taker_pressure<-0.15) else 'محايد'}")
+    if long_short_ratio is not None:
+        crowded_txt = "⚠️ ازدحام حسابات بنفس اتجاهنا - خطر تصفية مزدحمة" if ((side=='Long' and long_short_ratio>2.2) or (side=='Short' and long_short_ratio<0.45)) else "طبيعي"
+        parts.append(f"👥 نسبة تمركز الحسابات (Long/Short): {long_short_ratio:.2f} - {crowded_txt}")
     parts.append("🛡️ ستوب لوز هيكلي عند حدود منطقة التجميع - اختراقه يعني انعكاس حقيقي وليس فخ سيولة")
     parts.append(f"📈 توافق تام مع اتجاه فريم الساعة (1H Bias: {h1_trend})")
     parts.append(f"🎯 الهدف الأول (TP1): {tp1}")

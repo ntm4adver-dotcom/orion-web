@@ -225,3 +225,48 @@ def fetch_order_book_imbalance(symbol: str, depth: int = 20) -> Optional[float]:
         return (bid_qty - ask_qty) / total if total > 0 else None
     except Exception:
         return None
+
+
+def fetch_taker_pressure(symbol: str, limit: int = 100) -> Optional[float]:
+    """ضغط المتداولين الفعليين (Taker Buy/Sell Pressure) — انظر التوثيق بعميل OKX
+    لنفس المنطق. يعتمد على حقل isBuyerMaker: إذا True فالبائع هو من بادر بالصفقة
+    (ضغط بيع)، وإذا False فالمشتري هو من بادر (ضغط شراء)."""
+    if _is_banned():
+        return None
+    url = f"{BASE_URL}/fapi/v1/trades"
+    r = _request("GET", url, {"symbol": symbol, "limit": limit}, "fetch_taker_pressure")
+    if r is None:
+        return None
+    try:
+        r.raise_for_status()
+        data = r.json()
+        buy_vol = 0.0
+        sell_vol = 0.0
+        for t in data:
+            qty = float(t.get("qty", 0) or 0)
+            if t.get("isBuyerMaker"):
+                sell_vol += qty  # البائع بادر بالصفقة = ضغط بيع
+            else:
+                buy_vol += qty  # المشتري بادر بالصفقة = ضغط شراء
+        total = buy_vol + sell_vol
+        return (buy_vol - sell_vol) / total if total > 0 else None
+    except Exception:
+        return None
+
+
+def fetch_long_short_ratio(symbol: str) -> Optional[float]:
+    """نسبة تمركز الحسابات (Long/Short Account Ratio) — انظر التوثيق بعميل OKX لنفس المنطق."""
+    if _is_banned():
+        return None
+    url = f"{BASE_URL}/futures/data/globalLongShortAccountRatio"
+    r = _request("GET", url, {"symbol": symbol, "period": "5m", "limit": 1}, "fetch_long_short_ratio")
+    if r is None:
+        return None
+    try:
+        r.raise_for_status()
+        data = r.json()
+        if data:
+            return float(data[0].get("longShortRatio", 0) or 0)
+        return None
+    except Exception:
+        return None
