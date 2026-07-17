@@ -81,11 +81,12 @@ class ScannerState:
             return symbols
         limit = settings.get("symbols_limit", 10)
         client = okx_client if settings["exchange"] == "okx" else binance_client
-        db.add_log(f"جاري استعلام {'OKX' if settings['exchange'] == 'okx' else 'Binance'} عن أزواج العملات الأعلى حجماً في الـ 24 ساعة الماضية...")
-        symbols = binance_client.fetch_top_symbols(limit) if settings["exchange"] != "okx" else settings["selected_symbols"].split(",")
-        fallback_reason = getattr(binance_client, "last_error", {}).get("_top_symbols") if settings["exchange"] != "okx" else None
+        exchange_name = "OKX" if settings["exchange"] == "okx" else "Binance"
+        db.add_log(f"جاري استعلام {exchange_name} عن أزواج العملات الأعلى حجماً وسيولةً في الـ 24 ساعة الماضية...")
+        symbols = client.fetch_top_symbols(limit)
+        fallback_reason = getattr(client, "last_error", {}).get("_top_symbols")
         if fallback_reason:
-            db.add_log(f"⚠️ تعذر جلب قائمة العملات الحقيقية من Binance، تم استخدام قائمة احتياطية مؤقتة — السبب: {fallback_reason}")
+            db.add_log(f"⚠️ تعذر جلب قائمة العملات الحقيقية من {exchange_name}، تم استخدام قائمة احتياطية مؤقتة — السبب: {fallback_reason}")
         db.add_log(f"✅ تم العثور على {len(symbols)} زوج: {', '.join(symbols)}")
         return symbols
 

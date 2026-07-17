@@ -273,6 +273,50 @@ def fetch_all_prices() -> Dict[str, float]:
     return prices
 
 
+last_error: Dict[str, str] = {}
+
+
+def _default_symbols():
+    return [
+        "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "DOGEUSDT", "XRPUSDT", "ADAUSDT",
+        "AVAXUSDT", "LINKUSDT", "TONUSDT", "SUIUSDT", "DOTUSDT", "LTCUSDT", "TRXUSDT",
+        "NEARUSDT", "APTUSDT", "ARBUSDT", "OPUSDT", "MATICUSDT", "ATOMUSDT",
+    ]
+
+
+def fetch_top_symbols(limit_count: int = 10) -> List[str]:
+    """يعادل fetchTopSymbols بعميل Binance — يجلب أعلى عملات OKX Swap تداولاً وسيولة
+    خلال آخر 24 ساعة، مرتبة تنازلياً، ومحدودة بعدد limit_count."""
+    resp = _public_get("/api/v5/market/tickers?instType=SWAP")
+    if not resp or resp.get("code") != "0":
+        last_error["_top_symbols"] = (resp or {}).get("msg", "تعذر الاتصال بـ OKX لجلب قائمة العملات") if resp else "تعذر الاتصال بـ OKX لجلب قائمة العملات"
+        return _default_symbols()[:limit_count]
+    try:
+        candidates = []
+        for obj in resp.get("data", []):
+            inst_id = obj.get("instId", "")
+            if not inst_id.endswith("-USDT-SWAP"):
+                continue
+            quote_volume = float(obj.get("volCcy24h", 0) or 0)
+            last_price = float(obj.get("last", 0) or 0)
+            if quote_volume < 10_000_000.0:
+                continue
+            if last_price < 0.0001:
+                continue
+            base = inst_id.replace("-USDT-SWAP", "")
+            candidates.append((f"{base}USDT", quote_volume))
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        result = [c[0] for c in candidates[:limit_count]]
+        if result:
+            last_error.pop("_top_symbols", None)
+            return result
+        last_error["_top_symbols"] = "لم يتم إيجاد عملات مطابقة لشروط السيولة على OKX"
+        return _default_symbols()[:limit_count]
+    except Exception as e:
+        last_error["_top_symbols"] = str(e)
+        return _default_symbols()[:limit_count]
+
+
 _oi_history: Dict[str, list] = {}
 OI_HISTORY_MAX_AGE_MS = 45 * 60 * 1000
 OI_HISTORY_MAX_POINTS = 12
