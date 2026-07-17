@@ -11,8 +11,8 @@ from . import binance_client
 from . import okx_client
 from . import telegram_alert
 from . import learning
-from .analyzer import analyze, MarketMicrostructure
-from .ict_strategy import analyze_ict_smart_sweep
+from .analyzer import MarketMicrostructure
+from .strategies import get_active_strategies, strategy_label
 
 
 class ScannerState:
@@ -158,84 +158,90 @@ class ScannerState:
                     long_short_ratio=exchange.fetch_long_short_ratio(symbol) if hasattr(exchange, "fetch_long_short_ratio") else None,
                 )
 
-                strategy_fn = analyze_ict_smart_sweep if settings.get("active_strategy") == "ict_smart_sweep" else analyze
-                result = strategy_fn(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro)
+                matched_any = False
+                for strategy_key, strategy_fn in get_active_strategies(settings.get("active_strategy", "explosive_breakout")):
+                    result = strategy_fn(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro)
+                    if result is None:
+                        continue
+                    matched_any = True
+                    self._process_signal(settings, symbol, strategy_key, result, k4h, k1h, k5m)
 
-                if result is None:
+                if not matched_any:
                     db.add_log(f"▫️ {symbol}: ليس له اتجاه كافٍ حالياً.")
-                    continue
-
-                req_prob, learning_msg = learning.effective_threshold(result.symbol, result.side, settings)
-                if learning_msg:
-                    db.add_log(learning_msg)
-
-                if result.prob < req_prob:
-                    db.add_log(f"⏳ [{symbol}] تم تخطي الإشارة: نسبة النجاح ({result.prob}%) أقل من الحد المطلوب ({req_prob}%).")
-                    continue
-
-                if settings["is_volume_filter_enabled"]:
-                    v1h = [k.volume for k in k1h[-50:]]
-                    vol_avg = sum(v1h) / len(v1h) if v1h else 1.0
-                    vol_ratio = (v1h[-1] / vol_avg) if vol_avg > 0 else 1.0
-                    if vol_ratio < settings["min_volume_ratio"]:
-                        db.add_log(f"⏳ [{symbol}] تم تخطي الإشارة: معدل الحجم ({vol_ratio:.2f}x) أقل من الحد الأدنى.")
-                        continue
-
-                if settings["is_vwap_filter_enabled"]:
-                    last20 = k4h[-20:]
-                    v_sum = sum(k.volume for k in last20)
-                    vwap4h = ((sum(k.volume * (k.high + k.low + k.close) / 3.0 for k in last20) / v_sum)
-                              if v_sum > 0 else last20[-1].close)
-                    last_price = k5m[-1].close
-                    if result.side == "Long" and last_price <= vwap4h:
-                        db.add_log(f"⏳ [{symbol}] تم تخطي إشارة صعود: السعر تحت خط VWAP.")
-                        continue
-                    if result.side == "Short" and last_price >= vwap4h:
-                        db.add_log(f"⏳ [{symbol}] تم تخطي إشارة هبوط: السعر فوق خط VWAP.")
-                        continue
-
-                if settings["is_4h_buyers_filter_enabled"]:
-                    last20 = k4h[-20:]
-                    green = sum(k.volume for k in last20 if k.close > k.open)
-                    red = sum(k.volume for k in last20 if k.close < k.open)
-                    total = green + red
-                    buy_pct = int(green / total * 100) if total > 0 else 50
-                    if result.side == "Long" and buy_pct < settings["min_4h_buyers_percentage"]:
-                        db.add_log(f"⏳ [{symbol}] تم تخطي إشارة صعود: نسبة المشتريات ({buy_pct}%) غير كافية.")
-                        continue
-                    if result.side == "Short" and (100 - buy_pct) < settings["min_4h_buyers_percentage"]:
-                        db.add_log(f"⏳ [{symbol}] تم تخطي إشارة هبوط: نسبة المبيعات غير كافية.")
-                        continue
-
-                # منع التكرار: تجاهل الإشارة الجديدة إذا فيه صفقة (معلقة أو نشطة) بالفعل
-                # لنفس العملة ونفس الاتجاه — يطابق getActiveOrPendingSignal بالتطبيق الأصلي
-                existing = db.get_active_or_pending_signal(result.symbol, result.side)
-                if existing:
-                    status_ar = "نشطة" if existing["status"] == "ACTIVE" else "معلقة"
-                    db.add_log(f"⏳ [{symbol}] تم تجاهل الإشارة الجديدة ({result.side}) لوجود صفقة {status_ar} بالفعل من نفس الاتجاه (بروبابيليتي {existing['probability']}%).")
-                    continue
-
-                db.add_log(f"🎯 [{symbol}] تم رصد فرصة {result.side}! الاحتمالية: {result.prob}% | الجودة: {result.quality}")
-                signal_id = db.add_signal({
-                    "symbol": result.symbol, "side": result.side, "entry_price": result.entry_price,
-                    "stop_loss": result.stop_loss, "take_profit": result.take_profit, "rr": result.rr,
-                    "probability": result.prob, "quality": result.quality, "behavior": result.behavior,
-                    "volume_analysis": result.volume_analysis,
-                })
-
-                if settings["is_telegram_enabled"]:
-                    telegram_alert.send_signal_alert(
-                        settings["telegram_token"], settings["telegram_chat_ids"], result.symbol,
-                        result.side, result.entry_price, result.take_profit, result.stop_loss,
-                        result.prob, result.quality, result.behavior,
-                    )
-
-                if settings["okx_is_auto_trading_enabled"]:
-                    self._execute_auto_trade(settings, result, signal_id)
 
             except Exception as e:
                 db.add_log(f"❌ [{symbol}] خطأ أثناء التحليل: {e}")
             time.sleep(0.2)
+
+    def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k5m):
+        req_prob, learning_msg = learning.effective_threshold(result.symbol, result.side, settings)
+        if learning_msg:
+            db.add_log(learning_msg)
+
+        if result.prob < req_prob:
+            db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: نسبة النجاح ({result.prob}%) أقل من الحد المطلوب ({req_prob}%).")
+            return
+
+        if settings["is_volume_filter_enabled"]:
+            v1h = [k.volume for k in k1h[-50:]]
+            vol_avg = sum(v1h) / len(v1h) if v1h else 1.0
+            vol_ratio = (v1h[-1] / vol_avg) if vol_avg > 0 else 1.0
+            if vol_ratio < settings["min_volume_ratio"]:
+                db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: معدل الحجم ({vol_ratio:.2f}x) أقل من الحد الأدنى.")
+                return
+
+        if settings["is_vwap_filter_enabled"]:
+            last20 = k4h[-20:]
+            v_sum = sum(k.volume for k in last20)
+            vwap4h = ((sum(k.volume * (k.high + k.low + k.close) / 3.0 for k in last20) / v_sum)
+                      if v_sum > 0 else last20[-1].close)
+            last_price = k5m[-1].close
+            if result.side == "Long" and last_price <= vwap4h:
+                db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي إشارة صعود: السعر تحت خط VWAP.")
+                return
+            if result.side == "Short" and last_price >= vwap4h:
+                db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي إشارة هبوط: السعر فوق خط VWAP.")
+                return
+
+        if settings["is_4h_buyers_filter_enabled"]:
+            last20 = k4h[-20:]
+            green = sum(k.volume for k in last20 if k.close > k.open)
+            red = sum(k.volume for k in last20 if k.close < k.open)
+            total = green + red
+            buy_pct = int(green / total * 100) if total > 0 else 50
+            if result.side == "Long" and buy_pct < settings["min_4h_buyers_percentage"]:
+                db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي إشارة صعود: نسبة المشتريات ({buy_pct}%) غير كافية.")
+                return
+            if result.side == "Short" and (100 - buy_pct) < settings["min_4h_buyers_percentage"]:
+                db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي إشارة هبوط: نسبة المبيعات غير كافية.")
+                return
+
+        # منع التكرار: تجاهل الإشارة الجديدة إذا فيه صفقة (معلقة أو نشطة) بالفعل لنفس العملة
+        # ونفس الاتجاه — بغض النظر عن الاستراتيجية، عشان ما نفتح صفقتين متطابقتين بنفس الاتجاه
+        existing = db.get_active_or_pending_signal(result.symbol, result.side)
+        if existing:
+            status_ar = "نشطة" if existing["status"] == "ACTIVE" else "معلقة"
+            db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تجاهل الإشارة الجديدة ({result.side}) لوجود صفقة {status_ar} بالفعل من نفس الاتجاه (بروبابيليتي {existing['probability']}%).")
+            return
+
+        strategy_display = strategy_label(strategy_key)
+        db.add_log(f"🎯 [{symbol}] ({strategy_display}) تم رصد فرصة {result.side}! الاحتمالية: {result.prob}% | الجودة: {result.quality}")
+        signal_id = db.add_signal({
+            "symbol": result.symbol, "side": result.side, "entry_price": result.entry_price,
+            "stop_loss": result.stop_loss, "take_profit": result.take_profit, "rr": result.rr,
+            "probability": result.prob, "quality": result.quality, "behavior": result.behavior,
+            "volume_analysis": result.volume_analysis, "strategy": strategy_key,
+        })
+
+        if settings["is_telegram_enabled"]:
+            telegram_alert.send_signal_alert(
+                settings["telegram_token"], settings["telegram_chat_ids"], result.symbol,
+                result.side, result.entry_price, result.take_profit, result.stop_loss,
+                result.prob, result.quality, result.behavior,
+            )
+
+        if settings["okx_is_auto_trading_enabled"]:
+            self._execute_auto_trade(settings, result, signal_id)
 
     def _execute_auto_trade(self, settings: dict, result, signal_id: int):
         side_text = "buy" if result.side == "Long" else "sell"

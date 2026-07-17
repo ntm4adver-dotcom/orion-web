@@ -29,13 +29,16 @@
 
     <label style="margin-top:14px; display:block;">استراتيجية التحليل النشطة</label>
     <select name="active_strategy">
-      <option value="explosive_breakout" {{ 'selected' if s.active_strategy=='explosive_breakout' }}>⚡ الانفجار السعري (Explosive Breakout Hunter) — الأصلية</option>
-      <option value="ict_smart_sweep" {{ 'selected' if s.active_strategy=='ict_smart_sweep' }}>🧠 النمط الذكي لسحب السيولة (ICT / Smart Money Concepts)</option>
+      {% for key, label in strategy_options %}
+      <option value="{{ key }}" {{ 'selected' if s.active_strategy==key }}>{{ label }}</option>
+      {% endfor %}
     </select>
     <p class="muted" style="margin-top:8px; font-size:12px; line-height:1.8;">
       <b>الانفجار السعري:</b> يصطاد اختراقات مضغوطة بزخم فوليوم مؤكد.<br>
       <b>النمط الذكي (ICT):</b> يبحث عن سحب سيولة (Liquidity Sweep) + فجوة سعرية (FVG) + كسر هيكل (CHoCH)
-      داخل المنطقة الذهبية لفيبوناتشي، بعائد/مخاطرة ثابت 1:3. يشترط جلسة تداول نشطة (Kill Zone).
+      داخل المنطقة الذهبية لفيبوناتشي، بعائد/مخاطرة ثابت 1:3. يشترط جلسة تداول نشطة (Kill Zone).<br>
+      <b>الكل معاً:</b> يشغّل كل الاستراتيجيات المسجّلة على كل عملة بكل دورة فحص، وأي إشارة تنجح
+      بأي استراتيجية تُسجَّل وتُنفَّذ بشكل مستقل. أي استراتيجية تُضاف مستقبلاً تدخل ضمن هذا الخيار تلقائياً.
     </p>
   </div>
 

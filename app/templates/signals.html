@@ -76,6 +76,14 @@ function setFilter(f){
   renderSignals();
 }
 
+const STRATEGY_LABELS = {
+  'explosive_breakout': '⚡ الانفجار السعري',
+  'ict_smart_sweep': '🧠 النمط الذكي (ICT)',
+};
+function strategyLabel(key){
+  return STRATEGY_LABELS[key] || key;
+}
+
 function fmt(n){
   if (n === null || n === undefined) return '—';
   const num = Number(n);
@@ -98,10 +106,12 @@ function buildBar(sig){
     }
     const fillColor = closed ? 'rgba(34,197,94,.15)' : 'rgba(34,197,94,.5)';
     return `
-      <div class="bar-labels"><span>Entry (${fmt(sig.entry_price)})</span><span style="color:var(--gold);">🛡️ بدون وقف خسارة</span><span style="color:var(--green);">Target (${fmt(sig.take_profit)})</span></div>
-      <div class="bar-track">
-        <div class="bar-seg" style="left:0; width:${frac*100}%; background:${fillColor};"></div>
-        ${!closed ? `<div class="bar-line" style="left:${frac*100}%; background:var(--cyan);"></div>` : ''}
+      <div class="bar-ltr-wrap" style="direction:ltr;">
+        <div class="bar-labels"><span>Entry (${fmt(sig.entry_price)})</span><span style="color:var(--gold);">🛡️ بدون وقف خسارة</span><span style="color:var(--green);">Target (${fmt(sig.take_profit)})</span></div>
+        <div class="bar-track">
+          <div class="bar-seg" style="left:0; width:${frac*100}%; background:${fillColor};"></div>
+          ${!closed ? `<div class="bar-line" style="left:${frac*100}%; background:var(--cyan);"></div>` : ''}
+        </div>
       </div>`;
   }
 
@@ -141,8 +151,14 @@ function buildBar(sig){
   }
 
   return `
-    <div class="bar-labels"><span>Stop</span><span style="position:relative; ${entryPct>10 && entryPct<90 ? '' : 'display:none;'}">Entry</span><span style="color:var(--green);">Target (TP)</span></div>
-    <div class="bar-track">${segments}</div>`;
+    <div class="bar-ltr-wrap" style="direction:ltr;">
+      <div class="bar-labels" style="position:relative; height:16px;">
+        <span style="position:absolute; left:0;">Stop</span>
+        <span style="position:absolute; left:${entryPct}%; transform:translateX(-50%); color:var(--gold);">Entry</span>
+        <span style="position:absolute; right:0; color:var(--green);">Target (TP)</span>
+      </div>
+      <div class="bar-track">${segments}</div>
+    </div>`;
 }
 
 function statusMeta(status){
@@ -220,6 +236,7 @@ function renderSignals(){
         </div>
         <div class="sig-symbol">${sig.symbol}</div>
       </div>
+      ${sig.strategy ? `<div class="muted" style="font-size:11px; margin-bottom:8px;">${strategyLabel(sig.strategy)}</div>` : ''}
       <div class="sig-mid">
         <span class="status-pill ${st.cls}">${st.label}</span>
         <span>السعر الحالي: <b>${fmt(live)}</b></span>

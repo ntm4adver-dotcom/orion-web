@@ -5,6 +5,15 @@
 <h2>🧠 محرك التعلم الذاتي (Coin Learning)</h2>
 
 <div class="card">
+  <h3>⚖️ مقارنة أداء الاستراتيجيات</h3>
+  <p class="muted" style="margin-bottom:12px;">مقارنة حقيقية من نتائج الصفقات المغلقة فعلياً — أي استراتيجية جديدة تُضاف تلقائياً بهذا الجدول بدون أي إعداد إضافي.</p>
+  <table id="strategy-table">
+    <thead><tr><th>الاستراتيجية</th><th>إجمالي الصفقات</th><th>مغلقة</th><th>رابحة</th><th>خاسرة</th><th>نسبة النجاح</th></tr></thead>
+    <tbody><tr><td colspan="6" class="muted">جاري التحميل...</td></tr></tbody>
+  </table>
+</div>
+
+<div class="card">
   <p class="muted" style="line-height:1.9; margin:0;">
     هذا النظام <b>لا يعِد بنسبة نجاح معينة</b> — لا يوجد أي نظام تداول يقدر يضمن ذلك بسوق حقيقي.
     بدل هذا، يراقب أداء كل عملة واتجاه (Long/Short) فعلياً من الصفقات المغلقة، ويستخدم هذا السجل
@@ -77,7 +86,28 @@ async function saveThresholds(){
     body: JSON.stringify(buildLearningPayload(document.getElementById('learning-toggle').checked))});
 }
 
+async function loadStrategyPerformance(){
+  const r = await fetch('/api/strategy-performance');
+  const data = await r.json();
+  const tbody = document.querySelector('#strategy-table tbody');
+  if (!data.length){
+    tbody.innerHTML = '<tr><td colspan="6" class="muted">ما فيه صفقات مسجّلة بعد.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.map(p => `
+    <tr>
+      <td><b>${p.label}</b></td>
+      <td>${p.total_all_statuses}</td>
+      <td>${p.closed_total}</td>
+      <td style="color:var(--green);">${p.wins}</td>
+      <td style="color:var(--red);">${p.losses}</td>
+      <td><b>${p.closed_total > 0 ? p.win_rate + '%' : '—'}</b></td>
+    </tr>`).join('');
+}
+
 loadLearning();
+loadStrategyPerformance();
 setInterval(loadLearning, 10000);
+setInterval(loadStrategyPerformance, 10000);
 </script>
 {% endblock %}

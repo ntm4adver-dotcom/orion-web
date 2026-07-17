@@ -83,9 +83,17 @@ def init_db():
                 status TEXT,
                 update_timestamp INTEGER,
                 current_price REAL DEFAULT 0,
-                last_notified_status TEXT DEFAULT ''
+                last_notified_status TEXT DEFAULT '',
+                strategy TEXT DEFAULT ''
             )
         """)
+        # هجرة آمنة: إضافة عمود strategy لو قاعدة البيانات كانت موجودة قبل هذا التحديث
+        try:
+            existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(trade_signals)").fetchall()}
+            if "strategy" not in existing_cols:
+                conn.execute("ALTER TABLE trade_signals ADD COLUMN strategy TEXT DEFAULT ''")
+        except Exception:
+            pass
         conn.execute("""
             CREATE TABLE IF NOT EXISTS scan_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,13 +159,13 @@ def add_signal(signal: Dict[str, Any]) -> int:
         cur = conn.execute("""
             INSERT INTO trade_signals
             (timestamp, symbol, side, entry_price, stop_loss, take_profit, rr, probability,
-             quality, behavior, volume_analysis, status, update_timestamp, current_price, last_notified_status)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             quality, behavior, volume_analysis, status, update_timestamp, current_price, last_notified_status, strategy)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             int(time.time() * 1000), signal["symbol"], signal["side"], signal["entry_price"],
             signal["stop_loss"], signal["take_profit"], signal["rr"], signal["probability"],
             signal["quality"], signal["behavior"], signal["volume_analysis"], "PENDING",
-            int(time.time() * 1000), signal["entry_price"], "",
+            int(time.time() * 1000), signal["entry_price"], "", signal.get("strategy", ""),
         ))
         conn.commit()
         return cur.lastrowid
@@ -167,6 +175,26 @@ def get_signals(limit: int = 100) -> List[Dict[str, Any]]:
     with _lock, _connect() as conn:
         cur = conn.execute("SELECT * FROM trade_signals ORDER BY id DESC LIMIT ?", (limit,))
         return [dict(row) for row in cur.fetchall()]
+
+
+def get_strategy_performance() -> List[Dict[str, Any]]:
+    """يقارن أداء كل استراتيجية على حدة (رابحة/خاسرة/نسبة نجاح) من الصفقات المغلقة الحقيقية فقط."""
+    with _lock, _connect() as conn:
+        cur = conn.execute("""
+            SELECT COALESCE(NULLIF(strategy,''), 'غير محدد') AS strategy,
+                   SUM(CASE WHEN status='HIT_TP' THEN 1 ELSE 0 END) AS wins,
+                   SUM(CASE WHEN status='HIT_SL' THEN 1 ELSE 0 END) AS losses,
+                   COUNT(*) AS total_all_statuses
+            FROM trade_signals
+            GROUP BY strategy
+            ORDER BY total_all_statuses DESC
+        """)
+        rows = [dict(r) for r in cur.fetchall()]
+    for r in rows:
+        closed = r["wins"] + r["losses"]
+        r["closed_total"] = closed
+        r["win_rate"] = round((r["wins"] / closed) * 100.0, 1) if closed > 0 else 0.0
+    return rows
 
 
 def get_coin_performance(limit: int = 200) -> List[Dict[str, Any]]:

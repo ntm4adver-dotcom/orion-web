@@ -7,6 +7,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import db
 from . import okx_client
 from . import learning
+from .strategies import get_strategy_options, strategy_label
 from .auth import is_logged_in, APP_PASSWORD
 from .scanner import scanner_state
 
@@ -73,7 +74,10 @@ def settings_page(request: Request):
     g = _guard(request)
     if g:
         return g
-    return templates.TemplateResponse("settings.html", {"request": request, "active": "settings", "s": db.get_settings(), "saved": False})
+    return templates.TemplateResponse("settings.html", {
+        "request": request, "active": "settings", "s": db.get_settings(), "saved": False,
+        "strategy_options": get_strategy_options(),
+    })
 
 
 @app.post("/settings")
@@ -200,6 +204,16 @@ async def api_learning_settings(request: Request):
     }
     db.update_settings(updates)
     return {"ok": True}
+
+
+@app.get("/api/strategy-performance")
+def api_strategy_performance(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    perf = db.get_strategy_performance()
+    for p in perf:
+        p["label"] = strategy_label(p["strategy"]) if p["strategy"] != "غير محدد" else "غير محدد (صفقات قديمة قبل هذا التحديث)"
+    return perf
 
 
 @app.get("/api/learning")
