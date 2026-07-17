@@ -43,6 +43,11 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "is_adaptive_stop_loss_enabled": 0,         # استراتيجية التكيف التلقائي (Adaptive Sizing)
     "adaptive_stop_loss_limit_usdt": 1.0,       # أقصى خسارة مستهدفة لكل صفقة بالـ USDT
     "is_instant_entry_enabled": 1,              # أمر سوق فوري (Market) بدل أمر محدد (Limit)
+    # محرك التعلم الذاتي (Coin Learning) — يتعلم من سجل الصفقات المغلقة الحقيقي فقط
+    "is_coin_learning_enabled": 1,
+    "coin_learning_min_trades": 5,       # الحد الأدنى من الصفقات المغلقة قبل ما ناخذ قرار بناءً على الأداء
+    "coin_learning_weak_threshold": 35,  # أقل من هذه النسبة % = سجل ضعيف، يرفع شرط الدخول
+    "coin_learning_strong_threshold": 70,  # أعلى من هذه النسبة % = سجل قوي، يخفف شرط الدخول قليلاً
 }
 
 
@@ -121,7 +126,8 @@ def get_settings() -> Dict[str, Any]:
     for bkey in ("is_auto_scanning", "is_telegram_enabled", "is_single_coin_mode_enabled",
                  "is_volume_filter_enabled", "is_vwap_filter_enabled", "is_4h_buyers_filter_enabled",
                  "is_cancel_if_exceeds_target_enabled", "okx_is_testnet", "okx_is_auto_trading_enabled",
-                 "okx_is_max_leverage_enabled", "is_adaptive_stop_loss_enabled", "is_instant_entry_enabled"):
+                 "okx_is_max_leverage_enabled", "is_adaptive_stop_loss_enabled", "is_instant_entry_enabled",
+                 "is_coin_learning_enabled"):
         settings[bkey] = bool(int(settings.get(bkey, 0)))
     return settings
 
@@ -160,6 +166,47 @@ def get_signals(limit: int = 100) -> List[Dict[str, Any]]:
     with _lock, _connect() as conn:
         cur = conn.execute("SELECT * FROM trade_signals ORDER BY id DESC LIMIT ?", (limit,))
         return [dict(row) for row in cur.fetchall()]
+
+
+def get_coin_performance(limit: int = 200) -> List[Dict[str, Any]]:
+    """يحسب أداء كل عملة+اتجاه من الصفقات المغلقة فعلياً (HIT_TP/HIT_SL) — هذا هو
+    'ذاكرة' محرك التعلم الذاتي، مبني على نتائج حقيقية وليس تخمين."""
+    with _lock, _connect() as conn:
+        cur = conn.execute("""
+            SELECT symbol, side,
+                   SUM(CASE WHEN status='HIT_TP' THEN 1 ELSE 0 END) AS wins,
+                   SUM(CASE WHEN status='HIT_SL' THEN 1 ELSE 0 END) AS losses
+            FROM trade_signals
+            WHERE status IN ('HIT_TP','HIT_SL')
+            GROUP BY symbol, side
+            ORDER BY (wins + losses) DESC
+            LIMIT ?
+        """, (limit,))
+        rows = [dict(r) for r in cur.fetchall()]
+    for r in rows:
+        total = r["wins"] + r["losses"]
+        r["total"] = total
+        r["win_rate"] = round((r["wins"] / total) * 100.0, 1) if total > 0 else 0.0
+    return rows
+
+
+def get_coin_performance_for(symbol: str, side: str) -> Optional[Dict[str, Any]]:
+    with _lock, _connect() as conn:
+        cur = conn.execute("""
+            SELECT
+                SUM(CASE WHEN status='HIT_TP' THEN 1 ELSE 0 END) AS wins,
+                SUM(CASE WHEN status='HIT_SL' THEN 1 ELSE 0 END) AS losses
+            FROM trade_signals
+            WHERE status IN ('HIT_TP','HIT_SL') AND symbol=? AND side=?
+        """, (symbol, side))
+        row = cur.fetchone()
+    wins = row["wins"] or 0
+    losses = row["losses"] or 0
+    total = wins + losses
+    if total == 0:
+        return None
+    return {"symbol": symbol, "side": side, "wins": wins, "losses": losses,
+            "total": total, "win_rate": round((wins / total) * 100.0, 1)}
 
 
 def get_active_or_pending_signal(symbol: str, side: str) -> Optional[Dict[str, Any]]:

@@ -10,6 +10,7 @@ from . import db
 from . import binance_client
 from . import okx_client
 from . import telegram_alert
+from . import learning
 from .analyzer import analyze, MarketMicrostructure
 
 
@@ -20,6 +21,7 @@ class ScannerState:
         self.last_scan_time: Optional[int] = None
         self.countdown_seconds = 0
         self._thread: Optional[threading.Thread] = None
+        self._price_thread: Optional[threading.Thread] = None
         self._stop_flag = threading.Event()
         self._trigger_immediate = threading.Event()
         self._notified_transitions = set()
@@ -33,6 +35,9 @@ class ScannerState:
         db.add_log("تم بدء تشغيل محرك أوريون الذكي للفحص التلقائي...")
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
+        if not (self._price_thread and self._price_thread.is_alive()):
+            self._price_thread = threading.Thread(target=self._price_update_loop, daemon=True)
+            self._price_thread.start()
 
     def stop(self):
         self.is_scanning_active = False
@@ -41,6 +46,20 @@ class ScannerState:
 
     def trigger_immediate_scan(self):
         self._trigger_immediate.set()
+
+    def _price_update_loop(self):
+        """خيط مستقل خفيف يحدّث السعر اللحظي لكل الصفقات المفتوحة كل 5 ثوانٍ،
+        بدون انتظار اكتمال دورة الفحص الكاملة (اللي قد تاخذ وقت أطول لكل العملات)."""
+        while not self._stop_flag.is_set():
+            try:
+                settings = db.get_settings()
+                self._update_signal_prices(settings)
+            except Exception:
+                pass
+            for _ in range(10):  # 5 ثوانٍ مقسّمة لفحص متكرر لعلم الإيقاف
+                if self._stop_flag.is_set():
+                    return
+                time.sleep(0.5)
 
     def _run_loop(self):
         while not self._stop_flag.is_set():
@@ -53,7 +72,6 @@ class ScannerState:
 
                 self.is_currently_working = True
                 self._run_scan_cycle(settings)
-                self._update_signal_prices(settings)
                 self.last_scan_time = int(time.time() * 1000)
             except Exception as e:
                 db.add_log(f"⚠️ خطأ في دورة الفحص: {e}")
@@ -143,8 +161,12 @@ class ScannerState:
                     db.add_log(f"▫️ {symbol}: ليس له اتجاه كافٍ حالياً.")
                     continue
 
-                if result.prob < settings.get("min_probability", 70):
-                    db.add_log(f"⏳ [{symbol}] تم تخطي الإشارة: نسبة النجاح ({result.prob}%) أقل من الحد الأدنى.")
+                req_prob, learning_msg = learning.effective_threshold(result.symbol, result.side, settings)
+                if learning_msg:
+                    db.add_log(learning_msg)
+
+                if result.prob < req_prob:
+                    db.add_log(f"⏳ [{symbol}] تم تخطي الإشارة: نسبة النجاح ({result.prob}%) أقل من الحد المطلوب ({req_prob}%).")
                     continue
 
                 if settings["is_volume_filter_enabled"]:

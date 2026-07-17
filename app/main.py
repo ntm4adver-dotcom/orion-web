@@ -6,6 +6,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from . import db
 from . import okx_client
+from . import learning
 from .auth import is_logged_in, APP_PASSWORD
 from .scanner import scanner_state
 
@@ -83,7 +84,7 @@ async def settings_save(request: Request):
     form = await request.form()
     checkboxes = ["is_auto_scanning", "is_single_coin_mode_enabled", "is_telegram_enabled",
                   "is_volume_filter_enabled", "is_vwap_filter_enabled", "is_4h_buyers_filter_enabled",
-                  "is_cancel_if_exceeds_target_enabled"]
+                  "is_cancel_if_exceeds_target_enabled", "is_coin_learning_enabled"]
     updates = {}
     for key in db.DEFAULT_SETTINGS:
         if key in checkboxes:
@@ -176,6 +177,43 @@ def api_signals(request: Request):
     if not is_logged_in(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     return db.get_signals(100)
+
+
+@app.get("/evolution")
+def evolution_page(request: Request):
+    g = _guard(request)
+    if g:
+        return g
+    return templates.TemplateResponse("evolution.html", {"request": request, "active": "evolution", "s": db.get_settings()})
+
+
+@app.post("/api/learning/settings")
+async def api_learning_settings(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    body = await request.json()
+    updates = {
+        "is_coin_learning_enabled": 1 if body.get("is_coin_learning_enabled") else 0,
+        "coin_learning_min_trades": body.get("coin_learning_min_trades", 5),
+        "coin_learning_weak_threshold": body.get("coin_learning_weak_threshold", 35),
+        "coin_learning_strong_threshold": body.get("coin_learning_strong_threshold", 70),
+    }
+    db.update_settings(updates)
+    return {"ok": True}
+
+
+@app.get("/api/learning")
+def api_learning(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    settings = db.get_settings()
+    perf = db.get_coin_performance()
+    for p in perf:
+        threshold, msg = learning.effective_threshold(p["symbol"], p["side"], settings)
+        p["effective_threshold"] = threshold
+        p["is_weak"] = p["win_rate"] < settings.get("coin_learning_weak_threshold", 35) and p["total"] >= settings.get("coin_learning_min_trades", 5)
+        p["is_strong"] = p["win_rate"] >= settings.get("coin_learning_strong_threshold", 70) and p["total"] >= settings.get("coin_learning_min_trades", 5)
+    return perf
 
 
 @app.get("/signals")

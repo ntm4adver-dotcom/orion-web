@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}التطور - Orion{% endblock %}
+{% block content %}
+
+<h2>🧠 محرك التعلم الذاتي (Coin Learning)</h2>
+
+<div class="card">
+  <p class="muted" style="line-height:1.9; margin:0;">
+    هذا النظام <b>لا يعِد بنسبة نجاح معينة</b> — لا يوجد أي نظام تداول يقدر يضمن ذلك بسوق حقيقي.
+    بدل هذا، يراقب أداء كل عملة واتجاه (Long/Short) فعلياً من الصفقات المغلقة، ويستخدم هذا السجل
+    الحقيقي للتأثير تلقائياً على قرار قبول الإشارات القادمة: يرفع شرط الدخول على العملات اللي أثبتت
+    ضعفاً متكرراً، ويخفف الشرط قليلاً على العملات اللي أثبتت نجاحاً متكرراً. كل رقم بالجدول أدناه مبني
+    على صفقات حقيقية مغلقة من سجلك، وليس تقديراً.
+  </p>
+</div>
+
+<div class="card">
+  <div class="switch"><input type="checkbox" id="learning-toggle" {{ 'checked' if s.is_coin_learning_enabled }} onchange="toggleLearning(this.checked)"> <label style="margin:0;">تفعيل محرك التعلم الذاتي</label></div>
+  <div class="row" style="margin-top:12px;">
+    <div><label>الحد الأدنى من الصفقات المغلقة قبل اعتماد السجل</label><input type="number" id="min-trades" value="{{ s.coin_learning_min_trades }}" onchange="saveThresholds()"></div>
+    <div><label>سجل ضعيف (أقل من %)</label><input type="number" id="weak-th" value="{{ s.coin_learning_weak_threshold }}" onchange="saveThresholds()"></div>
+    <div><label>سجل قوي (أعلى من أو يساوي %)</label><input type="number" id="strong-th" value="{{ s.coin_learning_strong_threshold }}" onchange="saveThresholds()"></div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>سجل أداء العملات المتعلَّم منه</h3>
+  <table id="learning-table">
+    <thead><tr><th>العملة</th><th>الاتجاه</th><th>عدد الصفقات</th><th>رابحة</th><th>خاسرة</th><th>نسبة النجاح</th><th>الحد الأدنى الفعّال</th><th>الحالة</th></tr></thead>
+    <tbody><tr><td colspan="8" class="muted">جاري التحميل...</td></tr></tbody>
+  </table>
+</div>
+
+<script>
+async function loadLearning(){
+  const r = await fetch('/api/learning');
+  const data = await r.json();
+  const tbody = document.querySelector('#learning-table tbody');
+  if (!data.length){
+    tbody.innerHTML = '<tr><td colspan="8" class="muted">ما فيه صفقات مغلقة كافية بعد لبناء سجل أداء. النظام سيبدأ يتعلم أول ما تتراكم صفقات مغلقة (رابحة أو خاسرة).</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.map(p => {
+    let stateBadge = '<span class="muted">محايد</span>';
+    if (p.is_weak) stateBadge = '<span style="color:var(--red); font-weight:700;">⚠️ ضعيف</span>';
+    else if (p.is_strong) stateBadge = '<span style="color:var(--green); font-weight:700;">✅ قوي</span>';
+    const sideAr = p.side === 'Long' ? 'شراء' : 'بيع';
+    return `<tr>
+      <td><b>${p.symbol}</b></td>
+      <td>${sideAr}</td>
+      <td>${p.total}</td>
+      <td style="color:var(--green);">${p.wins}</td>
+      <td style="color:var(--red);">${p.losses}</td>
+      <td><b>${p.win_rate}%</b></td>
+      <td>${p.effective_threshold}%</td>
+      <td>${stateBadge}</td>
+    </tr>`;
+  }).join('');
+}
+
+function buildLearningPayload(learningChecked){
+  return {
+    is_coin_learning_enabled: !!learningChecked,
+    coin_learning_min_trades: document.getElementById('min-trades').value,
+    coin_learning_weak_threshold: document.getElementById('weak-th').value,
+    coin_learning_strong_threshold: document.getElementById('strong-th').value,
+  };
+}
+
+async function toggleLearning(checked){
+  await fetch('/api/learning/settings', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(buildLearningPayload(checked))});
+}
+
+async function saveThresholds(){
+  await fetch('/api/learning/settings', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(buildLearningPayload(document.getElementById('learning-toggle').checked))});
+}
+
+loadLearning();
+setInterval(loadLearning, 10000);
+</script>
+{% endblock %}
