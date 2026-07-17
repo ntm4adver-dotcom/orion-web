@@ -70,6 +70,8 @@ def _public_get(path: str) -> Optional[dict]:
 
 
 def test_connection(api_key: str, api_secret: str, passphrase: str, is_testnet: bool) -> Tuple[bool, str]:
+    if not api_key or not api_secret or not passphrase:
+        return False, "لم يتم إدخال مفاتيح API بعد. أدخلها بالأعلى واضغط «حفظ ومزامنة»."
     resp = _request("GET", "/api/v5/account/config", None, api_key, api_secret, passphrase, is_testnet)
     if not resp:
         return False, "فشل الاتصال بالخادم. تأكد من اتصال الإنترنت."

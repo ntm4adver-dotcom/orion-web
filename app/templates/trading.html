@@ -21,8 +21,10 @@
 </form>
 
 <div class="card">
-  <div class="flex-between"><h3>حالة الاتصال والرصيد</h3><button class="btn secondary" onclick="testConn()">اختبار الاتصال</button></div>
-  <div id="conn-result" class="muted"></div>
+  <div class="flex-between">
+    <h3>حالة الاتصال والرصيد <span id="live-dot" class="muted" style="font-size:11px;"></span></h3>
+  </div>
+  <div id="conn-result" class="muted">جاري الاتصال...</div>
   <div class="row" style="margin-top:10px;">
     <div class="card" style="flex:1;"><div class="muted">إجمالي الرصيد (Equity)</div><div id="equity" style="font-size:22px;font-weight:800;">—</div></div>
     <div class="card" style="flex:1;"><div class="muted">المتاح للتداول</div><div id="available" style="font-size:22px;font-weight:800;">—</div></div>
@@ -33,7 +35,7 @@
   <h3>المراكز المفتوحة</h3>
   <table id="positions-table">
     <thead><tr><th>الرمز</th><th>الاتجاه</th><th>الحجم</th><th>سعر الدخول</th><th>الرافعة</th><th>الربح/الخسارة</th></tr></thead>
-    <tbody><tr><td colspan="6" class="muted">اضغط "اختبار الاتصال" لعرض المراكز</td></tr></tbody>
+    <tbody><tr><td colspan="6" class="muted">جاري تحميل المراكز المفتوحة...</td></tr></tbody>
   </table>
 </div>
 
@@ -138,19 +140,41 @@ document.addEventListener('DOMContentLoaded', () => setVolType('{{ s.okx_volume_
 </style>
 
 <script>
-async function testConn(){
-  document.getElementById('conn-result').innerText = 'جاري الاختبار...';
-  const r = await fetch('/api/trading/test', {method:'POST'});
-  const data = await r.json();
-  document.getElementById('conn-result').innerText = data.message;
-  document.getElementById('equity').innerText = data.equity !== undefined ? data.equity + ' USDT' : '—';
-  document.getElementById('available').innerText = data.available !== undefined ? data.available + ' USDT' : '—';
-  const tbody = document.querySelector('#positions-table tbody');
-  if(data.positions && data.positions.length){
-    tbody.innerHTML = data.positions.map(p => `<tr><td>${p.inst_id}</td><td>${p.pos_side}</td><td>${p.pos}</td><td>${p.avg_px}</td><td>${p.leverage}</td><td>${p.upl}</td></tr>`).join('');
-  } else {
-    tbody.innerHTML = '<tr><td colspan="6" class="muted">لا توجد مراكز مفتوحة حالياً</td></tr>';
+let liveErrorStreak = 0;
+
+async function refreshOkxLive(){
+  const dot = document.getElementById('live-dot');
+  try{
+    const r = await fetch('/api/trading/test', {method:'POST'});
+    const data = await r.json();
+
+    if (data.equity === undefined){
+      // ما فيه مفاتيح API متصلة بعد، أو فشل الاتصال
+      document.getElementById('conn-result').innerText = data.message || 'بانتظار ربط حساب OKX...';
+      dot.innerHTML = '';
+      return;
+    }
+
+    liveErrorStreak = 0;
+    dot.innerHTML = '<span class="dot" style="display:inline-block; width:7px; height:7px; background:var(--green); border-radius:50%; margin-inline-start:6px;"></span> مباشر';
+    document.getElementById('conn-result').innerText = data.message;
+    document.getElementById('equity').innerText = data.equity + ' USDT';
+    document.getElementById('available').innerText = data.available + ' USDT';
+    const tbody = document.querySelector('#positions-table tbody');
+    if(data.positions && data.positions.length){
+      tbody.innerHTML = data.positions.map(p => `<tr><td>${p.inst_id}</td><td>${p.pos_side}</td><td>${p.pos}</td><td>${p.avg_px}</td><td>${p.leverage}</td><td style="color:${p.upl>=0?'var(--green)':'var(--red)'};">${p.upl}</td></tr>`).join('');
+    } else {
+      tbody.innerHTML = '<tr><td colspan="6" class="muted">لا توجد مراكز مفتوحة حالياً</td></tr>';
+    }
+  }catch(e){
+    liveErrorStreak++;
+    if (liveErrorStreak > 2){
+      dot.innerHTML = '<span class="dot" style="display:inline-block; width:7px; height:7px; background:var(--red); border-radius:50%; margin-inline-start:6px;"></span> انقطع الاتصال';
+    }
   }
 }
+
+refreshOkxLive();
+setInterval(refreshOkxLive, 5000);  // تحديث لحظي مستمر كل 5 ثوانٍ بدون أي تدخل يدوي
 </script>
 {% endblock %}

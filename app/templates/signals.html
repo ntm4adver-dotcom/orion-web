@@ -231,7 +231,7 @@ function renderSignals(){
       <div class="levels-row">
         <div class="level-box"><div class="lbl">سعر الدخول</div><div class="val">${fmt(sig.entry_price)}</div></div>
         <div class="level-box"><div class="lbl">الهدف (TP)</div><div class="val" style="color:var(--green);">${fmt(sig.take_profit)}</div></div>
-        ${sig.stop_loss > 0 ? `<div class="level-box"><div class="lbl">وقف الخسارة (SL)</div><div class="val" style="color:var(--red);">${fmt(sig.stop_loss)}</div></div>` : ''}
+        <div class="level-box"><div class="lbl">وقف الخسارة (SL)</div><div class="val" style="color:var(--red);">${sig.stop_loss > 0 ? fmt(sig.stop_loss) : '—'}</div></div>
       </div>
       <div class="bar-wrap">${buildBar(sig)}</div>
       <div class="sig-caption">${captionFor(sig.status)}</div>
