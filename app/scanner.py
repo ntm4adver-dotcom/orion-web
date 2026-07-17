@@ -91,17 +91,28 @@ class ScannerState:
         exchange = okx_client if settings["exchange"] == "okx" else binance_client
         db.add_log(f"[{time.strftime('%H:%M:%S')}] بدء فحص حزمة الأزواج الذكية المكتشفة...")
 
+        # تحقق من الحظر المؤقت مرة واحدة بداية الدورة بدل ما نكرر نفس الخطأ لكل عملة
+        if hasattr(exchange, "get_ban_status"):
+            ban_msg = exchange.get_ban_status()
+            if ban_msg:
+                db.add_log(f"⏸️ تم إيقاف هذه الدورة مؤقتاً — {ban_msg}")
+                return
+
         for idx, symbol in enumerate(symbols):
             if self._stop_flag.is_set():
                 break
             if idx > 0:
-                time.sleep(0.4)  # تأخير بسيط بين كل عملة وأخرى لتجنب تقييد معدل الطلبات من المنصة
+                time.sleep(1.2)  # تأخير أكبر بين كل عملة وأخرى لتجنب تقييد معدل الطلبات من المنصة
             try:
                 db.add_log(f"جاري سحب بيانات الشموع لزوج {symbol}...")
                 k4h = exchange.fetch_klines(symbol, "4h", 100)
+                time.sleep(0.25)
                 k1h = exchange.fetch_klines(symbol, "1h", 100)
+                time.sleep(0.25)
                 k15m = exchange.fetch_klines(symbol, "15m", 100)
+                time.sleep(0.25)
                 k5m = exchange.fetch_klines(symbol, "5m", 150)
+                time.sleep(0.25)
                 k_daily = exchange.fetch_klines(symbol, "1d", 100)
 
                 if len(k5m) < 30 or len(k1h) < 60:
@@ -110,6 +121,10 @@ class ScannerState:
                         db.add_log(f"▫️ {symbol}: بيانات غير كافية للتحليل — السبب: {reason}")
                     else:
                         db.add_log(f"▫️ {symbol}: بيانات غير كافية للتحليل.")
+                    # إذا صرنا محظورين أثناء الفحص، نوقف بقية الدورة فوراً بدل تكرار المحاولة على كل عملة
+                    if hasattr(exchange, "get_ban_status") and exchange.get_ban_status():
+                        db.add_log(f"⏸️ تم إيقاف بقية الدورة — {exchange.get_ban_status()}")
+                        return
                     continue
 
                 micro = MarketMicrostructure(
