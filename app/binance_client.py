@@ -12,33 +12,54 @@ OI_HISTORY_MAX_AGE_MS = 45 * 60 * 1000
 OI_HISTORY_MAX_POINTS = 12
 
 
-def fetch_klines(symbol: str, interval: str, limit: int = 150) -> List[Kline]:
+last_error: Dict[str, str] = {}
+
+# متصفح حقيقي في الهيدر لتجنب رفض Binance للطلبات الآلية بدون User-Agent
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+}
+
+
+def fetch_klines(symbol: str, interval: str, limit: int = 150, retries: int = 3) -> List[Kline]:
     url = f"{BASE_URL}/fapi/v1/klines"
-    try:
-        with httpx.Client(timeout=15) as client:
-            r = client.get(url, params={"symbol": symbol, "interval": interval, "limit": limit})
-            r.raise_for_status()
-            data = r.json()
-            return [
-                Kline(
-                    open_time=int(item[0]),
-                    open=float(item[1]),
-                    high=float(item[2]),
-                    low=float(item[3]),
-                    close=float(item[4]),
-                    volume=float(item[5]),
-                    close_time=int(item[6]),
-                )
-                for item in data
-            ]
-    except Exception:
-        return []
+    last_exc = None
+    for attempt in range(retries):
+        try:
+            with httpx.Client(timeout=15, headers=_HEADERS) as client:
+                r = client.get(url, params={"symbol": symbol, "interval": interval, "limit": limit})
+                if r.status_code == 429 or r.status_code == 418:
+                    # تقييد معدل الطلبات من Binance - ننتظر ونعيد المحاولة
+                    wait_s = 1.5 * (attempt + 1)
+                    last_exc = f"تقييد معدل الطلبات (HTTP {r.status_code}), إعادة محاولة بعد {wait_s}ث"
+                    time.sleep(wait_s)
+                    continue
+                r.raise_for_status()
+                data = r.json()
+                last_error.pop(symbol, None)
+                return [
+                    Kline(
+                        open_time=int(item[0]),
+                        open=float(item[1]),
+                        high=float(item[2]),
+                        low=float(item[3]),
+                        close=float(item[4]),
+                        volume=float(item[5]),
+                        close_time=int(item[6]),
+                    )
+                    for item in data
+                ]
+        except Exception as e:
+            last_exc = str(e)
+            time.sleep(0.5)
+    last_error[symbol] = last_exc or "خطأ غير معروف"
+    return []
 
 
 def fetch_top_symbols(limit_count: int = 10) -> List[str]:
     url = f"{BASE_URL}/fapi/v1/ticker/24hr"
     try:
-        with httpx.Client(timeout=15) as client:
+        with httpx.Client(timeout=15, headers=_HEADERS) as client:
             r = client.get(url)
             r.raise_for_status()
             data = r.json()
@@ -64,7 +85,7 @@ def fetch_top_symbols(limit_count: int = 10) -> List[str]:
 def fetch_all_prices() -> Dict[str, float]:
     url = f"{BASE_URL}/fapi/v1/ticker/price"
     try:
-        with httpx.Client(timeout=15) as client:
+        with httpx.Client(timeout=15, headers=_HEADERS) as client:
             r = client.get(url)
             r.raise_for_status()
             data = r.json()
@@ -80,7 +101,7 @@ def _default_symbols():
 def fetch_open_interest_change_pct(symbol: str) -> Optional[float]:
     url = f"{BASE_URL}/fapi/v1/openInterest"
     try:
-        with httpx.Client(timeout=15) as client:
+        with httpx.Client(timeout=15, headers=_HEADERS) as client:
             r = client.get(url, params={"symbol": symbol})
             r.raise_for_status()
             oi = float(r.json().get("openInterest", 0) or 0)
@@ -102,7 +123,7 @@ def fetch_open_interest_change_pct(symbol: str) -> Optional[float]:
 def fetch_funding_rate(symbol: str) -> Optional[float]:
     url = f"{BASE_URL}/fapi/v1/premiumIndex"
     try:
-        with httpx.Client(timeout=15) as client:
+        with httpx.Client(timeout=15, headers=_HEADERS) as client:
             r = client.get(url, params={"symbol": symbol})
             r.raise_for_status()
             val = r.json().get("lastFundingRate")
@@ -114,7 +135,7 @@ def fetch_funding_rate(symbol: str) -> Optional[float]:
 def fetch_order_book_imbalance(symbol: str, depth: int = 20) -> Optional[float]:
     url = f"{BASE_URL}/fapi/v1/depth"
     try:
-        with httpx.Client(timeout=15) as client:
+        with httpx.Client(timeout=15, headers=_HEADERS) as client:
             r = client.get(url, params={"symbol": symbol, "limit": depth})
             r.raise_for_status()
             data = r.json()

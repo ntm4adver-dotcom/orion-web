@@ -91,9 +91,11 @@ class ScannerState:
         exchange = okx_client if settings["exchange"] == "okx" else binance_client
         db.add_log(f"[{time.strftime('%H:%M:%S')}] بدء فحص حزمة الأزواج الذكية المكتشفة...")
 
-        for symbol in symbols:
+        for idx, symbol in enumerate(symbols):
             if self._stop_flag.is_set():
                 break
+            if idx > 0:
+                time.sleep(0.4)  # تأخير بسيط بين كل عملة وأخرى لتجنب تقييد معدل الطلبات من المنصة
             try:
                 db.add_log(f"جاري سحب بيانات الشموع لزوج {symbol}...")
                 k4h = exchange.fetch_klines(symbol, "4h", 100)
@@ -103,7 +105,11 @@ class ScannerState:
                 k_daily = exchange.fetch_klines(symbol, "1d", 100)
 
                 if len(k5m) < 30 or len(k1h) < 60:
-                    db.add_log(f"▫️ {symbol}: بيانات غير كافية للتحليل.")
+                    reason = getattr(exchange, "last_error", {}).get(symbol) if hasattr(exchange, "last_error") else None
+                    if reason:
+                        db.add_log(f"▫️ {symbol}: بيانات غير كافية للتحليل — السبب: {reason}")
+                    else:
+                        db.add_log(f"▫️ {symbol}: بيانات غير كافية للتحليل.")
                     continue
 
                 micro = MarketMicrostructure(
