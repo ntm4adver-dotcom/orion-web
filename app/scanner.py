@@ -188,12 +188,26 @@ class ScannerState:
         side_text = "buy" if result.side == "Long" else "sell"
         db.add_log(f"🤖 [التداول الآلي] جاري إرسال أمر إلى OKX ({result.symbol} | {side_text})...")
         try:
+            available_balance = None
+            if settings.get("okx_volume_type") == "PERCENTAGE":
+                info = okx_client.fetch_account_info(
+                    settings["okx_api_key"], settings["okx_api_secret"],
+                    settings["okx_passphrase"], settings["okx_is_testnet"],
+                )
+                available_balance = info.get("available_balance")
+
+            quantity_usdt = okx_client.calculate_order_quantity_usdt(
+                settings, result.entry_price, result.stop_loss, available_balance,
+            )
+
             success, message = okx_client.place_order(
-                symbol=result.symbol, side=side_text, quantity_usdt=settings["okx_volume_usdt"],
+                symbol=result.symbol, side=side_text, quantity_usdt=quantity_usdt,
                 leverage=settings["okx_leverage"], margin_mode=settings["okx_margin_mode"],
                 stop_loss=result.stop_loss, take_profit=result.take_profit,
                 api_key=settings["okx_api_key"], api_secret=settings["okx_api_secret"],
                 passphrase=settings["okx_passphrase"], is_testnet=settings["okx_is_testnet"],
+                is_market_order=settings.get("is_instant_entry_enabled", True),
+                is_max_leverage_enabled=settings.get("okx_is_max_leverage_enabled", False),
             )
             if success:
                 db.add_log(f"✅ [التداول الآلي] تم تنفيذ الصفقة بنجاح: {message}")

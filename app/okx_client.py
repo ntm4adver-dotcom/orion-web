@@ -134,12 +134,77 @@ def set_leverage(symbol: str, leverage: int, margin_mode: str, api_key: str, api
     return False, (resp or {}).get("msg", "فشل ضبط الرافعة")
 
 
+def fetch_max_leverage(inst_id: str, margin_mode: str, api_key: str, api_secret: str,
+                        passphrase: str, is_testnet: bool, default_fallback: int = 10) -> int:
+    """يعادل fetchMaxLeverage في OkxClient.kt الأصلي — يجلب أقصى رافعة متاحة لهذه العملة تحديداً."""
+    resp = _request("GET", f"/api/v5/account/max-leverage?instId={inst_id}&mgnMode={margin_mode}",
+                     None, api_key, api_secret, passphrase, is_testnet)
+    if resp and resp.get("code") == "0" and resp.get("data"):
+        try:
+            lev = int(float(resp["data"][0].get("maxLever", default_fallback)))
+            return max(1, lev)
+        except Exception:
+            pass
+    return default_fallback
+
+
+_ctval_cache: Dict[str, float] = {}
+
+
+def fetch_contract_value(inst_id: str) -> float:
+    """يعادل fetchInstrumentContractValue الأصلي — قيمة العقد الواحد (ctVal) لكل رمز.
+    ضروري لحساب حجم الصفقة (sz) بدقة، لأن عقود OKX Swap ليست دائماً 1 وحدة = 1 عقد."""
+    if inst_id in _ctval_cache:
+        return _ctval_cache[inst_id]
+    resp = _public_get(f"/api/v5/public/instruments?instType=SWAP&instId={inst_id}")
+    if resp and resp.get("code") == "0" and resp.get("data"):
+        try:
+            ct_val = float(resp["data"][0].get("ctVal", 1.0) or 1.0)
+            _ctval_cache[inst_id] = ct_val
+            return ct_val
+        except Exception:
+            pass
+    _ctval_cache[inst_id] = 1.0
+    return 1.0
+
+
+def calculate_order_quantity_usdt(settings: dict, entry_price: float, stop_loss: float,
+                                   available_balance: Optional[float] = None) -> float:
+    """يعادل منطق حساب calculatedQuantityUsdt في OrionViewModel.kt الأصلي:
+    1) لو التكيف التلقائي (Adaptive Sizing) مفعّل ولدينا وقف خسارة صالح → نحسب الحجم
+       بحيث تكون الخسارة القصوى المحتملة = adaptive_stop_loss_limit_usdt بالضبط.
+    2) وإلا لو نوع الحجم PERCENTAGE → نسبة من الرصيد المتاح.
+    3) وإلا → المبلغ الثابت المُدخل يدوياً (okx_volume_usdt)."""
+    quantity_usdt = float(settings.get("okx_volume_usdt", 10.0))
+
+    if settings.get("is_adaptive_stop_loss_enabled") and stop_loss and entry_price and stop_loss > 0 and entry_price > 0:
+        price_diff = abs(entry_price - stop_loss)
+        leverage = max(1, int(settings.get("okx_leverage", 10)))
+        if price_diff > 0:
+            adaptive_qty = (float(settings.get("adaptive_stop_loss_limit_usdt", 1.0)) * entry_price) / (leverage * price_diff)
+            if adaptive_qty > 0:
+                quantity_usdt = adaptive_qty
+    elif settings.get("okx_volume_type") == "PERCENTAGE" and available_balance is not None:
+        pct_value = available_balance * (float(settings.get("okx_volume_percent", 5.0)) / 100.0)
+        if pct_value > 0:
+            quantity_usdt = pct_value
+
+    return quantity_usdt if quantity_usdt > 0 else 10.0  # قيمة احتياطية آمنة
+
+
 def place_order(symbol: str, side: str, quantity_usdt: float, leverage: int, margin_mode: str,
                  stop_loss: float, take_profit: float, api_key: str, api_secret: str,
-                 passphrase: str, is_testnet: bool, is_market_order: bool = True) -> Tuple[bool, str]:
+                 passphrase: str, is_testnet: bool, is_market_order: bool = True,
+                 is_max_leverage_enabled: bool = False) -> Tuple[bool, str]:
     """side: 'buy' أو 'sell'. ينفذ أمر سوق فوري بحجم quantity_usdt دولار مع ربط SL/TP اختيارياً."""
     inst_id = _to_inst_id(symbol)
-    set_leverage(symbol, leverage, margin_mode, api_key, api_secret, passphrase, is_testnet)
+
+    final_leverage = leverage
+    if is_max_leverage_enabled:
+        final_leverage = fetch_max_leverage(inst_id, margin_mode, api_key, api_secret, passphrase,
+                                             is_testnet, default_fallback=leverage)
+
+    set_leverage(symbol, final_leverage, margin_mode, api_key, api_secret, passphrase, is_testnet)
 
     px_resp = _public_get(f"/api/v5/market/ticker?instId={inst_id}")
     try:
@@ -149,7 +214,9 @@ def place_order(symbol: str, side: str, quantity_usdt: float, leverage: int, mar
     if last_price <= 0:
         return False, "سعر غير صالح"
 
-    sz = str(round((quantity_usdt * leverage) / last_price, 6))
+    ct_val = fetch_contract_value(inst_id)
+    leverage = final_leverage
+    sz = str(round((quantity_usdt * leverage) / (last_price * ct_val), 6))
 
     body = {
         "instId": inst_id,
@@ -169,7 +236,7 @@ def place_order(symbol: str, side: str, quantity_usdt: float, leverage: int, mar
     if not resp:
         return False, "فشل الاتصال بمنصة OKX"
     if resp.get("code") == "0":
-        return True, f"تم تنفيذ الأمر بنجاح ({sz} عقد)"
+        return True, f"تم تنفيذ الأمر بنجاح ({sz} عقد) برافعة x{leverage} ({margin_mode})"
     detail = resp.get("data", [{}])
     msg = detail[0].get("sMsg") if detail else resp.get("msg", "خطأ غير معروف")
     return False, msg or resp.get("msg", "خطأ غير معروف")

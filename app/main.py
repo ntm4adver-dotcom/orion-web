@@ -127,8 +127,14 @@ async def trading_execution_save(request: Request):
     updates = {
         "okx_is_auto_trading_enabled": 1 if "okx_is_auto_trading_enabled" in form else 0,
         "okx_leverage": form.get("okx_leverage", 10),
-        "okx_volume_usdt": form.get("okx_volume_usdt", 10.0),
+        "okx_is_max_leverage_enabled": 1 if "okx_is_max_leverage_enabled" in form else 0,
         "okx_margin_mode": form.get("okx_margin_mode", "cross"),
+        "okx_volume_type": form.get("okx_volume_type", "FIXED"),
+        "okx_volume_usdt": form.get("okx_volume_usdt", 10.0),
+        "okx_volume_percent": form.get("okx_volume_percent", 5.0),
+        "is_adaptive_stop_loss_enabled": 1 if "is_adaptive_stop_loss_enabled" in form else 0,
+        "adaptive_stop_loss_limit_usdt": form.get("adaptive_stop_loss_limit_usdt", 1.0),
+        "is_instant_entry_enabled": 1 if "is_instant_entry_enabled" in form else 0,
     }
     db.update_settings(updates)
     return RedirectResponse("/trading", status_code=303)

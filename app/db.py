@@ -35,8 +35,14 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "okx_is_testnet": 1,
     "okx_is_auto_trading_enabled": 0,
     "okx_leverage": 10,
-    "okx_volume_usdt": 10.0,
-    "okx_margin_mode": "cross",
+    "okx_is_max_leverage_enabled": 0,           # تفعيل "أقصى رافعة" تلقائية متكيفة لكل عملة
+    "okx_margin_mode": "cross",                 # cross أو isolated
+    "okx_volume_type": "FIXED",                 # FIXED (مبلغ ثابت) أو PERCENTAGE (نسبة من الرصيد)
+    "okx_volume_usdt": 10.0,                    # يُستخدم عند FIXED
+    "okx_volume_percent": 5.0,                  # يُستخدم عند PERCENTAGE
+    "is_adaptive_stop_loss_enabled": 0,         # استراتيجية التكيف التلقائي (Adaptive Sizing)
+    "adaptive_stop_loss_limit_usdt": 1.0,       # أقصى خسارة مستهدفة لكل صفقة بالـ USDT
+    "is_instant_entry_enabled": 1,              # أمر سوق فوري (Market) بدل أمر محدد (Limit)
 }
 
 
@@ -114,7 +120,8 @@ def get_settings() -> Dict[str, Any]:
     # normalize booleans stored as 0/1 ints
     for bkey in ("is_auto_scanning", "is_telegram_enabled", "is_single_coin_mode_enabled",
                  "is_volume_filter_enabled", "is_vwap_filter_enabled", "is_4h_buyers_filter_enabled",
-                 "is_cancel_if_exceeds_target_enabled", "okx_is_testnet", "okx_is_auto_trading_enabled"):
+                 "is_cancel_if_exceeds_target_enabled", "okx_is_testnet", "okx_is_auto_trading_enabled",
+                 "okx_is_max_leverage_enabled", "is_adaptive_stop_loss_enabled", "is_instant_entry_enabled"):
         settings[bkey] = bool(int(settings.get(bkey, 0)))
     return settings
 

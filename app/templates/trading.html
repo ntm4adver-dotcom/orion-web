@@ -41,20 +41,101 @@
   <div class="card">
     <h3>إعدادات التنفيذ الآلي</h3>
     <div class="switch"><input type="checkbox" name="okx_is_auto_trading_enabled" {{ 'checked' if s.okx_is_auto_trading_enabled }}> <label style="margin:0; color:var(--red); font-weight:700;">تفعيل تنفيذ الإشارات تلقائياً كصفقات حقيقية</label></div>
-    <div class="row" style="margin-top:10px;">
-      <div><label>الرافعة المالية (Leverage)</label><input type="number" name="okx_leverage" value="{{ s.okx_leverage }}"></div>
-      <div><label>حجم الصفقة (USDT)</label><input type="number" step="0.1" name="okx_volume_usdt" value="{{ s.okx_volume_usdt }}"></div>
-      <div>
-        <label>وضع الهامش</label>
-        <select name="okx_margin_mode">
-          <option value="cross" {{ 'selected' if s.okx_margin_mode=='cross' }}>Cross</option>
-          <option value="isolated" {{ 'selected' if s.okx_margin_mode=='isolated' }}>Isolated</option>
-        </select>
+
+    <!-- وضع الهامش: Cross / Isolated -->
+    <div style="margin-top:18px;">
+      <label>وضع الهامش (Margin Mode)</label>
+      <div class="row" style="gap:8px; margin-top:6px;">
+        <label class="toggle-btn" style="flex:1;">
+          <input type="radio" name="okx_margin_mode" value="cross" {{ 'checked' if s.okx_margin_mode=='cross' }} style="display:none;" onchange="this.closest('form').querySelectorAll('.mm-btn').forEach(b=>b.classList.remove('active')); this.nextElementSibling.classList.add('active');">
+          <span class="mm-btn {{ 'active' if s.okx_margin_mode=='cross' }}" style="display:block; text-align:center; padding:10px; border-radius:8px; border:1px solid var(--border); cursor:pointer;" onclick="this.previousElementSibling.checked=true;">هامش متقاطع (Cross)</span>
+        </label>
+        <label class="toggle-btn" style="flex:1;">
+          <input type="radio" name="okx_margin_mode" value="isolated" {{ 'checked' if s.okx_margin_mode=='isolated' }} style="display:none;" onchange="this.closest('form').querySelectorAll('.mm-btn').forEach(b=>b.classList.remove('active')); this.nextElementSibling.classList.add('active');">
+          <span class="mm-btn {{ 'active' if s.okx_margin_mode=='isolated' }}" style="display:block; text-align:center; padding:10px; border-radius:8px; border:1px solid var(--border); cursor:pointer;" onclick="this.previousElementSibling.checked=true;">هامش منفصل (Isolated)</span>
+        </label>
       </div>
     </div>
+
+    <!-- مستوى الرافعة المالية -->
+    <div style="margin-top:18px;">
+      <div class="flex-between">
+        <label style="margin:0;">مستوى الرافعة المالية (Leverage)</label>
+        <span class="muted" id="lev-hint">{{ 'أقصى رافعة تلقائية متكيفة لكل عملة ⚡' if s.okx_is_max_leverage_enabled else 'رافعة ثابتة يدوية' }}</span>
+      </div>
+      <div class="row" style="align-items:center; gap:8px; margin-top:6px;">
+        <input type="number" name="okx_leverage" id="lev-input" value="{{ s.okx_leverage }}" min="1" max="100" {{ 'disabled' if s.okx_is_max_leverage_enabled }} style="flex:1;">
+        <button type="button" id="max-lev-btn" class="btn {{ 'secondary' if not s.okx_is_max_leverage_enabled }}" style="white-space:nowrap;" onclick="toggleMaxLeverage()">🚀 أقصى رافعة</button>
+        <input type="checkbox" name="okx_is_max_leverage_enabled" id="max-lev-check" {{ 'checked' if s.okx_is_max_leverage_enabled }} style="display:none;">
+      </div>
+    </div>
+
+    <!-- حجم التمويل لكل صفقة: مبلغ ثابت أو نسبة -->
+    <div style="margin-top:18px;">
+      <label>حجم التمويل لكل صفقة (Margin Cost)</label>
+      <div class="row" style="gap:8px; margin-top:6px;">
+        <label class="toggle-btn" style="flex:1;">
+          <input type="radio" name="okx_volume_type" value="PERCENTAGE" {{ 'checked' if s.okx_volume_type=='PERCENTAGE' }} style="display:none;" onchange="setVolType('PERCENTAGE')">
+          <span class="mm-btn vt-btn" data-val="PERCENTAGE" style="display:block; text-align:center; padding:10px; border-radius:8px; border:1px solid var(--border); cursor:pointer;" onclick="this.previousElementSibling.checked=true; setVolType('PERCENTAGE');">نسبة مئوية (%)</span>
+        </label>
+        <label class="toggle-btn" style="flex:1;">
+          <input type="radio" name="okx_volume_type" value="FIXED" {{ 'checked' if s.okx_volume_type=='FIXED' }} style="display:none;" onchange="setVolType('FIXED')">
+          <span class="mm-btn vt-btn" data-val="FIXED" style="display:block; text-align:center; padding:10px; border-radius:8px; border:1px solid var(--border); cursor:pointer;" onclick="this.previousElementSibling.checked=true; setVolType('FIXED');">مبلغ ثابت (USDT)</span>
+        </label>
+      </div>
+      <div id="vol-fixed-wrap" style="margin-top:10px;">
+        <label>أدخل القيمة يدوياً بالـ USDT</label>
+        <input type="number" step="0.1" name="okx_volume_usdt" value="{{ s.okx_volume_usdt }}">
+      </div>
+      <div id="vol-pct-wrap" style="margin-top:10px; display:none;">
+        <label>النسبة المئوية من الرصيد المتاح (%)</label>
+        <input type="number" step="0.1" name="okx_volume_percent" value="{{ s.okx_volume_percent }}">
+      </div>
+    </div>
+
+    <!-- استراتيجية التكيف التلقائي -->
+    <div class="card" style="margin-top:18px; background:rgba(0,229,255,0.05);">
+      <div class="flex-between">
+        <div style="font-weight:700;">🎯 استراتيجية التكيف التلقائي (Adaptive Sizing)</div>
+        <label class="switch" style="margin:0;"><input type="checkbox" name="is_adaptive_stop_loss_enabled" id="adaptive-check" {{ 'checked' if s.is_adaptive_stop_loss_enabled }} onchange="document.getElementById('adaptive-wrap').style.display=this.checked?'block':'none';"></label>
+      </div>
+      <p class="muted" style="margin-top:8px;">تحديد قيمة الخسارة القصوى لكل صفقة بالـ USDT، وسيقوم البوت باحتساب الكمية تلقائياً.</p>
+      <div id="adaptive-wrap" style="{{ '' if s.is_adaptive_stop_loss_enabled else 'display:none;' }} margin-top:10px;">
+        <label>أدخل مقدار الخسارة الأقصى المستهدف لكل صفقة — USDT</label>
+        <input type="number" step="0.1" name="adaptive_stop_loss_limit_usdt" value="{{ s.adaptive_stop_loss_limit_usdt }}">
+        <p class="muted" style="margin-top:8px;">💡 ملاحظة: عند تفعيل هذا الخيار، سيقوم النظام تلقائياً بمقارنة السعر ووقف الخسارة لكل صفقة (Long أو Short) ويحسب الكمية بحيث تتناسب تماماً مع الخسارة القصوى المحددة أعلاه، متجاوزاً القيمة الثابتة/النسبة أعلاه.</p>
+      </div>
+    </div>
+
+    <!-- نوع أمر الدخول -->
+    <div class="switch" style="margin-top:18px;"><input type="checkbox" name="is_instant_entry_enabled" {{ 'checked' if s.is_instant_entry_enabled }}> <label style="margin:0;">دخول فوري بسعر السوق (Market) — إلغاء التحديد يجعله أمر محدد (Limit)</label></div>
+
     <div style="margin-top:14px;"><button type="submit">حفظ إعدادات التنفيذ</button></div>
   </div>
 </form>
+
+<script>
+function toggleMaxLeverage(){
+  const check = document.getElementById('max-lev-check');
+  const input = document.getElementById('lev-input');
+  const btn = document.getElementById('max-lev-btn');
+  const hint = document.getElementById('lev-hint');
+  check.checked = !check.checked;
+  input.disabled = check.checked;
+  btn.classList.toggle('secondary', !check.checked);
+  hint.innerText = check.checked ? 'أقصى رافعة تلقائية متكيفة لكل عملة ⚡' : 'رافعة ثابتة يدوية';
+}
+function setVolType(val){
+  document.querySelectorAll('.vt-btn').forEach(b => b.classList.toggle('active', b.dataset.val === val));
+  document.getElementById('vol-fixed-wrap').style.display = (val === 'FIXED') ? 'block' : 'none';
+  document.getElementById('vol-pct-wrap').style.display = (val === 'PERCENTAGE') ? 'block' : 'none';
+}
+document.addEventListener('DOMContentLoaded', () => setVolType('{{ s.okx_volume_type }}'));
+</script>
+
+<style>
+.mm-btn.active { border-color: var(--cyan) !important; background: rgba(0,229,255,0.12); color: var(--cyan); }
+</style>
 
 <script>
 async function testConn(){
