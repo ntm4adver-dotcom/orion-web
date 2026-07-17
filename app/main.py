@@ -178,6 +178,57 @@ def api_signals(request: Request):
     return db.get_signals(100)
 
 
+@app.get("/signals")
+def signals_page(request: Request):
+    g = _guard(request)
+    if g:
+        return g
+    return templates.TemplateResponse("signals.html", {"request": request, "active": "signals", "s": db.get_settings()})
+
+
+@app.post("/api/signals/clear")
+def api_signals_clear(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    db.clear_signals()
+    return {"ok": True}
+
+
+@app.post("/api/signals/execute")
+async def api_signals_execute(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    body = await request.json()
+    s = db.get_settings()
+    if not s["okx_api_key"] or not s["okx_api_secret"] or not s["okx_passphrase"]:
+        return {"success": False, "message": "يرجى تعبئة مفاتيح API لربط حساب OKX أولاً في صفحة التداول الآلي."}
+
+    symbol = body.get("symbol", "")
+    side = body.get("side", "Long")
+    entry_price = float(body.get("entry_price", 0))
+    stop_loss = float(body.get("stop_loss", 0))
+    take_profit = float(body.get("take_profit", 0))
+    side_text = "buy" if side == "Long" else "sell"
+
+    available_balance = None
+    if s.get("okx_volume_type") == "PERCENTAGE":
+        info = okx_client.fetch_account_info(s["okx_api_key"], s["okx_api_secret"], s["okx_passphrase"], s["okx_is_testnet"])
+        available_balance = info.get("available_balance")
+
+    quantity_usdt = okx_client.calculate_order_quantity_usdt(s, entry_price, stop_loss, available_balance)
+
+    success, message = okx_client.place_order(
+        symbol=symbol, side=side_text, quantity_usdt=quantity_usdt,
+        leverage=s["okx_leverage"], margin_mode=s["okx_margin_mode"],
+        stop_loss=stop_loss, take_profit=take_profit,
+        api_key=s["okx_api_key"], api_secret=s["okx_api_secret"], passphrase=s["okx_passphrase"],
+        is_testnet=s["okx_is_testnet"], is_market_order=s.get("is_instant_entry_enabled", True),
+        is_max_leverage_enabled=s.get("okx_is_max_leverage_enabled", False),
+    )
+    db.add_log(f"{'✅' if success else '❌'} [أمر يدوي] إرسال صفقة {symbol} ({side}) - {message}")
+    return {"success": success, "message": message}
+
+
 @app.post("/api/scan/start")
 def api_scan_start(request: Request):
     if not is_logged_in(request):

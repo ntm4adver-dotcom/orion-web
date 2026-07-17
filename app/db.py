@@ -190,6 +190,12 @@ def update_signal_status(signal_id: int, status: str, current_price: float, last
         conn.commit()
 
 
+def clear_signals():
+    with _lock, _connect() as conn:
+        conn.execute("DELETE FROM trade_signals")
+        conn.commit()
+
+
 def add_log(message: str, max_logs: int = 300):
     with _lock, _connect() as conn:
         conn.execute("INSERT INTO scan_logs (timestamp, message) VALUES (?, ?)", (int(time.time() * 1000), message))

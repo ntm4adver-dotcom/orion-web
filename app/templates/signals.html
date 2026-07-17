@@ -1,0 +1,284 @@
+{% extends "base.html" %}
+{% block title %}الإشارات - Orion{% endblock %}
+{% block content %}
+
+<div class="flex-between" style="margin-bottom:10px;">
+  <h2 style="margin:0;">📋 سجل الفرص والإشارات <span id="total-count" class="muted"></span></h2>
+  <button class="btn danger" onclick="clearAllSignals()">🗑️ مسح السجل</button>
+</div>
+
+<div class="card">
+  <div class="flex-between">
+    <div style="text-align:center; flex:1;">
+      <div class="muted">مستوى نجاح الصفقات (Win Rate)</div>
+      <div id="win-rate" style="font-size:32px; font-weight:800; color:var(--green);">—</div>
+    </div>
+    <div style="display:flex; gap:22px;">
+      <div style="text-align:center;">
+        <div style="color:var(--green); font-size:22px; font-weight:800;" id="win-count">0</div>
+        <div class="muted">🎯 الرابحة</div>
+      </div>
+      <div style="text-align:center;">
+        <div style="color:var(--red); font-size:22px; font-weight:800;" id="loss-count">0</div>
+        <div class="muted">🔴 الخاسرة</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<input type="text" id="search-box" placeholder="ابحث عن عملة... (مثال: BTC)" style="margin-bottom:12px;" oninput="renderSignals()">
+
+<div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
+  <button class="filter-chip active" data-filter="all" onclick="setFilter('all')">الكل (<span id="c-all">0</span>)</button>
+  <button class="filter-chip" data-filter="ACTIVE" onclick="setFilter('ACTIVE')">نشطة (<span id="c-active">0</span>)</button>
+  <button class="filter-chip" data-filter="PENDING" onclick="setFilter('PENDING')">معلقة (<span id="c-pending">0</span>)</button>
+  <button class="filter-chip" data-filter="CLOSED" onclick="setFilter('CLOSED')">الأهداف (<span id="c-closed">0</span>)</button>
+</div>
+
+<div id="signals-list"></div>
+
+<style>
+.filter-chip{
+  background:var(--dark-accent); color:var(--text-sec); border:1px solid var(--dark-accent);
+  border-radius:20px; padding:8px 16px; font-size:13px; font-weight:700; cursor:pointer;
+}
+.filter-chip.active{ border-color:var(--cyan); color:var(--cyan); background:rgba(34,211,238,.08); }
+.sig-card{ background:var(--card); border:1px solid var(--dark-accent); border-radius:14px; padding:16px; margin-bottom:14px; }
+.sig-top{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+.sig-symbol{ font-weight:800; font-size:16px; }
+.side-pill{ padding:4px 10px; border-radius:8px; font-size:12px; font-weight:800; border:1px solid; margin-inline-end:6px; }
+.side-pill.long{ color:var(--green); border-color:rgba(34,197,94,.35); background:rgba(34,197,94,.12); }
+.side-pill.short{ color:var(--red); border-color:rgba(239,68,68,.35); background:rgba(239,68,68,.12); }
+.prob-pill{ padding:4px 10px; border-radius:8px; font-size:12px; font-weight:800; background:rgba(251,191,36,.12); color:var(--gold); margin-inline-end:6px; }
+.sig-mid{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; font-size:13px; }
+.pnl-box{ text-align:center; padding:10px; border-radius:10px; font-weight:800; font-size:15px; margin-bottom:12px; }
+.levels-row{ display:flex; gap:10px; margin-bottom:12px; }
+.level-box{ flex:1; text-align:center; background:#0f1320; border-radius:10px; padding:8px; }
+.level-box .lbl{ font-size:11px; color:var(--text-sec); margin-bottom:4px; }
+.level-box .val{ font-weight:800; font-size:14px; }
+.bar-wrap{ margin:14px 0 8px; }
+.bar-labels{ display:flex; justify-content:space-between; font-size:10px; color:var(--text-sec); font-weight:700; margin-bottom:4px; }
+.bar-track{ position:relative; height:16px; background:#1a1e2b; border-radius:8px; overflow:visible; direction:ltr; }
+.bar-seg{ position:absolute; top:0; height:100%; border-radius:8px; }
+.bar-line{ position:absolute; top:-3px; bottom:-3px; width:3px; border-radius:2px; }
+.sig-caption{ font-size:11px; color:var(--text-sec); margin:8px 0; text-align:center; }
+.sig-actions{ display:flex; justify-content:space-between; align-items:center; margin-top:10px; gap:10px; }
+.details-box{ display:none; margin-top:10px; padding:10px; background:#0f1320; border-radius:10px; font-size:12px; color:var(--text-sec); line-height:1.8; }
+</style>
+
+<script>
+let allSignals = [];
+let currentFilter = 'all';
+
+function setFilter(f){
+  currentFilter = f;
+  document.querySelectorAll('.filter-chip').forEach(c => c.classList.toggle('active', c.dataset.filter === f));
+  renderSignals();
+}
+
+function fmt(n){
+  if (n === null || n === undefined) return '—';
+  const num = Number(n);
+  if (Math.abs(num) >= 1) return num.toFixed(4).replace(/0+$/,'').replace(/\.$/,'');
+  return num.toPrecision(6);
+}
+
+function buildBar(sig){
+  const live = (sig.current_price && sig.current_price > 0) ? sig.current_price : sig.entry_price;
+  const isLong = sig.side === 'Long';
+  const closed = ['HIT_TP','HIT_SL','CANCELLED','REPLACED'].includes(sig.status);
+
+  if (!sig.stop_loss || sig.stop_loss <= 0){
+    // بدون وقف خسارة: من الدخول إلى الهدف فقط
+    const denom = sig.take_profit - sig.entry_price;
+    let frac = 0;
+    if (denom !== 0){
+      frac = isLong ? Math.min(1, Math.max(0, (live - sig.entry_price) / denom))
+                     : Math.min(1, Math.max(0, (sig.entry_price - live) / Math.abs(denom)));
+    }
+    const fillColor = closed ? 'rgba(34,197,94,.15)' : 'rgba(34,197,94,.5)';
+    return `
+      <div class="bar-labels"><span>Entry (${fmt(sig.entry_price)})</span><span style="color:var(--gold);">🛡️ بدون وقف خسارة</span><span style="color:var(--green);">Target (${fmt(sig.take_profit)})</span></div>
+      <div class="bar-track">
+        <div class="bar-seg" style="left:0; width:${frac*100}%; background:${fillColor};"></div>
+        ${!closed ? `<div class="bar-line" style="left:${frac*100}%; background:var(--cyan);"></div>` : ''}
+      </div>`;
+  }
+
+  const denom = sig.take_profit - sig.stop_loss;
+  const entryFrac = denom !== 0 ? Math.min(1, Math.max(0, (sig.entry_price - sig.stop_loss) / denom)) : 0.5;
+  const barFrac = denom !== 0 ? Math.min(1, Math.max(0, (live - sig.stop_loss) / denom)) : 0.5;
+  const entryPct = entryFrac * 100, livePct = barFrac * 100;
+
+  let segments = '';
+  if (sig.status === 'PENDING'){
+    const left = Math.min(entryPct, livePct), width = Math.abs(livePct - entryPct);
+    segments = `
+      <div class="bar-seg" style="left:${left}%; width:${width}%; background:rgba(251,191,36,.4);"></div>
+      <div class="bar-line" style="left:${entryPct}%; background:rgba(251,191,36,.85); width:2px;"></div>
+      <div class="bar-line" style="left:0%; background:rgba(239,68,68,.4); width:2px;"></div>
+      <div class="bar-line" style="left:100%; background:rgba(34,197,94,.4); width:2px;"></div>
+      <div class="bar-line" style="left:${livePct}%; background:var(--gold); width:3px;"></div>`;
+  } else if (sig.status === 'ACTIVE'){
+    segments = `
+      <div class="bar-seg" style="left:0%; width:${entryPct}%; background:rgba(239,68,68,.13);"></div>
+      <div class="bar-seg" style="left:${entryPct}%; width:${100-entryPct}%; background:rgba(34,197,94,.13);"></div>`;
+    if (livePct > entryPct){
+      segments += `<div class="bar-seg" style="left:${entryPct}%; width:${livePct-entryPct}%; background:rgba(34,197,94,.55);"></div>`;
+    } else if (livePct < entryPct){
+      segments += `<div class="bar-seg" style="left:${livePct}%; width:${entryPct-livePct}%; background:rgba(239,68,68,.55);"></div>`;
+    }
+    segments += `
+      <div class="bar-line" style="left:${entryPct}%; background:rgba(255,255,255,.8); width:2px;"></div>
+      <div class="bar-line" style="left:0%; background:var(--red); width:2px;"></div>
+      <div class="bar-line" style="left:100%; background:var(--green); width:2px;"></div>
+      <div class="bar-line" style="left:${livePct}%; background:var(--cyan); width:3px;"></div>`;
+  } else {
+    // مغلقة: HIT_TP / HIT_SL / CANCELLED / REPLACED
+    const bg = sig.status === 'HIT_TP' ? 'rgba(34,197,94,.18)' : (sig.status === 'HIT_SL' ? 'rgba(239,68,68,.18)' : 'rgba(148,163,184,.08)');
+    segments = `<div class="bar-seg" style="left:0%; width:100%; background:${bg};"></div>
+      <div class="bar-line" style="left:${entryPct}%; background:rgba(255,255,255,.5); width:2px;"></div>`;
+  }
+
+  return `
+    <div class="bar-labels"><span>Stop</span><span style="position:relative; ${entryPct>10 && entryPct<90 ? '' : 'display:none;'}">Entry</span><span style="color:var(--green);">Target (TP)</span></div>
+    <div class="bar-track">${segments}</div>`;
+}
+
+function statusMeta(status){
+  const map = {
+    'PENDING': {label:'⏳ معلقة بانتظار الدخول', cls:'status-PENDING'},
+    'ACTIVE': {label:'⚡ نشط ومراقب', cls:'status-ACTIVE'},
+    'HIT_TP': {label:'✅ تحقق الهدف', cls:'status-HIT_TP'},
+    'HIT_SL': {label:'🛑 تفعيل وقف الخسارة', cls:'status-HIT_SL'},
+    'CANCELLED': {label:'⚪ ملغاة', cls:'status-CANCELLED'},
+    'REPLACED': {label:'♻️ تم الاستبدال', cls:'status-CANCELLED'},
+  };
+  return map[status] || {label: status, cls:''};
+}
+
+function captionFor(status){
+  const map = {
+    'PENDING': 'الصفقة بانتظار وصول السعر لنقطة الدخول المحددة.',
+    'ACTIVE': 'الصفقة مفعّلة ونشطة وتحت المراقبة المستمرة لمستويات الأهداف والإيقاف.',
+    'HIT_TP': 'تم تحقيق الهدف بنجاح وإغلاق الصفقة رابحة.',
+    'HIT_SL': 'تم الوصول لوقف الخسارة وإغلاق الصفقة.',
+    'CANCELLED': 'تم إلغاء هذه الفرصة قبل تفعيلها.',
+    'REPLACED': 'تم استبدال هذه الصفقة بفرصة أقوى.',
+  };
+  return map[status] || '';
+}
+
+function renderSignals(){
+  const search = document.getElementById('search-box').value.trim().toUpperCase();
+  let list = allSignals;
+  if (search) list = list.filter(s => s.symbol.toUpperCase().includes(search));
+
+  const counts = {
+    all: allSignals.length,
+    ACTIVE: allSignals.filter(s => s.status === 'ACTIVE').length,
+    PENDING: allSignals.filter(s => s.status === 'PENDING').length,
+    CLOSED: allSignals.filter(s => ['HIT_TP','HIT_SL','CANCELLED','REPLACED'].includes(s.status)).length,
+  };
+  document.getElementById('c-all').innerText = counts.all;
+  document.getElementById('c-active').innerText = counts.ACTIVE;
+  document.getElementById('c-pending').innerText = counts.PENDING;
+  document.getElementById('c-closed').innerText = counts.CLOSED;
+  document.getElementById('total-count').innerText = `(${counts.all})`;
+
+  const wins = allSignals.filter(s => s.status === 'HIT_TP').length;
+  const losses = allSignals.filter(s => s.status === 'HIT_SL').length;
+  const totalClosed = wins + losses;
+  document.getElementById('win-count').innerText = wins;
+  document.getElementById('loss-count').innerText = losses;
+  document.getElementById('win-rate').innerText = totalClosed > 0 ? ((wins/totalClosed)*100).toFixed(1) + '%' : '—';
+
+  if (currentFilter === 'ACTIVE') list = list.filter(s => s.status === 'ACTIVE');
+  else if (currentFilter === 'PENDING') list = list.filter(s => s.status === 'PENDING');
+  else if (currentFilter === 'CLOSED') list = list.filter(s => ['HIT_TP','HIT_SL','CANCELLED','REPLACED'].includes(s.status));
+
+  const container = document.getElementById('signals-list');
+  if (list.length === 0){
+    container.innerHTML = '<div class="card muted" style="text-align:center;">لا توجد إشارات ضمن هذا التصنيف</div>';
+    return;
+  }
+
+  container.innerHTML = list.map(sig => {
+    const live = (sig.current_price && sig.current_price > 0) ? sig.current_price : sig.entry_price;
+    const isLong = sig.side === 'Long';
+    const pnlPct = isLong ? ((live - sig.entry_price) / sig.entry_price) * 100 : ((sig.entry_price - live) / sig.entry_price) * 100;
+    const isProfit = pnlPct >= 0;
+    const st = statusMeta(sig.status);
+    const canExecute = sig.status === 'PENDING' || sig.status === 'ACTIVE';
+
+    return `
+    <div class="sig-card">
+      <div class="sig-top">
+        <div>
+          <span class="prob-pill">احتمال: ${sig.probability}%</span>
+          <span class="side-pill ${isLong ? 'long' : 'short'}">${isLong ? '▲ شراء (LONG)' : '▼ بيع (SHORT)'}</span>
+        </div>
+        <div class="sig-symbol">${sig.symbol}</div>
+      </div>
+      <div class="sig-mid">
+        <span class="status-pill ${st.cls}">${st.label}</span>
+        <span>السعر الحالي: <b>${fmt(live)}</b></span>
+      </div>
+      ${sig.status === 'ACTIVE' || sig.status === 'PENDING' ? `
+      <div class="pnl-box" style="background:${isProfit ? 'rgba(34,197,94,.08)' : 'rgba(239,68,68,.08)'}; color:${isProfit ? 'var(--green)' : 'var(--red)'};">
+        الربح العائم الحالي: ${isProfit ? '+' : ''}${pnlPct.toFixed(2)}%
+      </div>` : ''}
+      <div class="levels-row">
+        <div class="level-box"><div class="lbl">سعر الدخول</div><div class="val">${fmt(sig.entry_price)}</div></div>
+        <div class="level-box"><div class="lbl">الهدف (TP)</div><div class="val" style="color:var(--green);">${fmt(sig.take_profit)}</div></div>
+        ${sig.stop_loss > 0 ? `<div class="level-box"><div class="lbl">وقف الخسارة (SL)</div><div class="val" style="color:var(--red);">${fmt(sig.stop_loss)}</div></div>` : ''}
+      </div>
+      <div class="bar-wrap">${buildBar(sig)}</div>
+      <div class="sig-caption">${captionFor(sig.status)}</div>
+      <div class="sig-actions">
+        ${canExecute ? `<button class="btn" style="font-size:12px; padding:8px 14px;" onclick='executeSignal(${JSON.stringify(sig)})'>⚡ تنفيذ على OKX</button>` : '<span></span>'}
+        <span class="muted" style="cursor:pointer;" onclick="toggleDetails(this)">ℹ️ تفاصيل التحليل</span>
+      </div>
+      <div class="details-box">
+        <b>الجودة:</b> ${sig.quality || '—'}<br>
+        <b>السلوك السعري:</b> ${sig.behavior || '—'}<br>
+        <b>تحليل الحجم:</b> ${sig.volume_analysis || '—'}<br>
+        <b>عائد/مخاطرة R:R:</b> ${sig.rr ? '1:' + sig.rr : 'غير محدد'}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleDetails(el){
+  const box = el.closest('.sig-card').querySelector('.details-box');
+  box.style.display = box.style.display === 'block' ? 'none' : 'block';
+}
+
+async function executeSignal(sig){
+  if (!confirm(`تأكيد تنفيذ صفقة ${sig.symbol} (${sig.side}) على OKX؟`)) return;
+  const r = await fetch('/api/signals/execute', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({symbol: sig.symbol, side: sig.side, entry_price: sig.entry_price, stop_loss: sig.stop_loss, take_profit: sig.take_profit})
+  });
+  const data = await r.json();
+  alert(data.message);
+}
+
+async function clearAllSignals(){
+  if (!confirm('هل أنت متأكد من حذف كل سجل الإشارات؟ هذا الإجراء لا يمكن التراجع عنه.')) return;
+  await fetch('/api/signals/clear', {method: 'POST'});
+  fetchAndRender();
+}
+
+async function fetchAndRender(){
+  try{
+    const r = await fetch('/api/signals');
+    allSignals = await r.json();
+    renderSignals();
+  }catch(e){}
+}
+
+fetchAndRender();
+setInterval(fetchAndRender, 3000);
+</script>
+{% endblock %}
