@@ -162,6 +162,19 @@ def get_signals(limit: int = 100) -> List[Dict[str, Any]]:
         return [dict(row) for row in cur.fetchall()]
 
 
+def get_active_or_pending_signal(symbol: str, side: str) -> Optional[Dict[str, Any]]:
+    """يعادل signalDao.getActiveOrPendingSignal الأصلي — يتحقق من وجود صفقة بنفس
+    الرمز والاتجاه حالتها PENDING أو ACTIVE، لمنع تكرار نفس الإشارة."""
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            "SELECT * FROM trade_signals WHERE symbol=? AND side=? AND status IN ('PENDING','ACTIVE') "
+            "ORDER BY id DESC LIMIT 1",
+            (symbol, side),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
 def get_open_signals() -> List[Dict[str, Any]]:
     with _lock, _connect() as conn:
         cur = conn.execute("SELECT * FROM trade_signals WHERE status IN ('PENDING','ACTIVE')")

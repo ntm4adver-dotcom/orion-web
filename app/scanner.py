@@ -83,6 +83,9 @@ class ScannerState:
         client = okx_client if settings["exchange"] == "okx" else binance_client
         db.add_log(f"جاري استعلام {'OKX' if settings['exchange'] == 'okx' else 'Binance'} عن أزواج العملات الأعلى حجماً في الـ 24 ساعة الماضية...")
         symbols = binance_client.fetch_top_symbols(limit) if settings["exchange"] != "okx" else settings["selected_symbols"].split(",")
+        fallback_reason = getattr(binance_client, "last_error", {}).get("_top_symbols") if settings["exchange"] != "okx" else None
+        if fallback_reason:
+            db.add_log(f"⚠️ تعذر جلب قائمة العملات الحقيقية من Binance، تم استخدام قائمة احتياطية مؤقتة — السبب: {fallback_reason}")
         db.add_log(f"✅ تم العثور على {len(symbols)} زوج: {', '.join(symbols)}")
         return symbols
 
@@ -176,6 +179,14 @@ class ScannerState:
                     if result.side == "Short" and (100 - buy_pct) < settings["min_4h_buyers_percentage"]:
                         db.add_log(f"⏳ [{symbol}] تم تخطي إشارة هبوط: نسبة المبيعات غير كافية.")
                         continue
+
+                # منع التكرار: تجاهل الإشارة الجديدة إذا فيه صفقة (معلقة أو نشطة) بالفعل
+                # لنفس العملة ونفس الاتجاه — يطابق getActiveOrPendingSignal بالتطبيق الأصلي
+                existing = db.get_active_or_pending_signal(result.symbol, result.side)
+                if existing:
+                    status_ar = "نشطة" if existing["status"] == "ACTIVE" else "معلقة"
+                    db.add_log(f"⏳ [{symbol}] تم تجاهل الإشارة الجديدة ({result.side}) لوجود صفقة {status_ar} بالفعل من نفس الاتجاه (بروبابيليتي {existing['probability']}%).")
+                    continue
 
                 db.add_log(f"🎯 [{symbol}] تم رصد فرصة {result.side}! الاحتمالية: {result.prob}% | الجودة: {result.quality}")
                 signal_id = db.add_signal({

@@ -110,11 +110,13 @@ def fetch_klines(symbol: str, interval: str, limit: int = 150) -> List[Kline]:
 
 def fetch_top_symbols(limit_count: int = 10) -> List[str]:
     if _is_banned():
-        return _default_symbols()
+        last_error["_top_symbols"] = get_ban_status()
+        return _default_symbols()[:limit_count]
     url = f"{BASE_URL}/fapi/v1/ticker/24hr"
     r = _request("GET", url, None, "fetch_top_symbols")
     if r is None:
-        return _default_symbols()
+        last_error["_top_symbols"] = get_ban_status() or "تعذر الاتصال بـ Binance لجلب قائمة العملات"
+        return _default_symbols()[:limit_count]
     try:
         r.raise_for_status()
         data = r.json()
@@ -132,9 +134,14 @@ def fetch_top_symbols(limit_count: int = 10) -> List[str]:
             candidates.append((symbol, quote_volume))
         candidates.sort(key=lambda x: x[1], reverse=True)
         result = [c[0] for c in candidates[:limit_count]]
-        return result if result else _default_symbols()
-    except Exception:
-        return _default_symbols()
+        if result:
+            last_error.pop("_top_symbols", None)
+            return result
+        last_error["_top_symbols"] = "لم يتم إيجاد عملات مطابقة لشروط السيولة"
+        return _default_symbols()[:limit_count]
+    except Exception as e:
+        last_error["_top_symbols"] = str(e)
+        return _default_symbols()[:limit_count]
 
 
 def fetch_all_prices() -> Dict[str, float]:
@@ -153,7 +160,11 @@ def fetch_all_prices() -> Dict[str, float]:
 
 
 def _default_symbols():
-    return ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "DOGEUSDT", "XRPUSDT", "ADAUSDT"]
+    return [
+        "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "DOGEUSDT", "XRPUSDT", "ADAUSDT",
+        "AVAXUSDT", "LINKUSDT", "TONUSDT", "SUIUSDT", "DOTUSDT", "LTCUSDT", "TRXUSDT",
+        "NEARUSDT", "APTUSDT", "ARBUSDT", "OPUSDT", "MATICUSDT", "ATOMUSDT",
+    ]
 
 
 def fetch_open_interest_change_pct(symbol: str) -> Optional[float]:
