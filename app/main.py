@@ -1,12 +1,13 @@
 import os
 from fastapi import FastAPI, Request, Form
-from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.responses import RedirectResponse, JSONResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import db
 from . import okx_client
 from . import learning
+from . import backup_scheduler
 from .strategies import get_strategy_options, strategy_label
 from .auth import is_logged_in, APP_PASSWORD
 from .scanner import scanner_state
@@ -24,6 +25,7 @@ def on_startup():
     settings = db.get_settings()
     if settings.get("is_auto_scanning"):
         scanner_state.start()
+    backup_scheduler.scheduler.start()  # النسخ الاحتياطي التلقائي يشتغل دائماً بغض النظر عن حالة الفحص
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +90,7 @@ async def settings_save(request: Request):
     form = await request.form()
     checkboxes = ["is_auto_scanning", "is_single_coin_mode_enabled", "is_telegram_enabled",
                   "is_volume_filter_enabled", "is_vwap_filter_enabled", "is_4h_buyers_filter_enabled",
-                  "is_cancel_if_exceeds_target_enabled", "is_coin_learning_enabled"]
+                  "is_cancel_if_exceeds_target_enabled"]
     updates = {}
     for key in db.DEFAULT_SETTINGS:
         if key in checkboxes:
@@ -204,6 +206,38 @@ async def api_learning_settings(request: Request):
     }
     db.update_settings(updates)
     return {"ok": True}
+
+
+@app.post("/api/backup/auto-settings")
+async def api_backup_auto_settings(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    body = await request.json()
+    db.update_settings({
+        "is_auto_backup_enabled": 1 if body.get("is_auto_backup_enabled") else 0,
+        "auto_backup_interval_hours": body.get("auto_backup_interval_hours", 6),
+        "auto_backup_retention_count": body.get("auto_backup_retention_count", 10),
+    })
+    return {"ok": True}
+
+
+@app.get("/api/backup/list")
+def api_backup_list(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return backup_scheduler.list_backups()
+
+
+@app.get("/api/backup/download/{filename}")
+def api_backup_download(filename: str, request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    # حماية من مسارات خارج مجلد النسخ الاحتياطية
+    safe_name = os.path.basename(filename)
+    filepath = os.path.join(backup_scheduler.BACKUP_DIR, safe_name)
+    if not os.path.isfile(filepath):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return FileResponse(filepath, filename=safe_name, media_type="application/json")
 
 
 @app.get("/api/backup/export")

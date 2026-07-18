@@ -101,6 +101,22 @@
   </div>
 
   <div style="margin-top:20px; border-top:1px solid var(--dark-accent); padding-top:16px;">
+    <h4 style="margin:0 0 10px;">⏱️ النسخ الاحتياطي التلقائي الدوري</h4>
+    <div class="switch"><input type="checkbox" id="backup-enabled" {{ 'checked' if s.is_auto_backup_enabled }}> <label style="margin:0;">تفعيل النسخ الاحتياطي التلقائي (يحفظ نسخ على نفس القرص بدون تدخل منك)</label></div>
+    <div class="row" style="margin-top:10px;">
+      <div><label>كل كم ساعة يأخذ نسخة جديدة</label><input type="number" id="backup-interval" value="{{ s.auto_backup_interval_hours }}"></div>
+      <div><label>عدد النسخ المحتفظ بها (الأقدم تُحذف تلقائياً)</label><input type="number" id="backup-retention" value="{{ s.auto_backup_retention_count }}"></div>
+    </div>
+    <button type="button" style="margin-top:10px;" onclick="saveBackupSettings()">حفظ إعدادات النسخ التلقائي</button>
+    <p id="backup-settings-result" class="muted" style="margin-top:8px; font-size:12px;"></p>
+  </div>
+
+  <div id="backup-list-wrap" style="margin-top:20px; border-top:1px solid var(--dark-accent); padding-top:16px;">
+    <h4 style="margin:0 0 10px;">📁 النسخ المتوفرة على القرص حالياً</h4>
+    <div id="backup-list" class="muted">جاري التحميل...</div>
+  </div>
+
+  <div style="margin-top:20px; border-top:1px solid var(--dark-accent); padding-top:16px;">
     <label>استعادة من ملف نسخة احتياطية</label>
     <input type="file" id="backup-file" accept="application/json">
     <div class="row" style="margin-top:10px; gap:10px;">
@@ -112,6 +128,34 @@
 </div>
 
 <script>
+async function saveBackupSettings(){
+  const payload = {
+    is_auto_backup_enabled: document.getElementById('backup-enabled').checked,
+    auto_backup_interval_hours: document.getElementById('backup-interval').value,
+    auto_backup_retention_count: document.getElementById('backup-retention').value,
+  };
+  await fetch('/api/backup/auto-settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+  document.getElementById('backup-settings-result').innerText = '✅ تم الحفظ';
+  setTimeout(() => document.getElementById('backup-settings-result').innerText = '', 2500);
+}
+
+async function loadBackupList(){
+  try{
+    const r = await fetch('/api/backup/list');
+    const data = await r.json();
+    const wrap = document.getElementById('backup-list');
+    if (!data.length){ wrap.innerText = 'ما فيه نسخ محفوظة على القرص بعد — أول نسخة تلقائية بتُحفظ حسب الفاصل الزمني المحدد أعلاه.'; return; }
+    wrap.innerHTML = data.map(b => {
+      const date = new Date(b.created_at).toLocaleString('ar-SA');
+      return `<div class="row" style="justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--dark-accent);">
+        <span>${date} — ${b.size_kb} KB</span>
+        <a href="/api/backup/download/${b.filename}" download><button type="button" class="btn secondary" style="font-size:12px; padding:6px 12px;">تنزيل</button></a>
+      </div>`;
+    }).join('');
+  }catch(e){}
+}
+loadBackupList();
+
 async function restoreBackup(mode){
   const fileInput = document.getElementById('backup-file');
   if (!fileInput.files.length){ alert('اختر ملف النسخة الاحتياطية أولاً.'); return; }

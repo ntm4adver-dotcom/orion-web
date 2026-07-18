@@ -29,6 +29,9 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "is_cancel_if_exceeds_target_enabled": 1,
     "exchange": "binance",  # 'binance' or 'okx' for market data source
     "symbol_selection_mode": "top_volume",  # top_volume / big_movers / high_funding / oi_spike
+    "is_auto_backup_enabled": 1,
+    "auto_backup_interval_hours": 6,
+    "auto_backup_retention_count": 10,
     "active_strategy": "explosive_breakout",  # 'explosive_breakout' أو 'ict_smart_sweep'
     # OKX trading connection
     "okx_api_key": "",
@@ -137,7 +140,7 @@ def get_settings() -> Dict[str, Any]:
                  "is_volume_filter_enabled", "is_vwap_filter_enabled", "is_4h_buyers_filter_enabled",
                  "is_cancel_if_exceeds_target_enabled", "okx_is_testnet", "okx_is_auto_trading_enabled",
                  "okx_is_max_leverage_enabled", "is_adaptive_stop_loss_enabled", "is_instant_entry_enabled",
-                 "is_coin_learning_enabled"):
+                 "is_coin_learning_enabled", "is_auto_backup_enabled"):
         settings[bkey] = bool(int(settings.get(bkey, 0)))
     return settings
 
