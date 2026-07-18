@@ -59,8 +59,12 @@
   <div class="card">
     <h3>العملات</h3>
     <div class="switch"><input type="checkbox" name="is_single_coin_mode_enabled" {{ 'checked' if s.is_single_coin_mode_enabled }}> <label style="margin:0;">وضع مراقبة عملات محددة فقط</label></div>
-    <label>رموز العملات (مفصولة بفاصلة) — تُستخدم في وضع المراقبة المخصصة</label>
-    <input type="text" name="single_coin_symbol" value="{{ s.single_coin_symbol }}">
+    <label>قائمة العملات المراقبة — تُستخدم في وضع المراقبة المخصصة</label>
+    <div id="watchlist-items" style="display:flex; flex-wrap:wrap; gap:8px; margin:10px 0;"></div>
+    <div class="row" style="gap:8px;">
+      <input type="text" id="watchlist-input" placeholder="مثال: BTC أو ETHUSDT" style="flex:1;">
+      <button type="button" onclick="addWatchlistSymbol()">➕ إضافة</button>
+    </div>
   </div>
 
   <div class="card">
@@ -68,8 +72,14 @@
     <div class="switch"><input type="checkbox" name="is_telegram_enabled" {{ 'checked' if s.is_telegram_enabled }}> <label style="margin:0;">تفعيل تنبيهات تيليجرام</label></div>
     <label>Telegram Bot Token</label>
     <input type="text" name="telegram_token" value="{{ s.telegram_token }}" placeholder="123456:ABC-DEF...">
-    <label>Chat IDs (مفصولة بفاصلة)</label>
-    <input type="text" name="telegram_chat_ids" value="{{ s.telegram_chat_ids }}" placeholder="-100123456,987654321">
+
+    <label style="margin-top:14px; display:block;">جهات الاتصال (الاسم + Chat ID)</label>
+    <div id="telegram-contacts-items" style="display:flex; flex-direction:column; gap:6px; margin:10px 0;"></div>
+    <div class="row" style="gap:8px;">
+      <input type="text" id="telegram-name-input" placeholder="اسم صاحب الحساب (مثال: أحمد)" style="flex:1;">
+      <input type="text" id="telegram-chatid-input" placeholder="Chat ID مثال: -100123456" style="flex:1;">
+      <button type="button" onclick="addTelegramContact()">➕ إضافة</button>
+    </div>
   </div>
 
   <div class="card">
@@ -128,6 +138,57 @@
 </div>
 
 <script>
+async function loadWatchlist(){
+  const r = await fetch('/api/watchlist');
+  const list = await r.json();
+  const wrap = document.getElementById('watchlist-items');
+  if (!list.length){ wrap.innerHTML = '<span class="muted">ما فيه عملات مضافة بعد.</span>'; return; }
+  wrap.innerHTML = list.map(sym => `
+    <span style="display:inline-flex; align-items:center; gap:6px; background:var(--dark-accent); padding:6px 12px; border-radius:20px; font-size:13px;">
+      ${sym}
+      <span style="cursor:pointer; color:var(--red); font-weight:800;" onclick="removeWatchlistSymbol('${sym}')">✕</span>
+    </span>`).join('');
+}
+async function addWatchlistSymbol(){
+  const input = document.getElementById('watchlist-input');
+  const symbol = input.value.trim();
+  if (!symbol) return;
+  await fetch('/api/watchlist/add', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({symbol})});
+  input.value = '';
+  loadWatchlist();
+}
+async function removeWatchlistSymbol(symbol){
+  await fetch('/api/watchlist/remove', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({symbol})});
+  loadWatchlist();
+}
+loadWatchlist();
+
+async function loadTelegramContacts(){
+  const r = await fetch('/api/telegram/contacts');
+  const list = await r.json();
+  const wrap = document.getElementById('telegram-contacts-items');
+  if (!list.length){ wrap.innerHTML = '<span class="muted">ما فيه جهات اتصال مضافة بعد.</span>'; return; }
+  wrap.innerHTML = list.map(c => `
+    <div class="row" style="justify-content:space-between; align-items:center; background:var(--dark-accent); padding:8px 12px; border-radius:8px;">
+      <span><b>${c.name}</b> <span class="muted">— ${c.chat_id}</span></span>
+      <span style="cursor:pointer; color:var(--red); font-weight:800;" onclick="removeTelegramContact('${c.chat_id}')">✕ حذف</span>
+    </div>`).join('');
+}
+async function addTelegramContact(){
+  const nameInput = document.getElementById('telegram-name-input');
+  const chatIdInput = document.getElementById('telegram-chatid-input');
+  const chat_id = chatIdInput.value.trim();
+  if (!chat_id){ alert('أدخل Chat ID أولاً.'); return; }
+  await fetch('/api/telegram/contacts/add', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name: nameInput.value.trim(), chat_id})});
+  nameInput.value = ''; chatIdInput.value = '';
+  loadTelegramContacts();
+}
+async function removeTelegramContact(chat_id){
+  await fetch('/api/telegram/contacts/remove', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({chat_id})});
+  loadTelegramContacts();
+}
+loadTelegramContacts();
+
 async function saveBackupSettings(){
   const payload = {
     is_auto_backup_enabled: document.getElementById('backup-enabled').checked,

@@ -3,6 +3,7 @@ import os
 import sqlite3
 import time
 import threading
+import json
 from typing import Optional, List, Dict, Any
 
 DB_PATH = os.environ.get("ORION_DB_PATH", os.path.join(os.path.dirname(__file__), "..", "data", "orion.db"))
@@ -14,12 +15,14 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "scan_interval_seconds": 30,
     "telegram_token": "",
     "telegram_chat_ids": "",
+    "telegram_contacts_json": "[]",  # [{"name": "...", "chat_id": "..."}, ...] — المصدر الأصلي، telegram_chat_ids مشتق منه تلقائياً
     "min_probability": 70,
     "is_auto_scanning": 1,
     "is_telegram_enabled": 1,
     "selected_symbols": "BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,DOGEUSDT,XRPUSDT,ADAUSDT",
     "is_single_coin_mode_enabled": 0,
     "single_coin_symbol": "BTCUSDT",
+    "watchlist_json": '["BTCUSDT"]',  # المصدر الأصلي لقائمة المراقبة، single_coin_symbol مشتق منه تلقائياً
     "symbols_limit": 10,
     "is_volume_filter_enabled": 0,
     "min_volume_ratio": 0.8,
@@ -274,6 +277,68 @@ def clear_signals():
     with _lock, _connect() as conn:
         conn.execute("DELETE FROM trade_signals")
         conn.commit()
+
+
+def get_telegram_contacts() -> List[Dict[str, str]]:
+    s = get_settings()
+    try:
+        return json.loads(s.get("telegram_contacts_json") or "[]")
+    except Exception:
+        return []
+
+
+def add_telegram_contact(name: str, chat_id: str):
+    contacts = get_telegram_contacts()
+    chat_id = chat_id.strip()
+    if not any(c["chat_id"] == chat_id for c in contacts):
+        contacts.append({"name": name.strip() or chat_id, "chat_id": chat_id})
+    _save_telegram_contacts(contacts)
+    return contacts
+
+
+def remove_telegram_contact(chat_id: str):
+    contacts = [c for c in get_telegram_contacts() if c["chat_id"] != chat_id]
+    _save_telegram_contacts(contacts)
+    return contacts
+
+
+def _save_telegram_contacts(contacts: List[Dict[str, str]]):
+    update_settings({
+        "telegram_contacts_json": json.dumps(contacts, ensure_ascii=False),
+        "telegram_chat_ids": ",".join(c["chat_id"] for c in contacts),
+    })
+
+
+def get_watchlist() -> List[str]:
+    s = get_settings()
+    try:
+        return json.loads(s.get("watchlist_json") or "[]")
+    except Exception:
+        return []
+
+
+def add_watchlist_symbol(symbol: str):
+    symbol = symbol.strip().upper()
+    if symbol and not symbol.endswith(("USDT", "BUSD")):
+        symbol += "USDT"
+    watchlist = get_watchlist()
+    if symbol and symbol not in watchlist:
+        watchlist.append(symbol)
+    _save_watchlist(watchlist)
+    return watchlist
+
+
+def remove_watchlist_symbol(symbol: str):
+    watchlist = [s for s in get_watchlist() if s != symbol]
+    _save_watchlist(watchlist)
+    return watchlist
+
+
+def _save_watchlist(watchlist: List[str]):
+    update_settings({
+        "watchlist_json": json.dumps(watchlist, ensure_ascii=False),
+        "single_coin_symbol": ",".join(watchlist),
+    })
 
 
 def export_backup() -> Dict[str, Any]:

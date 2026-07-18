@@ -208,6 +208,63 @@ async def api_learning_settings(request: Request):
     return {"ok": True}
 
 
+@app.get("/api/telegram/contacts")
+def api_telegram_contacts_list(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return db.get_telegram_contacts()
+
+
+@app.post("/api/telegram/contacts/add")
+async def api_telegram_contacts_add(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    chat_id = (body.get("chat_id") or "").strip()
+    if not chat_id:
+        return {"success": False, "message": "أدخل معرّف Chat ID."}
+    contacts = db.add_telegram_contact(name, chat_id)
+    return {"success": True, "contacts": contacts}
+
+
+@app.post("/api/telegram/contacts/remove")
+async def api_telegram_contacts_remove(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    body = await request.json()
+    contacts = db.remove_telegram_contact((body.get("chat_id") or "").strip())
+    return {"success": True, "contacts": contacts}
+
+
+@app.get("/api/watchlist")
+def api_watchlist_list(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return db.get_watchlist()
+
+
+@app.post("/api/watchlist/add")
+async def api_watchlist_add(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    body = await request.json()
+    symbol = (body.get("symbol") or "").strip()
+    if not symbol:
+        return {"success": False, "message": "أدخل رمز العملة."}
+    watchlist = db.add_watchlist_symbol(symbol)
+    return {"success": True, "watchlist": watchlist}
+
+
+@app.post("/api/watchlist/remove")
+async def api_watchlist_remove(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    body = await request.json()
+    watchlist = db.remove_watchlist_symbol((body.get("symbol") or "").strip())
+    return {"success": True, "watchlist": watchlist}
+
+
 @app.post("/api/backup/auto-settings")
 async def api_backup_auto_settings(request: Request):
     if not is_logged_in(request):
