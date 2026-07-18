@@ -71,6 +71,9 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "coin_learning_min_trades": 5,       # الحد الأدنى من الصفقات المغلقة قبل ما ناخذ قرار بناءً على الأداء
     "coin_learning_weak_threshold": 35,  # أقل من هذه النسبة % = سجل ضعيف، يرفع شرط الدخول
     "coin_learning_strong_threshold": 70,  # أعلى من هذه النسبة % = سجل قوي، يخفف شرط الدخول قليلاً
+    "strategy_learning_min_trades": 10,   # نفس الفكرة لكن على مستوى الاستراتيجية ككل (كل العملات مجتمعة)
+    "strategy_learning_weak_threshold": 35,
+    "strategy_learning_strong_threshold": 70,
 }
 
 

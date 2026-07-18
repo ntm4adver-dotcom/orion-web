@@ -182,7 +182,7 @@ class ScannerState:
             time.sleep(0.2)
 
     def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k5m):
-        req_prob, learning_msg = learning.effective_threshold(result.symbol, result.side, settings)
+        req_prob, learning_msg = learning.effective_threshold(result.symbol, result.side, settings, strategy_key=strategy_key)
         if learning_msg:
             db.add_log(learning_msg)
 

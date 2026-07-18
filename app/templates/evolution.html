@@ -8,8 +8,8 @@
   <h3>⚖️ مقارنة أداء الاستراتيجيات</h3>
   <p class="muted" style="margin-bottom:12px;">مقارنة حقيقية من نتائج الصفقات المغلقة فعلياً — أي استراتيجية جديدة تُضاف تلقائياً بهذا الجدول بدون أي إعداد إضافي.</p>
   <table id="strategy-table">
-    <thead><tr><th>الاستراتيجية</th><th>إجمالي الصفقات</th><th>مغلقة</th><th>رابحة</th><th>خاسرة</th><th>نسبة النجاح</th></tr></thead>
-    <tbody><tr><td colspan="6" class="muted">جاري التحميل...</td></tr></tbody>
+    <thead><tr><th>الاستراتيجية</th><th>إجمالي الصفقات</th><th>مغلقة</th><th>رابحة</th><th>خاسرة</th><th>نسبة النجاح</th><th>الحد الأدنى الفعّال حالياً</th></tr></thead>
+    <tbody><tr><td colspan="7" class="muted">جاري التحميل...</td></tr></tbody>
   </table>
 </div>
 
@@ -24,12 +24,22 @@
 </div>
 
 <div class="card">
-  <div class="switch"><input type="checkbox" id="learning-toggle" {{ 'checked' if s.is_coin_learning_enabled }} onchange="toggleLearning(this.checked)"> <label style="margin:0;">تفعيل محرك التعلم الذاتي</label></div>
-  <div class="row" style="margin-top:12px;">
-    <div><label>الحد الأدنى من الصفقات المغلقة قبل اعتماد السجل</label><input type="number" id="min-trades" value="{{ s.coin_learning_min_trades }}" onchange="saveThresholds()"></div>
+  <div class="switch"><input type="checkbox" id="learning-toggle" {{ 'checked' if s.is_coin_learning_enabled }} onchange="toggleLearning(this.checked)"> <label style="margin:0;">تفعيل محرك التعلم الذاتي (عملة + استراتيجية معاً)</label></div>
+
+  <h4 style="margin:16px 0 8px;">📍 مستوى العملة (لكل عملة+اتجاه على حدة)</h4>
+  <div class="row">
+    <div><label>الحد الأدنى من الصفقات المغلقة</label><input type="number" id="min-trades" value="{{ s.coin_learning_min_trades }}" onchange="saveThresholds()"></div>
     <div><label>سجل ضعيف (أقل من %)</label><input type="number" id="weak-th" value="{{ s.coin_learning_weak_threshold }}" onchange="saveThresholds()"></div>
     <div><label>سجل قوي (أعلى من أو يساوي %)</label><input type="number" id="strong-th" value="{{ s.coin_learning_strong_threshold }}" onchange="saveThresholds()"></div>
   </div>
+
+  <h4 style="margin:16px 0 8px;">📊 مستوى الاستراتيجية ككل (كل العملات مجتمعة)</h4>
+  <div class="row">
+    <div><label>الحد الأدنى من الصفقات المغلقة</label><input type="number" id="strat-min-trades" value="{{ s.strategy_learning_min_trades }}" onchange="saveThresholds()"></div>
+    <div><label>أداء ضعيف (أقل من %)</label><input type="number" id="strat-weak-th" value="{{ s.strategy_learning_weak_threshold }}" onchange="saveThresholds()"></div>
+    <div><label>أداء قوي (أعلى من أو يساوي %)</label><input type="number" id="strat-strong-th" value="{{ s.strategy_learning_strong_threshold }}" onchange="saveThresholds()"></div>
+  </div>
+  <p class="muted" style="margin-top:8px; font-size:12px;">⚠️ التذكير المهم: نسبة "الاحتمال %" المعروضة بكل إشارة هي تقييم داخلي بمعادلة نقاط، مو نسبة نجاح مُختبرة تاريخياً. محرك التعلم هذا هو الآلية الوحيدة اللي تربط القرارات فعلياً بنتائج حقيقية من السوق.</p>
 </div>
 
 <div class="card">
@@ -73,6 +83,9 @@ function buildLearningPayload(learningChecked){
     coin_learning_min_trades: document.getElementById('min-trades').value,
     coin_learning_weak_threshold: document.getElementById('weak-th').value,
     coin_learning_strong_threshold: document.getElementById('strong-th').value,
+    strategy_learning_min_trades: document.getElementById('strat-min-trades').value,
+    strategy_learning_weak_threshold: document.getElementById('strat-weak-th').value,
+    strategy_learning_strong_threshold: document.getElementById('strat-strong-th').value,
   };
 }
 
@@ -91,7 +104,7 @@ async function loadStrategyPerformance(){
   const data = await r.json();
   const tbody = document.querySelector('#strategy-table tbody');
   if (!data.length){
-    tbody.innerHTML = '<tr><td colspan="6" class="muted">ما فيه صفقات مسجّلة بعد.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="muted">ما فيه صفقات مسجّلة بعد.</td></tr>';
     return;
   }
   tbody.innerHTML = data.map(p => `
@@ -102,6 +115,7 @@ async function loadStrategyPerformance(){
       <td style="color:var(--green);">${p.wins}</td>
       <td style="color:var(--red);">${p.losses}</td>
       <td><b>${p.closed_total > 0 ? p.win_rate + '%' : '—'}</b></td>
+      <td>${p.effective_threshold}%</td>
     </tr>`).join('');
 }
 

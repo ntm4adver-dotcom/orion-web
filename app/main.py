@@ -204,6 +204,9 @@ async def api_learning_settings(request: Request):
         "coin_learning_min_trades": body.get("coin_learning_min_trades", 5),
         "coin_learning_weak_threshold": body.get("coin_learning_weak_threshold", 35),
         "coin_learning_strong_threshold": body.get("coin_learning_strong_threshold", 70),
+        "strategy_learning_min_trades": body.get("strategy_learning_min_trades", 10),
+        "strategy_learning_weak_threshold": body.get("strategy_learning_weak_threshold", 35),
+        "strategy_learning_strong_threshold": body.get("strategy_learning_strong_threshold", 70),
     }
     db.update_settings(updates)
     return {"ok": True}
@@ -376,9 +379,13 @@ async def api_backup_import(request: Request):
 def api_strategy_performance(request: Request):
     if not is_logged_in(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
+    settings = db.get_settings()
     perf = db.get_strategy_performance()
     for p in perf:
         p["label"] = strategy_label(p["strategy"]) if p["strategy"] != "غير محدد" else "غير محدد (صفقات قديمة قبل هذا التحديث)"
+        adj, _ = learning.get_strategy_adjustment(p["strategy"], settings)
+        base = int(settings.get("min_probability", 70))
+        p["effective_threshold"] = max(50, min(95, base + adj))
     return perf
 
 
