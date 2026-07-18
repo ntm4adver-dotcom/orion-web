@@ -32,7 +32,8 @@
   <button class="filter-chip active" data-filter="all" onclick="setFilter('all')">الكل (<span id="c-all">0</span>)</button>
   <button class="filter-chip" data-filter="ACTIVE" onclick="setFilter('ACTIVE')">نشطة (<span id="c-active">0</span>)</button>
   <button class="filter-chip" data-filter="PENDING" onclick="setFilter('PENDING')">معلقة (<span id="c-pending">0</span>)</button>
-  <button class="filter-chip" data-filter="CLOSED" onclick="setFilter('CLOSED')">الأهداف (<span id="c-closed">0</span>)</button>
+  <button class="filter-chip" data-filter="HIT_TP" onclick="setFilter('HIT_TP')">🎯 الأهداف (<span id="c-goals">0</span>)</button>
+  <button class="filter-chip" data-filter="HIT_SL" onclick="setFilter('HIT_SL')">🛑 وقف الخسارة (<span id="c-stopped">0</span>)</button>
 </div>
 
 <div id="signals-list"></div>
@@ -196,12 +197,14 @@ function renderSignals(){
     all: allSignals.length,
     ACTIVE: allSignals.filter(s => s.status === 'ACTIVE').length,
     PENDING: allSignals.filter(s => s.status === 'PENDING').length,
-    CLOSED: allSignals.filter(s => ['HIT_TP','HIT_SL','CANCELLED','REPLACED'].includes(s.status)).length,
+    HIT_TP: allSignals.filter(s => s.status === 'HIT_TP').length,
+    HIT_SL: allSignals.filter(s => s.status === 'HIT_SL').length,
   };
   document.getElementById('c-all').innerText = counts.all;
   document.getElementById('c-active').innerText = counts.ACTIVE;
   document.getElementById('c-pending').innerText = counts.PENDING;
-  document.getElementById('c-closed').innerText = counts.CLOSED;
+  document.getElementById('c-goals').innerText = counts.HIT_TP;
+  document.getElementById('c-stopped').innerText = counts.HIT_SL;
   document.getElementById('total-count').innerText = `(${counts.all})`;
 
   const wins = allSignals.filter(s => s.status === 'HIT_TP').length;
@@ -213,7 +216,8 @@ function renderSignals(){
 
   if (currentFilter === 'ACTIVE') list = list.filter(s => s.status === 'ACTIVE');
   else if (currentFilter === 'PENDING') list = list.filter(s => s.status === 'PENDING');
-  else if (currentFilter === 'CLOSED') list = list.filter(s => ['HIT_TP','HIT_SL','CANCELLED','REPLACED'].includes(s.status));
+  else if (currentFilter === 'HIT_TP') list = list.filter(s => s.status === 'HIT_TP');
+  else if (currentFilter === 'HIT_SL') list = list.filter(s => s.status === 'HIT_SL');
 
   const container = document.getElementById('signals-list');
   if (list.length === 0){
