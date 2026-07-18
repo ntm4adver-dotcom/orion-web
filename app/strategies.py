@@ -14,6 +14,7 @@
 from .analyzer import analyze
 from .ict_strategy import analyze_ict_smart_sweep
 from .hybrid_strategy import analyze_hybrid_confirmation
+from .ict_guided_strategy import analyze_ict_guided_entry
 
 # كل استراتيجية: مفتاح فريد -> {label: الاسم المعروض, fn: دالة التحليل}
 # توقيع دالة التحليل الموحّد: fn(symbol, k4h, k1h, k15m, k5m, k_daily, micro=None) -> Optional[AnalysisResult]
@@ -27,8 +28,12 @@ STRATEGY_REGISTRY = {
         "fn": analyze_ict_smart_sweep,
     },
     "hybrid_confirmation": {
-        "label": "🔗 التأكيد المزدوج (انفجار سعري ← تأكيد ICT يحدد نقاط الدخول/الخروج)",
+        "label": "🔗 التأكيد المزدوج (يشترط تأكيد ICT، وإلا تُرفض الصفقة)",
         "fn": analyze_hybrid_confirmation,
+    },
+    "ict_guided_entry": {
+        "label": "🎯 الانفجار الموجّه بـICT (بدون رفض — ICT يحسّن الدخول إن توفر فقط)",
+        "fn": analyze_ict_guided_entry,
     },
 }
 
