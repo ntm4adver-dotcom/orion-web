@@ -152,6 +152,83 @@ async def trading_execution_save(request: Request):
 # JSON API (polled by dashboard JS)
 # ---------------------------------------------------------------------------
 
+@app.get("/diagnose")
+def diagnose_page(request: Request):
+    g = _guard(request)
+    if g:
+        return g
+    return templates.TemplateResponse("diagnose.html", {"request": request, "active": "diagnose", "s": db.get_settings()})
+
+
+@app.get("/api/diagnose")
+def api_diagnose(request: Request, symbol: str):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    from . import binance_client, okx_client
+    from .analyzer import MarketMicrostructure, analyze_explosive_breakout
+    from .ict_strategy import analyze_ict_smart_sweep
+
+    symbol = symbol.strip().upper()
+    if not symbol.endswith("USDT"):
+        symbol += "USDT"
+
+    s = db.get_settings()
+    exchange = okx_client if s["exchange"] == "okx" else binance_client
+    exchange_name = "OKX" if s["exchange"] == "okx" else "Binance"
+
+    k4h = exchange.fetch_klines(symbol, "4h", 100)
+    k1h = exchange.fetch_klines(symbol, "1h", 100)
+    k15m = exchange.fetch_klines(symbol, "15m", 100)
+    k5m = exchange.fetch_klines(symbol, "5m", 150)
+    k_daily = exchange.fetch_klines(symbol, "1d", 100)
+
+    data_status = {
+        "4h": len(k4h), "1h": len(k1h), "15m": len(k15m), "5m": len(k5m), "1d": len(k_daily),
+    }
+
+    if len(k5m) < 30 or len(k1h) < 60:
+        return {
+            "symbol": symbol, "exchange": exchange_name, "data_status": data_status,
+            "error": "بيانات الشموع غير كافية لهذا الرمز — إما الرمز غير صحيح، أو المنصة لا تدرجه، أو فيه حظر مؤقت حالياً.",
+            "last_error": getattr(exchange, "last_error", {}).get(symbol),
+        }
+
+    micro = MarketMicrostructure(
+        oi_change_pct=exchange.fetch_open_interest_change_pct(symbol),
+        funding_rate=exchange.fetch_funding_rate(symbol),
+        ob_imbalance=exchange.fetch_order_book_imbalance(symbol),
+        taker_pressure=exchange.fetch_taker_pressure(symbol) if hasattr(exchange, "fetch_taker_pressure") else None,
+        long_short_ratio=exchange.fetch_long_short_ratio(symbol) if hasattr(exchange, "fetch_long_short_ratio") else None,
+        cvd_pct=exchange.get_cvd_24h_pct(symbol) if hasattr(exchange, "get_cvd_24h_pct") else None,
+    )
+
+    trace1: list = []
+    result1 = analyze_explosive_breakout(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro, trace=trace1)
+
+    trace2: list = []
+    result2 = analyze_ict_smart_sweep(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro, trace=trace2)
+
+    def _fmt_result(r):
+        if r is None:
+            return None
+        return {
+            "side": r.side, "probability": r.prob, "entry_price": r.entry_price,
+            "stop_loss": r.stop_loss, "take_profit": r.take_profit, "rr": r.rr, "quality": r.quality,
+        }
+
+    return {
+        "symbol": symbol, "exchange": exchange_name, "data_status": data_status,
+        "microstructure": {
+            "oi_change_pct": micro.oi_change_pct, "funding_rate": micro.funding_rate,
+            "ob_imbalance": micro.ob_imbalance, "taker_pressure": micro.taker_pressure,
+            "long_short_ratio": micro.long_short_ratio, "cvd_pct": micro.cvd_pct,
+        },
+        "explosive_breakout": {"result": _fmt_result(result1), "trace": trace1},
+        "ict_smart_sweep": {"result": _fmt_result(result2), "trace": trace2},
+    }
+
+
 @app.get("/api/status")
 def api_status(request: Request):
     if not is_logged_in(request):

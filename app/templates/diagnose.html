@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}تشخيص - Orion{% endblock %}
+{% block content %}
+
+<h2>🔬 تشخيص حقيقي مباشر</h2>
+<div class="card">
+  <p class="muted" style="line-height:1.9; margin:0;">
+    هذي الأداة تجيب بيانات <b>حقيقية الآن من السوق</b> لعملة تحددها، وتشغّل عليها كلا الاستراتيجيتين
+    خطوة بخطوة، وتوريك بالضبط أي شرط تحقق وأي شرط فشل — بأرقام حقيقية، مو رسالة عامة.
+    استخدمها للتأكد إن التحليل يشتغل صح، أو لفهم ليش عملة معينة ما طلعت لها إشارة.
+  </p>
+</div>
+
+<div class="card">
+  <div class="row" style="align-items:flex-end;">
+    <div style="flex:1;">
+      <label>رمز العملة (مثال: BTC أو BTCUSDT)</label>
+      <input type="text" id="symbol-input" placeholder="BTC" onkeydown="if(event.key==='Enter') runDiagnose();">
+    </div>
+    <button onclick="runDiagnose()" id="diagnose-btn" style="height:42px;">🔬 شخّص الآن</button>
+  </div>
+</div>
+
+<div id="diagnose-result"></div>
+
+<style>
+.trace-row{ display:flex; justify-content:space-between; align-items:center; padding:8px 10px; border-radius:8px; margin-bottom:4px; font-size:13px; }
+.trace-row.pass{ background:rgba(34,197,94,.08); }
+.trace-row.fail{ background:rgba(239,68,68,.10); }
+.trace-row.neutral{ background:#0f1320; }
+.trace-icon{ width:20px; text-align:center; }
+.micro-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(140px,1fr)); gap:10px; margin-top:10px; }
+.micro-box{ background:#0f1320; border-radius:10px; padding:10px; text-align:center; }
+.micro-box .lbl{ font-size:11px; color:var(--text-sec); }
+.micro-box .val{ font-weight:800; font-size:15px; margin-top:4px; }
+</style>
+
+<script>
+async function runDiagnose(){
+  const symbolInput = document.getElementById('symbol-input');
+  const symbol = symbolInput.value.trim();
+  if (!symbol) return;
+  const btn = document.getElementById('diagnose-btn');
+  const resultDiv = document.getElementById('diagnose-result');
+  btn.disabled = true;
+  btn.innerText = '⏳ جاري الجلب من السوق...';
+  resultDiv.innerHTML = '<div class="card muted" style="text-align:center;">جاري سحب بيانات حقيقية الآن وتشغيل التحليل الكامل — قد يأخذ بضع ثوانٍ...</div>';
+
+  try {
+    const r = await fetch('/api/diagnose?symbol=' + encodeURIComponent(symbol));
+    const data = await r.json();
+    renderDiagnose(data);
+  } catch(e) {
+    resultDiv.innerHTML = '<div class="card" style="color:var(--red);">خطأ بالاتصال: ' + e + '</div>';
+  } finally {
+    btn.disabled = false;
+    btn.innerText = '🔬 شخّص الآن';
+  }
+}
+
+function fmtVal(v){
+  if (v === null || v === undefined) return '—';
+  if (typeof v === 'boolean') return v ? '✅ نعم' : '❌ لا';
+  return v;
+}
+
+function renderTrace(trace){
+  if (!trace || !trace.length) return '<p class="muted">لا يوجد تتبع لهذا التحليل.</p>';
+  return trace.map(t => {
+    let cls = 'neutral';
+    if (t.ok === true) cls = 'pass';
+    else if (t.ok === false) cls = 'fail';
+    const icon = t.ok === true ? '✅' : (t.ok === false ? '❌' : '▫️');
+    return `<div class="trace-row ${cls}"><span class="trace-icon">${icon}</span><span style="flex:1; text-align:right; margin-inline-end:10px;">${t.check}</span><span style="font-weight:700;">${fmtVal(t.value)}</span></div>`;
+  }).join('');
+}
+
+function renderStrategyBlock(title, block){
+  const res = block.result;
+  const header = res
+    ? `<div style="background:rgba(34,197,94,.1); color:var(--green); padding:10px; border-radius:10px; margin-bottom:10px; font-weight:800;">
+         ✅ تم توليد إشارة: ${res.side} | احتمالية ${res.probability}% | دخول ${res.entry_price} | وقف ${res.stop_loss} | هدف ${res.take_profit} | R:R 1:${res.rr}
+       </div>`
+    : `<div style="background:rgba(239,68,68,.08); color:var(--red); padding:10px; border-radius:10px; margin-bottom:10px; font-weight:800;">
+         ❌ لم تتحقق شروط هذي الاستراتيجية الآن على هذي العملة
+       </div>`;
+  return `<div class="card"><h3>${title}</h3>${header}${renderTrace(block.trace)}</div>`;
+}
+
+function renderDiagnose(data){
+  const resultDiv = document.getElementById('diagnose-result');
+  if (data.error){
+    resultDiv.innerHTML = `<div class="card" style="color:var(--red);">
+      <b>${data.symbol}</b> (${data.exchange}) — ${data.error}
+      ${data.last_error ? '<br><span class="muted">تفاصيل: ' + data.last_error + '</span>' : ''}
+      <br><span class="muted">حالة البيانات: 4س=${data.data_status['4h']}, 1س=${data.data_status['1h']}, 15د=${data.data_status['15m']}, 5د=${data.data_status['5m']}, يومي=${data.data_status['1d']}</span>
+    </div>`;
+    return;
+  }
+
+  let html = `<div class="card">
+    <div class="flex-between"><h3>${data.symbol} — ${data.exchange}</h3><span class="muted">تحديث: الآن</span></div>
+    <div class="micro-grid">
+      <div class="micro-box"><div class="lbl">تغيّر OI</div><div class="val">${data.microstructure.oi_change_pct !== null ? data.microstructure.oi_change_pct.toFixed(2)+'%' : '—'}</div></div>
+      <div class="micro-box"><div class="lbl">معدل التمويل</div><div class="val">${data.microstructure.funding_rate !== null ? (data.microstructure.funding_rate*100).toFixed(4)+'%' : '—'}</div></div>
+      <div class="micro-box"><div class="lbl">توازن الأوامر</div><div class="val">${data.microstructure.ob_imbalance !== null ? data.microstructure.ob_imbalance.toFixed(2) : '—'}</div></div>
+      <div class="micro-box"><div class="lbl">ضغط المتداولين</div><div class="val">${data.microstructure.taker_pressure !== null ? data.microstructure.taker_pressure.toFixed(2) : '—'}</div></div>
+      <div class="micro-box"><div class="lbl">نسبة Long/Short</div><div class="val">${data.microstructure.long_short_ratio !== null ? data.microstructure.long_short_ratio.toFixed(2) : '—'}</div></div>
+      <div class="micro-box"><div class="lbl">CVD (24س)</div><div class="val">${data.microstructure.cvd_pct !== null ? data.microstructure.cvd_pct.toFixed(1)+'%' : '— (يحتاج وقت تجميع)'}</div></div>
+    </div>
+  </div>`;
+
+  html += renderStrategyBlock('⚡ الانفجار السعري (Explosive Breakout Hunter)', data.explosive_breakout);
+  html += renderStrategyBlock('🧠 النمط الذكي لسحب السيولة (ICT / Smart Money Concepts)', data.ict_smart_sweep);
+
+  resultDiv.innerHTML = html;
+}
+</script>
+{% endblock %}

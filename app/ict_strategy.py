@@ -62,11 +62,18 @@ def _find_high_volume_node(klines: List[Kline], zone_low: float, zone_high: floa
 
 def analyze_ict_smart_sweep(symbol: str, k4h: List[Kline], k1h: List[Kline], k15m: List[Kline],
                              k5m: List[Kline], k_daily: List[Kline],
-                             micro: Optional[MarketMicrostructure] = None) -> Optional[AnalysisResult]:
+                             micro: Optional[MarketMicrostructure] = None,
+                             trace: Optional[list] = None) -> Optional[AnalysisResult]:
+    def _log(label, value, ok=None):
+        if trace is not None:
+            trace.append({"check": label, "value": value, "ok": ok})
+
     if not k4h or not k1h or not k15m:
         return None
     if len(k1h) < 26 or len(k15m) < 15:
+        _log("عدد الشموع كافٍ (1س≥26، 15د≥15)", f"1س={len(k1h)}, 15د={len(k15m)}", False)
         return None
+    _log("عدد الشموع كافٍ", f"1س={len(k1h)}, 15د={len(k15m)}", True)
 
     last_price = k15m[-1].close
     atr_val = atr(k1h, 14)
@@ -75,7 +82,9 @@ def analyze_ict_smart_sweep(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
 
     # فلتر جلسة التداول (Kill Zone) — الاستراتيجية الأصلية تشترطه لكل إشارة
     if not in_kill_zone():
+        _log("❌ فلتر جلسة التداول (Kill Zone)", "الوقت الحالي خارج نطاق جلسات لندن/نيويورك النشطة — رفض إلزامي", False)
         return None
+    _log("✅ جلسة تداول نشطة (Kill Zone)", "داخل النطاق", True)
 
     # 1) الاتجاه العام على 4 ساعات
     trend4h = _get_bias(k4h)
@@ -87,6 +96,8 @@ def analyze_ict_smart_sweep(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
 
     coin_trend = daily_trend(k_daily) if k_daily else trend4h
     market_trend_value = 70 if coin_trend == "صاعد" else 30
+    _log("اتجاه 4 ساعات", trend4h)
+    _log("اتجاه العملة اليومي", coin_trend)
 
     # 2) سحب سيولة على فريم الساعة
     is_bullish_sweep = False
@@ -112,6 +123,9 @@ def analyze_ict_smart_sweep(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
             is_bearish_sweep = True
             sweep_high_value = max_high_recent
 
+    _log("سحب سيولة صاعد (1H)", is_bullish_sweep)
+    _log("سحب سيولة هابط (1H)", is_bearish_sweep)
+
     # 3) فجوة سعرية (FVG) مباشرة بعد السحب على فريم الساعة
     bullish_fvg_exists = False
     bearish_fvg_exists = False
@@ -124,6 +138,9 @@ def analyze_ict_smart_sweep(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
                 bullish_fvg_exists = True
             if c1.low - c3.high >= min_gap:
                 bearish_fvg_exists = True
+
+    _log("فجوة سعرية صاعدة (FVG)", bullish_fvg_exists)
+    _log("فجوة سعرية هابطة (FVG)", bearish_fvg_exists)
 
     # 4) كسر الهيكل (CHoCH) على فريم 15 دقيقة
     bullish_choch = False
@@ -139,6 +156,9 @@ def analyze_ict_smart_sweep(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
             if last_close < prev_swing_low:
                 bearish_choch = True
 
+    _log("كسر هيكل صاعد (CHoCH)", bullish_choch)
+    _log("كسر هيكل هابط (CHoCH)", bearish_choch)
+
     is_long_setup = (trend4h == "صاعد" and is_bullish_sweep and bullish_fvg_exists and bullish_choch
                       and coin_trend == "صاعد" and market_trend_value >= 50)
     is_short_setup = (trend4h == "هابط" and is_bearish_sweep and bearish_fvg_exists and bearish_choch
@@ -146,9 +166,12 @@ def analyze_ict_smart_sweep(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
 
     matched = is_long_setup or is_short_setup
     if not matched:
+        _log("❌ القرار النهائي", "لم تتحقق كل الشروط الخمسة بنفس الوقت (اتجاه 4س + سحب سيولة + FVG + CHoCH + اتجاه يومي) — هذا سبب الرفض", False)
         return None
 
     side = "Long" if is_long_setup else "Short"
+    if trace is not None:
+        trace.append({"check": "✅ كل الشروط الخمسة تحققت بنفس الوقت", "value": side, "ok": True})
 
     if side == "Long":
         swing_low = sweep_low_value if sweep_low_value > 0 else min(k.low for k in k15m[-20:])
@@ -211,6 +234,7 @@ def analyze_ict_smart_sweep(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
     oi_change_pct = micro.oi_change_pct if micro else None
     if oi_change_pct is not None and oi_change_pct < -1.5:
         # فائدة مفتوحة تنخفض بقوة أثناء إعداد الصفقة = سيولة تخرج من السوق، إشارة ضعف حقيقي
+        _log("❌ فلتر الفائدة المفتوحة (OI)", f"تغيّر OI={oi_change_pct:.2f}% (أقل من -1.5%) — رفض", False)
         return None
 
     probability = 72

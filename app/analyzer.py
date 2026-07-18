@@ -276,9 +276,16 @@ def analyze_explosive_breakout(
     k_daily: List[Kline],
     min_rr_floor: float = 3.0,
     micro: Optional[MarketMicrostructure] = None,
+    trace: Optional[list] = None,
 ) -> Optional[AnalysisResult]:
+    def _log(label, value, ok=None):
+        if trace is not None:
+            trace.append({"check": label, "value": value, "ok": ok})
+
     if len(k5m) < 30 or len(k1h) < 60:
+        _log("عدد الشموع كافٍ (5د≥30، 1س≥60)", f"5د={len(k5m)}, 1س={len(k1h)}", False)
         return None
+    _log("عدد الشموع كافٍ", f"5د={len(k5m)}, 1س={len(k1h)}", True)
 
     last_k5m = k5m[-1]
     prev_k5m = k5m[-2]
@@ -351,6 +358,15 @@ def analyze_explosive_breakout(
     is_triggered = False
     is_early_entry = False
 
+    _log("اتجاه فريم الساعة (1H Bias)", h1_trend)
+    _log("عرض نطاق البولينجر (Band Width)", round(band_width, 5))
+    _log("انضغاط السعر (Compression)", is_compressed)
+    _log("مؤشر RSI (5د)", round(rsi_val, 1))
+    _log("معدل الفوليوم الحالي مقابل المتوسط", f"{vol_ratio:.2f}x")
+    _log("نسبة جسم الشمعة للنطاق الكامل", round(body_ratio, 2))
+    _log("السعر الحالي", last_price)
+    _log("النطاق العلوي/السفلي للبولينجر", f"{lower:.6g} / {upper:.6g}")
+
     # ---- PATH A: Pre-Breakout Early Trigger ----
     if is_compressed and len(k5m) >= 3:
         last3 = k5m[-3:]
@@ -363,6 +379,9 @@ def analyze_explosive_breakout(
         elif (h1_trend == "هابط" and last_price <= lower * 1.002 and rsi_val < 55.0 and not rsi_rising
                 and vol_ratio > 1.7 and vol_accelerating and body_ratio > 0.55 and closes_near_low and lower_highs):
             side, is_triggered, is_early_entry = "Short", True, True
+        _log("مسار أ: دخول مبكر قبل الاختراق (يحتاج انضغاط + زخم مبكر)", f"صاعد={h1_trend=='صاعد'}, RSI صاعد={rsi_rising}, فوليوم>1.7x={vol_ratio>1.7}", is_triggered)
+    else:
+        _log("مسار أ: دخول مبكر", "السعر غير منضغط حالياً (شرط أساسي للمسار)، تم تخطي هذا المسار", False)
 
     # ---- PATH B: Confirmed Breakout Trigger ----
     if not is_triggered:
@@ -372,19 +391,28 @@ def analyze_explosive_breakout(
         elif (h1_trend == "هابط" and last_price < lower and rsi_val < 50.0
                 and last_k5m.volume > avg_vol20 * 2.5 and body_ratio > 0.45 and closes_near_low):
             side, is_triggered = "Short", True
+        _log("مسار ب: اختراق مؤكَّد (يحتاج تجاوز فعلي للنطاق + فوليوم>2.5x)",
+             f"تجاوز النطاق={'نعم' if (last_price>upper or last_price<lower) else 'لا'}, فوليوم={last_k5m.volume/avg_vol20:.2f}x" if avg_vol20 > 0 else "n/a",
+             is_triggered)
 
     if not is_triggered:
+        _log("❌ القرار النهائي", "لا يوجد اختراق أو دخول مبكر مؤكَّد بأي من المسارين — هذا سبب الرفض", False)
         return None
+    _log("✅ الاتجاه المرشَّح", side, True)
 
     if detect_fakeout_rejection(k5m, side, lookback=3):
+        _log("❌ فلتر فخ الاختراق (Fakeout Rejection)", "اكتُشف نمط فخ اختراق حديث — رفض", False)
         return None
 
     if detect_immediate_reversal_after_sweep(k5m, side):
+        _log("❌ فلتر الانعكاس الفوري بعد السحب", "اكتُشف انعكاس فوري بعد سحب سيولة — رفض", False)
         return None
 
     oi_change_pct = micro.oi_change_pct if micro else None
     if oi_change_pct is not None and oi_change_pct < -1.0:
+        _log("❌ فلتر الفائدة المفتوحة (OI)", f"تغيّر OI={oi_change_pct:.2f}% (أقل من -1%) — رفض", False)
         return None
+    _log("الفائدة المفتوحة (OI) تغيّر", f"{oi_change_pct:.2f}%" if oi_change_pct is not None else "غير متوفرة")
 
     # ✅ شرط إلزامي جديد: التحقق الحقيقي من اتجاه الفوليوم الداخل وقت الاختراق
     # (Taker Buy/Sell Pressure) — هذا يجاوب سؤال "هل الفوليوم اللي دخل فعلاً كان
@@ -393,24 +421,32 @@ def analyze_explosive_breakout(
     # الصفقة بالكامل — هذا فحص إلزامي على كل الصفقات (مو بس الدخول المبكر).
     taker_pressure = micro.taker_pressure if micro else None
     if taker_pressure is None:
+        _log("❌ فلتر ضغط المتداولين الفعليين (إلزامي)", "تعذّر جلب بيانات الصفقات الفعلية من المنصة — رفض إلزامي بغض النظر عن باقي الشروط", False)
         return None  # ما قدرنا نتأكد من اتجاه الفوليوم الفعلي = لا ندخل
     if side == "Long" and taker_pressure < 0.10:
+        _log("❌ فلتر ضغط المتداولين الفعليين (إلزامي)", f"القيمة {taker_pressure:.2f} أقل من الحد الأدنى المطلوب (0.10) لصفقة شراء — رفض", False)
         return None  # الفوليوم الداخل ما يثبت ضغط شراء حقيقي يدعم الصفقة
     if side == "Short" and taker_pressure > -0.10:
+        _log("❌ فلتر ضغط المتداولين الفعليين (إلزامي)", f"القيمة {taker_pressure:.2f} أعلى من الحد الأقصى المسموح (-0.10) لصفقة بيع — رفض", False)
         return None  # الفوليوم الداخل ما يثبت ضغط بيع حقيقي يدعم الصفقة
+    _log("✅ فلتر ضغط المتداولين الفعليين (إلزامي)", f"{taker_pressure:.2f} — تجاوز الحد المطلوب", True)
 
     ob_imbalance = micro.ob_imbalance if micro else None
     if is_early_entry and ob_imbalance is not None:
         if side == "Long" and ob_imbalance < -0.15:
+            _log("❌ فلتر عمق السوق (دخول مبكر فقط)", f"توازن الأوامر {ob_imbalance:.2f} يعاكس صفقة الشراء — رفض", False)
             return None
         if side == "Short" and ob_imbalance > 0.15:
+            _log("❌ فلتر عمق السوق (دخول مبكر فقط)", f"توازن الأوامر {ob_imbalance:.2f} يعاكس صفقة البيع — رفض", False)
             return None
 
     entry_price = last_price
     sl = structural_stop_loss(k5m, side, entry_price, effective_atr, lookback=8)
     risk_distance = abs(entry_price - sl)
     if entry_price and risk_distance / entry_price < 0.0015:
+        _log("❌ فلتر أدنى مسافة وقف خسارة", f"المسافة {risk_distance/entry_price*100:.3f}% أقل من الحد الأدنى (0.15%) — السوق شبه ساكن", False)
         return None
+    _log("✅ كل الشروط تحققت — تم توليد إشارة", side, True)
 
     measured_move = max_high_c - min_low_c
     tp1 = entry_price + max(effective_atr * 2.5, measured_move) if side == "Long" else entry_price - max(effective_atr * 2.5, measured_move)
@@ -522,6 +558,6 @@ def analyze_explosive_breakout(
     )
 
 
-def analyze(symbol: str, k4h, k1h, k15m, k5m, k_daily, micro=None) -> Optional[AnalysisResult]:
+def analyze(symbol: str, k4h, k1h, k15m, k5m, k_daily, micro=None, trace=None) -> Optional[AnalysisResult]:
     """نقطة الدخول الرئيسية — تعادل OrionAnalyzer.analyze في الأصل (استراتيجية واحدة فقط)."""
-    return analyze_explosive_breakout(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro)
+    return analyze_explosive_breakout(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro, trace=trace)
