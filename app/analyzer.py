@@ -28,8 +28,9 @@ class MarketMicrostructure:
     oi_change_pct: Optional[float] = None
     funding_rate: Optional[float] = None
     ob_imbalance: Optional[float] = None
-    taker_pressure: Optional[float] = None    # ضغط المتداولين الفعليين (-1 بيع كامل .. 1 شراء كامل)
+    taker_pressure: Optional[float] = None    # ضغط المتداولين الفعليين اللحظي (-1 بيع كامل .. 1 شراء كامل)
     long_short_ratio: Optional[float] = None  # نسبة تمركز الحسابات (>1 أغلبية شراء، <1 أغلبية بيع)
+    cvd_pct: Optional[float] = None           # CVD تراكمي 24 ساعة: 0%=بيع كامل, 50%=تعادل, 100%=شراء كامل
 
 
 @dataclass
@@ -453,6 +454,14 @@ def analyze_explosive_breakout(
         if crowded_same_side:
             prob -= 3
 
+    # CVD تراكمي 24 ساعة (Cumulative Volume Delta) — تأكيد إضافي بمنظور زمني أوسع من
+    # ضغط المتداولين اللحظي، يعكس هيمنة الشراء/البيع الفعلية على مدى اليوم كامل
+    cvd_pct = micro.cvd_pct if micro else None
+    if cvd_pct is not None:
+        cvd_aligned = (side == "Long" and cvd_pct > 60) or (side == "Short" and cvd_pct < 40)
+        if cvd_aligned:
+            prob += 3
+
     prob = max(70, min(95, prob))
 
     parts = []
@@ -475,6 +484,9 @@ def analyze_explosive_breakout(
     if long_short_ratio is not None:
         crowded_txt = "⚠️ ازدحام حسابات بنفس اتجاهنا - خطر تصفية مزدحمة" if ((side=='Long' and long_short_ratio>2.2) or (side=='Short' and long_short_ratio<0.45)) else "طبيعي"
         parts.append(f"👥 نسبة تمركز الحسابات (Long/Short): {long_short_ratio:.2f} - {crowded_txt}")
+    if cvd_pct is not None:
+        cvd_txt = "متوافق (تأكيد هيمنة شراء/بيع حقيقية على مدى اليوم)" if ((side=='Long' and cvd_pct>60) or (side=='Short' and cvd_pct<40)) else "محايد"
+        parts.append(f"📊 CVD تراكمي (24س): {cvd_pct:.1f}% شراء - {cvd_txt}")
     parts.append("🛡️ ستوب لوز هيكلي عند حدود منطقة التجميع - اختراقه يعني انعكاس حقيقي وليس فخ سيولة")
     parts.append(f"📈 توافق تام مع اتجاه فريم الساعة (1H Bias: {h1_trend})")
     parts.append(f"🎯 الهدف الأول (TP1): {tp1}")

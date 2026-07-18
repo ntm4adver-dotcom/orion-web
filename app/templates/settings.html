@@ -27,6 +27,20 @@
       <option value="okx" {{ 'selected' if s.exchange=='okx' }}>OKX</option>
     </select>
 
+    <label style="margin-top:14px; display:block;">معيار اختيار العملات للفحص</label>
+    <select name="symbol_selection_mode">
+      <option value="top_volume" {{ 'selected' if s.symbol_selection_mode=='top_volume' or not s.symbol_selection_mode }}>💰 الأعلى سيولة وحجم تداول (افتراضي)</option>
+      <option value="big_movers" {{ 'selected' if s.symbol_selection_mode=='big_movers' }}>🚀 الأكبر تحركاً سعرياً (Big Movers)</option>
+      <option value="high_funding" {{ 'selected' if s.symbol_selection_mode=='high_funding' }}>🔥 الأعلى تطرفاً بمعدل التمويل (High Funding)</option>
+      <option value="oi_spike" {{ 'selected' if s.symbol_selection_mode=='oi_spike' }}>📈 الأكبر قفزة بالفائدة المفتوحة (OI Spike)</option>
+    </select>
+    <p class="muted" style="margin-top:8px; font-size:12px; line-height:1.8;">
+      <b>الأعلى سيولة:</b> العملات الأنشط تداولاً — الخيار الأكثر استقراراً.<br>
+      <b>الأكبر تحركاً:</b> عملات تتحرك بقوة (صعوداً أو هبوطاً) خلال 24 ساعة — احتمال أعلى لالتقاط اختراقات نشطة.<br>
+      <b>أعلى تمويل:</b> عملات معدل تمويلها متطرف — إشارة ازدحام مراكز واحتمال انعكاس.<br>
+      <b>قفزة OI:</b> عملات شهدت ارتفاع مفاجئ بالفائدة المفتوحة — يحتاج دورتي فحص متتاليتين ليبدأ يعطي نتائج دقيقة (القياس الأول تأسيسي فقط).
+    </p>
+
     <label style="margin-top:14px; display:block;">استراتيجية التحليل النشطة</label>
     <select name="active_strategy">
       {% for key, label in strategy_options %}

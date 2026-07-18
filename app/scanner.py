@@ -101,8 +101,15 @@ class ScannerState:
         limit = settings.get("symbols_limit", 10)
         client = okx_client if settings["exchange"] == "okx" else binance_client
         exchange_name = "OKX" if settings["exchange"] == "okx" else "Binance"
-        db.add_log(f"جاري استعلام {exchange_name} عن أزواج العملات الأعلى حجماً وسيولةً في الـ 24 ساعة الماضية...")
-        symbols = client.fetch_top_symbols(limit)
+        mode = settings.get("symbol_selection_mode", "top_volume")
+        mode_labels = {
+            "top_volume": "الأعلى سيولة وحجم تداول",
+            "big_movers": "الأكبر تحركاً سعرياً (Big Movers)",
+            "high_funding": "الأعلى تطرفاً بمعدل التمويل (High Funding)",
+            "oi_spike": "الأكبر قفزة بالفائدة المفتوحة (OI Spike)",
+        }
+        db.add_log(f"جاري استعلام {exchange_name} عن أزواج العملات — المعيار: {mode_labels.get(mode, mode)}...")
+        symbols = client.fetch_screened_symbols(mode, limit)
         fallback_reason = getattr(client, "last_error", {}).get("_top_symbols")
         if fallback_reason:
             db.add_log(f"⚠️ تعذر جلب قائمة العملات الحقيقية من {exchange_name}، تم استخدام قائمة احتياطية مؤقتة — السبب: {fallback_reason}")
@@ -156,6 +163,7 @@ class ScannerState:
                     ob_imbalance=exchange.fetch_order_book_imbalance(symbol),
                     taker_pressure=exchange.fetch_taker_pressure(symbol) if hasattr(exchange, "fetch_taker_pressure") else None,
                     long_short_ratio=exchange.fetch_long_short_ratio(symbol) if hasattr(exchange, "fetch_long_short_ratio") else None,
+                    cvd_pct=exchange.get_cvd_24h_pct(symbol) if hasattr(exchange, "get_cvd_24h_pct") else None,
                 )
 
                 matched_any = False

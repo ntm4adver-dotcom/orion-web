@@ -13,6 +13,7 @@
 """
 from .analyzer import analyze
 from .ict_strategy import analyze_ict_smart_sweep
+from .hybrid_strategy import analyze_hybrid_confirmation
 
 # كل استراتيجية: مفتاح فريد -> {label: الاسم المعروض, fn: دالة التحليل}
 # توقيع دالة التحليل الموحّد: fn(symbol, k4h, k1h, k15m, k5m, k_daily, micro=None) -> Optional[AnalysisResult]
@@ -24,6 +25,10 @@ STRATEGY_REGISTRY = {
     "ict_smart_sweep": {
         "label": "🧠 النمط الذكي لسحب السيولة (ICT / Smart Money Concepts)",
         "fn": analyze_ict_smart_sweep,
+    },
+    "hybrid_confirmation": {
+        "label": "🔗 التأكيد المزدوج (انفجار سعري ← تأكيد ICT يحدد نقاط الدخول/الخروج)",
+        "fn": analyze_hybrid_confirmation,
     },
 }
 

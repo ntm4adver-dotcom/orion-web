@@ -287,28 +287,89 @@ def _default_symbols():
 
 
 def fetch_top_symbols(limit_count: int = 10) -> List[str]:
-    """يعادل fetchTopSymbols بعميل Binance — يجلب أعلى عملات OKX Swap تداولاً وسيولة
-    خلال آخر 24 ساعة، مرتبة تنازلياً، ومحدودة بعدد limit_count."""
+    return fetch_screened_symbols("top_volume", limit_count)
+
+
+def fetch_screened_symbols(mode: str, limit_count: int = 10) -> List[str]:
+    """يجيب قائمة عملات مصنَّفة حسب معيار مختار — انظر التوثيق بعميل Binance لشرح كل وضع.
+    ملاحظة: وضع oi_spike بـ OKX أدق من Binance لأنه يستخدم نداء واحد مجمّع لكل العملات
+    دفعة وحدة (bulk endpoint)، بدل نداء منفصل لكل عملة."""
     resp = _public_get("/api/v5/market/tickers?instType=SWAP")
     if not resp or resp.get("code") != "0":
         last_error["_top_symbols"] = (resp or {}).get("msg", "تعذر الاتصال بـ OKX لجلب قائمة العملات") if resp else "تعذر الاتصال بـ OKX لجلب قائمة العملات"
         return _default_symbols()[:limit_count]
     try:
-        candidates = []
+        liquid_pool = []
         for obj in resp.get("data", []):
             inst_id = obj.get("instId", "")
             if not inst_id.endswith("-USDT-SWAP"):
                 continue
             quote_volume = float(obj.get("volCcy24h", 0) or 0)
             last_price = float(obj.get("last", 0) or 0)
-            if quote_volume < 10_000_000.0:
+            open24h = float(obj.get("open24h", 0) or 0)
+            if quote_volume < 10_000_000.0 or last_price < 0.0001:
                 continue
-            if last_price < 0.0001:
-                continue
-            base = inst_id.replace("-USDT-SWAP", "")
-            candidates.append((f"{base}USDT", quote_volume))
-        candidates.sort(key=lambda x: x[1], reverse=True)
-        result = [c[0] for c in candidates[:limit_count]]
+            change_pct = ((last_price - open24h) / open24h * 100.0) if open24h > 0 else 0.0
+            symbol = inst_id.replace("-USDT-SWAP", "") + "USDT"
+            liquid_pool.append({"symbol": symbol, "inst_id": inst_id, "volume": quote_volume, "change_pct": change_pct})
+
+        if not liquid_pool:
+            last_error["_top_symbols"] = "لم يتم إيجاد عملات مطابقة لشروط السيولة على OKX"
+            return _default_symbols()[:limit_count]
+
+        if mode == "big_movers":
+            liquid_pool.sort(key=lambda x: abs(x["change_pct"]), reverse=True)
+            result = [c["symbol"] for c in liquid_pool[:limit_count]]
+
+        elif mode == "high_funding":
+            liquid_pool.sort(key=lambda x: x["volume"], reverse=True)
+            pool = liquid_pool[:40]
+            funding_map = []
+            for c in pool:
+                fr = fetch_funding_rate(c["symbol"])
+                if fr is not None:
+                    funding_map.append((c["symbol"], abs(fr)))
+                time.sleep(0.1)
+            funding_map.sort(key=lambda x: x[1], reverse=True)
+            result = [s for s, _ in funding_map[:limit_count]]
+
+        elif mode == "oi_spike":
+            # نداء مجمّع واحد يجيب الفائدة المفتوحة لكل عملات OKX Swap دفعة وحدة
+            oi_resp = _public_get("/api/v5/public/open-interest?instType=SWAP")
+            oi_map = []
+            if oi_resp and oi_resp.get("code") == "0":
+                now = int(time.time() * 1000)
+                pool_ids = {c["inst_id"] for c in liquid_pool}
+                for item in oi_resp.get("data", []):
+                    inst_id = item.get("instId", "")
+                    if inst_id not in pool_ids:
+                        continue
+                    try:
+                        oi_val = float(item.get("oi", 0) or 0)
+                    except Exception:
+                        continue
+                    history = _oi_history.setdefault(inst_id, [])
+                    history[:] = [h for h in history if now - h[0] <= OI_HISTORY_MAX_AGE_MS]
+                    oldest = history[0] if history else None
+                    history.append((now, oi_val))
+                    if len(history) > OI_HISTORY_MAX_POINTS:
+                        history.pop(0)
+                    if oldest and oldest[1] > 0:
+                        change = ((oi_val - oldest[1]) / oldest[1]) * 100.0
+                        symbol = inst_id.replace("-USDT-SWAP", "") + "USDT"
+                        oi_map.append((symbol, abs(change)))
+            if not oi_map:
+                last_error["_top_symbols"] = "لسا يجمع بيانات القياس الأول للفائدة المفتوحة — النتائج ستكون جاهزة بالدورة القادمة"
+                liquid_pool.sort(key=lambda x: x["volume"], reverse=True)
+                result = [c["symbol"] for c in liquid_pool[:limit_count]]
+            else:
+                oi_map.sort(key=lambda x: x[1], reverse=True)
+                result = [s for s, _ in oi_map[:limit_count]]
+
+        else:  # top_volume (افتراضي)
+            liquid_pool.sort(key=lambda x: x["volume"], reverse=True)
+            result = [c["symbol"] for c in liquid_pool[:limit_count]]
+
         if result:
             last_error.pop("_top_symbols", None)
             return result
@@ -372,12 +433,18 @@ def fetch_order_book_imbalance(symbol: str, depth: int = 20) -> Optional[float]:
         return None
 
 
+_cvd_history: Dict[str, list] = {}
+CVD_HISTORY_MAX_AGE_MS = 24 * 60 * 60 * 1000  # نافذة تراكمية 24 ساعة
+CVD_HISTORY_MAX_POINTS = 500  # سقف حماية من تضخم الذاكرة
+
+
 def fetch_taker_pressure(symbol: str, limit: int = 100) -> Optional[float]:
     """ضغط المتداولين الفعليين (Taker Buy/Sell Pressure): يفحص آخر الصفقات المنفَّذة
     فعلياً بالسوق (مو مجرد أوامر معلّقة بالـ order book) ويحسب هل الأغلبية اشترت
     بأوامر سوق (taker buy) أو باعت (taker sell). إشارة أقوى وأدق من فوليوم الشمعة
     العادي لتأكيد إن الاختراق مدعوم بضغط شراء/بيع حقيقي، وليس مجرد تقلب عابر.
-    ترجع رقم بين -1 (ضغط بيع كامل) و 1 (ضغط شراء كامل)."""
+    ترجع رقم بين -1 (ضغط بيع كامل) و 1 (ضغط شراء كامل).
+    كل استدعاء لهذي الدالة يغذّي أيضاً متتبع CVD التراكمي (انظر get_cvd_24h_pct)."""
     inst_id = _to_inst_id(symbol)
     resp = _public_get(f"/api/v5/market/trades?instId={inst_id}&limit={limit}")
     if not resp or resp.get("code") != "0" or not resp.get("data"):
@@ -391,10 +458,41 @@ def fetch_taker_pressure(symbol: str, limit: int = 100) -> Optional[float]:
                 buy_vol += sz
             elif t.get("side") == "sell":
                 sell_vol += sz
+        _record_cvd_sample(symbol, buy_vol, sell_vol)
         total = buy_vol + sell_vol
         return (buy_vol - sell_vol) / total if total > 0 else None
     except Exception:
         return None
+
+
+def _record_cvd_sample(symbol: str, buy_vol: float, sell_vol: float):
+    now = int(time.time() * 1000)
+    history = _cvd_history.setdefault(symbol, [])
+    history.append((now, buy_vol, sell_vol))
+    cutoff = now - CVD_HISTORY_MAX_AGE_MS
+    history[:] = [h for h in history if h[0] >= cutoff]
+    if len(history) > CVD_HISTORY_MAX_POINTS:
+        del history[: len(history) - CVD_HISTORY_MAX_POINTS]
+
+
+def get_cvd_24h_pct(symbol: str, min_samples: int = 3) -> Optional[float]:
+    """CVD تراكمي (Cumulative Volume Delta) على مدى 24 ساعة — نسبة هيمنة الشراء الفعلي
+    من إجمالي حجم التداول المُعايَن. مبني على عيّنات دورية من صفقات فعلية (مو تخمين)،
+    تتجمّع تلقائياً كل ما اشتغل الفحص. القيمة تصير أدق كل ما اشتغل البوت لفترة أطول
+    (تحتاج 24 ساعة تشغيل متواصل لتغطية كاملة للنافذة الزمنية).
+    القيمة: 0% = بيع كامل، 50% = تعادل، 100% = شراء كامل."""
+    history = _cvd_history.get(symbol, [])
+    now = int(time.time() * 1000)
+    cutoff = now - CVD_HISTORY_MAX_AGE_MS
+    recent = [h for h in history if h[0] >= cutoff]
+    if len(recent) < min_samples:
+        return None
+    total_buy = sum(h[1] for h in recent)
+    total_sell = sum(h[2] for h in recent)
+    total = total_buy + total_sell
+    if total <= 0:
+        return None
+    return (total_buy / total) * 100.0
 
 
 def fetch_long_short_ratio(symbol: str) -> Optional[float]:

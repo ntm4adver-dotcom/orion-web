@@ -206,17 +206,44 @@ def analyze_ict_smart_sweep(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
     if risk <= 0:
         return None
 
-    probability = 82
+    # ربط بيانات البنية الجزئية (OI / CVD / ضغط المتداولين) بالاستراتيجية — لم تكن
+    # مستخدمة هنا سابقاً رغم توفرها، وهذا يقوّي جودة الفلترة بنفس روح الاستراتيجية الأولى
+    oi_change_pct = micro.oi_change_pct if micro else None
+    if oi_change_pct is not None and oi_change_pct < -1.5:
+        # فائدة مفتوحة تنخفض بقوة أثناء إعداد الصفقة = سيولة تخرج من السوق، إشارة ضعف حقيقي
+        return None
+
+    probability = 72
     if is_long_setup or is_short_setup:
         probability += 8
     if bullish_fvg_exists or bearish_fvg_exists:
         probability += 3
     if bullish_choch or bearish_choch:
         probability += 3
+
+    if oi_change_pct is not None and oi_change_pct > 1.5:
+        probability += 4  # فائدة مفتوحة ترتفع = دخول سيولة/أموال جديدة حقيقية تدعم الاختراق
+
+    taker_pressure = micro.taker_pressure if micro else None
+    if taker_pressure is not None:
+        taker_aligned = (side == "Long" and taker_pressure > 0.15) or (side == "Short" and taker_pressure < -0.15)
+        if taker_aligned:
+            probability += 3
+
+    cvd_pct = micro.cvd_pct if micro else None
+    if cvd_pct is not None:
+        cvd_aligned = (side == "Long" and cvd_pct > 60) or (side == "Short" and cvd_pct < 40)
+        if cvd_aligned:
+            probability += 3
+
     probability = min(95, probability)
 
     rr = round(abs(tp - entry_price) / risk, 2) if risk > 0 else 3.0
     volume_analysis = "سحب سيولة + فجوة سعرية (FVG) + كسر هيكل (CHoCH) — استراتيجية ICT/SMC"
+    if oi_change_pct is not None:
+        behavior += f" | 📊 تغيّر الفائدة المفتوحة (OI): {oi_change_pct:.2f}%"
+    if cvd_pct is not None:
+        behavior += f" | 📈 CVD تراكمي (24س): {cvd_pct:.1f}% شراء"
 
     return AnalysisResult(
         symbol=symbol, trend=trend4h, dt="", prob=probability, price=last_price,
