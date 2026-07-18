@@ -13,6 +13,7 @@ import threading
 import glob
 
 from . import db
+from . import gdrive_backup
 
 BACKUP_DIR = os.path.join(os.path.dirname(db.DB_PATH), "backups")
 
@@ -90,6 +91,14 @@ class BackupScheduler:
                         filename = create_backup_snapshot()
                         _prune_old_backups(retention)
                         db.add_log(f"💾 [نسخ احتياطي تلقائي] تم حفظ نسخة جديدة: {filename}")
+
+                        if settings.get("is_gdrive_backup_enabled") and gdrive_backup.is_connected():
+                            filepath = os.path.join(BACKUP_DIR, filename)
+                            ok, msg = gdrive_backup.upload_backup_file(filepath, filename)
+                            if ok:
+                                db.add_log(f"☁️ [Google Drive] تم رفع النسخة الاحتياطية بنجاح: {filename}")
+                            else:
+                                db.add_log(f"⚠️ [Google Drive] فشل رفع النسخة الاحتياطية: {msg}")
             except Exception as e:
                 db.add_log(f"❌ [نسخ احتياطي تلقائي] خطأ: {e}")
             # نتحقق كل دقيقة هل حان وقت النسخة القادمة، بدل النوم لساعات طويلة دفعة وحدة

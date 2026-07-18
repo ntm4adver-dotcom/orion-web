@@ -8,6 +8,7 @@ from . import db
 from . import okx_client
 from . import learning
 from . import backup_scheduler
+from . import gdrive_backup
 from .strategies import get_strategy_options, strategy_label
 from .auth import is_logged_in, APP_PASSWORD
 from .scanner import scanner_state
@@ -263,6 +264,47 @@ async def api_watchlist_remove(request: Request):
     body = await request.json()
     watchlist = db.remove_watchlist_symbol((body.get("symbol") or "").strip())
     return {"success": True, "watchlist": watchlist}
+
+
+@app.get("/api/backup/gdrive/status")
+def api_gdrive_status(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return {
+        "configured": gdrive_backup.is_configured(),
+        "connected": gdrive_backup.is_connected(),
+    }
+
+
+@app.get("/api/backup/gdrive/connect")
+def api_gdrive_connect(request: Request):
+    if not is_logged_in(request):
+        return RedirectResponse("/login")
+    if not gdrive_backup.is_configured():
+        return JSONResponse({"error": "GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET غير مضبوطة بمتغيرات البيئة"}, status_code=400)
+    redirect_uri = str(request.base_url).rstrip("/") + "/api/backup/gdrive/callback"
+    return RedirectResponse(gdrive_backup.build_auth_url(redirect_uri))
+
+
+@app.get("/api/backup/gdrive/callback")
+def api_gdrive_callback(request: Request, code: str = "", error: str = ""):
+    if not is_logged_in(request):
+        return RedirectResponse("/login")
+    if error:
+        return RedirectResponse(f"/settings?gdrive_error={error}")
+    redirect_uri = str(request.base_url).rstrip("/") + "/api/backup/gdrive/callback"
+    ok, msg = gdrive_backup.exchange_code_for_tokens(code, redirect_uri)
+    if ok:
+        return RedirectResponse("/settings?gdrive_connected=1")
+    return RedirectResponse(f"/settings?gdrive_error={msg}")
+
+
+@app.post("/api/backup/gdrive/disconnect")
+def api_gdrive_disconnect(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    gdrive_backup.disconnect()
+    return {"ok": True}
 
 
 @app.post("/api/backup/auto-settings")

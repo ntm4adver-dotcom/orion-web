@@ -1,13 +1,25 @@
 """طبقة قاعدة بيانات SQLite بسيطة — تعادل Room DB (AppSettings, TradeSignal) في التطبيق الأصلي."""
 import os
+import shutil
 import sqlite3
 import time
 import threading
 import json
 from typing import Optional, List, Dict, Any
 
-DB_PATH = os.environ.get("ORION_DB_PATH", os.path.join(os.path.dirname(__file__), "..", "data", "orion.db"))
+_OLD_DEFAULT_DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "orion.db")
+DB_PATH = os.environ.get("ORION_DB_PATH", _OLD_DEFAULT_DB_PATH)
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+
+# نقل تلقائي آمن لمرة واحدة: لو المستخدم فعّل مسار خارجي جديد (ORION_DB_PATH) لأول مرة
+# ولسا ما فيه قاعدة بيانات بهذا المسار الجديد، لكن فيه بيانات قديمة بالمسار الافتراضي
+# القديم (جوا مجلد المشروع)، ننسخها تلقائياً للمسار الجديد بدل ما تضيع بصمت.
+if (os.path.abspath(DB_PATH) != os.path.abspath(_OLD_DEFAULT_DB_PATH)
+        and not os.path.exists(DB_PATH) and os.path.exists(_OLD_DEFAULT_DB_PATH)):
+    try:
+        shutil.copy2(_OLD_DEFAULT_DB_PATH, DB_PATH)
+    except Exception:
+        pass
 
 _lock = threading.Lock()
 
@@ -35,6 +47,9 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "is_auto_backup_enabled": 1,
     "auto_backup_interval_hours": 6,
     "auto_backup_retention_count": 10,
+    "gdrive_refresh_token": "",
+    "gdrive_folder_id": "",
+    "is_gdrive_backup_enabled": 0,
     "active_strategy": "explosive_breakout",  # 'explosive_breakout' أو 'ict_smart_sweep'
     # OKX trading connection
     "okx_api_key": "",
@@ -143,7 +158,7 @@ def get_settings() -> Dict[str, Any]:
                  "is_volume_filter_enabled", "is_vwap_filter_enabled", "is_4h_buyers_filter_enabled",
                  "is_cancel_if_exceeds_target_enabled", "okx_is_testnet", "okx_is_auto_trading_enabled",
                  "okx_is_max_leverage_enabled", "is_adaptive_stop_loss_enabled", "is_instant_entry_enabled",
-                 "is_coin_learning_enabled", "is_auto_backup_enabled"):
+                 "is_coin_learning_enabled", "is_auto_backup_enabled", "is_gdrive_backup_enabled"):
         settings[bkey] = bool(int(settings.get(bkey, 0)))
     return settings
 

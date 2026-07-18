@@ -121,6 +121,16 @@
     <p id="backup-settings-result" class="muted" style="margin-top:8px; font-size:12px;"></p>
   </div>
 
+  <div id="gdrive-wrap" style="margin-top:20px; border-top:1px solid var(--dark-accent); padding-top:16px;">
+    <h4 style="margin:0 0 10px;">☁️ Google Drive</h4>
+    <p class="muted" style="font-size:12px; margin-bottom:10px;">نسخة إضافية بمكان مستقل تماماً — حماية حقيقية حتى لو صار أي مشكلة بالقرص المحلي.</p>
+    <div id="gdrive-status" class="muted">جاري التحقق...</div>
+    <div style="margin-top:10px;">
+      <a id="gdrive-connect-btn" href="/api/backup/gdrive/connect" style="display:none;"><button type="button">🔗 ربط Google Drive</button></a>
+      <button type="button" id="gdrive-disconnect-btn" class="btn danger" style="display:none;" onclick="disconnectGDrive()">فصل الربط</button>
+    </div>
+  </div>
+
   <div id="backup-list-wrap" style="margin-top:20px; border-top:1px solid var(--dark-accent); padding-top:16px;">
     <h4 style="margin:0 0 10px;">📁 النسخ المتوفرة على القرص حالياً</h4>
     <div id="backup-list" class="muted">جاري التحميل...</div>
@@ -138,6 +148,35 @@
 </div>
 
 <script>
+async function loadGDriveStatus(){
+  try{
+    const r = await fetch('/api/backup/gdrive/status');
+    const data = await r.json();
+    const statusEl = document.getElementById('gdrive-status');
+    const connectBtn = document.getElementById('gdrive-connect-btn');
+    const disconnectBtn = document.getElementById('gdrive-disconnect-btn');
+    if (!data.configured){
+      statusEl.innerText = '⚠️ لم يتم ضبط GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET بمتغيرات البيئة بعد.';
+      connectBtn.style.display = 'none'; disconnectBtn.style.display = 'none';
+    } else if (data.connected){
+      statusEl.innerHTML = '<span style="color:var(--green);">✅ مربوط ويرفع نسخ تلقائياً</span>';
+      connectBtn.style.display = 'none'; disconnectBtn.style.display = 'inline-block';
+    } else {
+      statusEl.innerText = 'غير مربوط بعد.';
+      connectBtn.style.display = 'inline-block'; disconnectBtn.style.display = 'none';
+    }
+  }catch(e){}
+}
+async function disconnectGDrive(){
+  if (!confirm('فصل الربط مع Google Drive؟ لن تتوقف النسخ المحلية، فقط الرفع لدرايف.')) return;
+  await fetch('/api/backup/gdrive/disconnect', {method:'POST'});
+  loadGDriveStatus();
+}
+loadGDriveStatus();
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.get('gdrive_connected')) alert('✅ تم ربط Google Drive بنجاح!');
+if (urlParams.get('gdrive_error')) alert('❌ فشل الربط: ' + urlParams.get('gdrive_error'));
+
 async function loadWatchlist(){
   const r = await fetch('/api/watchlist');
   const list = await r.json();
