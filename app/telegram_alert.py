@@ -35,6 +35,11 @@ def _send_to_all(token: str, chat_ids_string: str, message: str):
             pass
 
 
+def send_text_alert(token: str, chat_ids_string: str, message: str):
+    """إرسال تنبيه نصي حر — يُستخدم لتنبيهات نقص البيانات وغيرها من الإشعارات العامة."""
+    _send_to_all(token, chat_ids_string, message)
+
+
 def send_signal_alert(token: str, chat_ids_string: str, symbol: str, direction: str,
                        entry_price: float, take_profit: float, stop_loss: float,
                        probability: int, quality: str, behavior: str, is_instant: bool = False):

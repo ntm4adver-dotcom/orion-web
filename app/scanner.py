@@ -120,12 +120,18 @@ class ScannerState:
         symbols = self._resolve_symbols(settings)
         exchange = okx_client if settings["exchange"] == "okx" else binance_client
         db.add_log(f"[{time.strftime('%H:%M:%S')}] بدء فحص حزمة الأزواج الذكية المكتشفة...")
+        incomplete_data_notes = []  # نجمّع كل نقص بيانات بالدورة، ونرسل تنبيه تيليجرام واحد بالنهاية بدل إغراق المستخدم برسائل
 
         # تحقق من الحظر المؤقت مرة واحدة بداية الدورة بدل ما نكرر نفس الخطأ لكل عملة
         if hasattr(exchange, "get_ban_status"):
             ban_msg = exchange.get_ban_status()
             if ban_msg:
                 db.add_log(f"⏸️ تم إيقاف هذه الدورة مؤقتاً — {ban_msg}")
+                if settings.get("is_telegram_enabled"):
+                    telegram_alert.send_text_alert(
+                        settings["telegram_token"], settings["telegram_chat_ids"],
+                        f"⏸️ *تنبيه توقف الفحص*\nتم إيقاف دورة الفحص كاملة بسبب حظر مؤقت:\n{ban_msg}",
+                    )
                 return
 
         for idx, symbol in enumerate(symbols):
@@ -151,6 +157,7 @@ class ScannerState:
                         db.add_log(f"▫️ {symbol}: بيانات غير كافية للتحليل — السبب: {reason}")
                     else:
                         db.add_log(f"▫️ {symbol}: بيانات غير كافية للتحليل.")
+                    incomplete_data_notes.append(f"{symbol}: نقص بالشموع (4س={len(k4h)}, 1س={len(k1h)}, 15د={len(k15m)}, 5د={len(k5m)}, يومي={len(k_daily)})" + (f" — {reason}" if reason else ""))
                     # إذا صرنا محظورين أثناء الفحص، نوقف بقية الدورة فوراً بدل تكرار المحاولة على كل عملة
                     if hasattr(exchange, "get_ban_status") and exchange.get_ban_status():
                         db.add_log(f"⏸️ تم إيقاف بقية الدورة — {exchange.get_ban_status()}")
@@ -166,6 +173,21 @@ class ScannerState:
                     cvd_pct=exchange.get_cvd_24h_pct(symbol) if hasattr(exchange, "get_cvd_24h_pct") else None,
                 )
 
+                # ضغط المتداولين (Taker Pressure) صار شرط إلزامي بالانفجار السعري — لو غاب،
+                # كل الاستراتيجيات المبنية عليه بترفض تلقائياً، فنسجّله كنقص بيانات حرج
+                if micro.taker_pressure is None:
+                    incomplete_data_notes.append(f"{symbol}: بيانات ضغط المتداولين الفعليين (Taker Pressure) غير متوفرة — سيتم رفض كل صفقات الانفجار السعري لهذي العملة بهذي الدورة")
+
+                def _fmt(v, suffix=""):
+                    return f"{v:.3f}{suffix}" if v is not None else "غير متوفر"
+
+                db.add_log(
+                    f"📥 [{symbol}] تم سحب: 4س={len(k4h)} | 1س={len(k1h)} | 15د={len(k15m)} | "
+                    f"5د={len(k5m)} | يومي={len(k_daily)} شمعة | OI={_fmt(micro.oi_change_pct, '%')} | "
+                    f"تمويل={_fmt(micro.funding_rate)} | عمق السوق={_fmt(micro.ob_imbalance)} | "
+                    f"ضغط متداولين={_fmt(micro.taker_pressure)} | CVD={_fmt(micro.cvd_pct, '%')}"
+                )
+
                 matched_any = False
                 for strategy_key, strategy_fn in get_active_strategies(settings.get("active_strategy", "explosive_breakout")):
                     result = strategy_fn(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro)
@@ -179,7 +201,20 @@ class ScannerState:
 
             except Exception as e:
                 db.add_log(f"❌ [{symbol}] خطأ أثناء التحليل: {e}")
+                incomplete_data_notes.append(f"{symbol}: خطأ استثنائي أثناء سحب/تحليل البيانات — {e}")
             time.sleep(0.2)
+
+        if incomplete_data_notes and settings.get("is_telegram_enabled"):
+            preview = incomplete_data_notes[:15]
+            extra = len(incomplete_data_notes) - len(preview)
+            body = "\n".join(f"• {note}" for note in preview)
+            if extra > 0:
+                body += f"\n… و {extra} حالة إضافية أخرى"
+            telegram_alert.send_text_alert(
+                settings["telegram_token"], settings["telegram_chat_ids"],
+                f"⚠️ *تنبيه اكتمال البيانات*\nبهذي الدورة، {len(incomplete_data_notes)} عملة لم تُجلب لها البيانات كاملة "
+                f"أو حصل خطأ أثناء التحليل:\n\n{body}",
+            )
 
     def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k5m):
         req_prob, learning_msg = learning.effective_threshold(result.symbol, result.side, settings, strategy_key=strategy_key)
