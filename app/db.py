@@ -273,6 +273,64 @@ def clear_signals():
         conn.commit()
 
 
+def export_backup() -> Dict[str, Any]:
+    """يصدّر نسخة احتياطية كاملة (كل الإعدادات + كل الإشارات المسجّلة) بصيغة JSON قابلة
+    للحفظ محلياً واستعادتها لاحقاً — طبقة أمان مستقلة تماماً عن ملف قاعدة البيانات نفسه."""
+    with _lock, _connect() as conn:
+        settings_rows = conn.execute("SELECT key, value FROM app_settings").fetchall()
+        signal_rows = conn.execute("SELECT * FROM trade_signals ORDER BY id").fetchall()
+    return {
+        "backup_version": 1,
+        "exported_at": int(time.time() * 1000),
+        "settings": {r["key"]: r["value"] for r in settings_rows},
+        "signals": [dict(r) for r in signal_rows],
+    }
+
+
+def import_backup(data: Dict[str, Any], mode: str = "merge") -> Dict[str, Any]:
+    """يستعيد نسخة احتياطية. mode='merge' يضيف الإشارات الناقصة فقط (بدون تكرار حسب id)
+    ويحدّث الإعدادات، mode='replace' يمسح كل شي حالي ويستبدله بالكامل بمحتوى النسخة."""
+    settings_data = data.get("settings", {})
+    signals_data = data.get("signals", [])
+
+    with _lock, _connect() as conn:
+        if mode == "replace":
+            conn.execute("DELETE FROM trade_signals")
+            conn.execute("DELETE FROM app_settings")
+
+        for key, value in settings_data.items():
+            conn.execute(
+                "INSERT INTO app_settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, value),
+            )
+
+        restored = 0
+        skipped = 0
+        cols = ["timestamp", "symbol", "side", "entry_price", "stop_loss", "take_profit", "rr",
+                "probability", "quality", "behavior", "volume_analysis", "status",
+                "update_timestamp", "current_price", "last_notified_status", "strategy"]
+        for sig in signals_data:
+            if mode == "merge":
+                existing = conn.execute(
+                    "SELECT id FROM trade_signals WHERE symbol=? AND timestamp=? AND side=?",
+                    (sig.get("symbol"), sig.get("timestamp"), sig.get("side")),
+                ).fetchone()
+                if existing:
+                    skipped += 1
+                    continue
+            placeholders = ",".join("?" for _ in cols)
+            conn.execute(
+                f"INSERT INTO trade_signals ({','.join(cols)}) VALUES ({placeholders})",
+                tuple(sig.get(c, "" if c in ("symbol", "side", "quality", "behavior", "volume_analysis",
+                                              "status", "last_notified_status", "strategy") else 0) for c in cols),
+            )
+            restored += 1
+        conn.commit()
+
+    return {"restored_signals": restored, "skipped_duplicates": skipped, "settings_restored": len(settings_data)}
+
+
 def add_log(message: str, max_logs: int = 300):
     with _lock, _connect() as conn:
         conn.execute("INSERT INTO scan_logs (timestamp, message) VALUES (?, ?)", (int(time.time() * 1000), message))

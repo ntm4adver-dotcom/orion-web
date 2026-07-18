@@ -88,4 +88,48 @@
   <button type="submit">حفظ الإعدادات</button>
   {% if saved %}<span class="muted" style="margin-inline-start:12px;">✅ تم الحفظ</span>{% endif %}
 </form>
+
+<div class="card" style="margin-top:20px;">
+  <h3>💾 النسخ الاحتياطي والاستعادة</h3>
+  <p class="muted" style="line-height:1.9;">
+    حمّل نسخة احتياطية كاملة (كل الإعدادات + كل الإشارات المسجّلة) بملف JSON واحد، واحتفظ فيها
+    بمكان آمن على جهازك. لو صار أي مشكلة بقاعدة البيانات (تحديث خاطئ، نقل سيرفر، إلخ) ترجع تستوردها
+    وترجع كل شي زي ما كان بدون ما تبدأ من الصفر.
+  </p>
+  <div class="row" style="margin-top:12px; align-items:center;">
+    <a href="/api/backup/export" download><button type="button">⬇️ تصدير نسخة احتياطية الآن</button></a>
+  </div>
+
+  <div style="margin-top:20px; border-top:1px solid var(--dark-accent); padding-top:16px;">
+    <label>استعادة من ملف نسخة احتياطية</label>
+    <input type="file" id="backup-file" accept="application/json">
+    <div class="row" style="margin-top:10px; gap:10px;">
+      <button type="button" class="btn secondary" onclick="restoreBackup('merge')">🔀 دمج (إضافة الناقص فقط)</button>
+      <button type="button" class="btn danger" onclick="restoreBackup('replace')">⚠️ استبدال كامل (يمسح الحالي)</button>
+    </div>
+    <p id="restore-result" class="muted" style="margin-top:10px;"></p>
+  </div>
+</div>
+
+<script>
+async function restoreBackup(mode){
+  const fileInput = document.getElementById('backup-file');
+  if (!fileInput.files.length){ alert('اختر ملف النسخة الاحتياطية أولاً.'); return; }
+  if (mode === 'replace' && !confirm('تحذير: هذا سيمسح كل الإشارات والإعدادات الحالية ويستبدلها بمحتوى الملف. متأكد؟')) return;
+
+  const formData = new FormData();
+  formData.append('file', fileInput.files[0]);
+  formData.append('mode', mode);
+
+  document.getElementById('restore-result').innerText = 'جاري الاستعادة...';
+  const r = await fetch('/api/backup/import', {method: 'POST', body: formData});
+  const data = await r.json();
+  if (data.success){
+    document.getElementById('restore-result').innerText =
+      `✅ تمت الاستعادة: ${data.restored_signals} إشارة مُستعادة، ${data.skipped_duplicates} مكررة تم تخطيها، ${data.settings_restored} إعداد.`;
+  } else {
+    document.getElementById('restore-result').innerText = `❌ ${data.message}`;
+  }
+}
+</script>
 {% endblock %}

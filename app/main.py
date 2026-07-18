@@ -206,6 +206,39 @@ async def api_learning_settings(request: Request):
     return {"ok": True}
 
 
+@app.get("/api/backup/export")
+def api_backup_export(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    backup = db.export_backup()
+    filename = f"orion-backup-{backup['exported_at']}.json"
+    return JSONResponse(
+        content=backup,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/api/backup/import")
+async def api_backup_import(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        form = await request.form()
+        file = form.get("file")
+        mode = form.get("mode", "merge")
+        if not file:
+            return {"success": False, "message": "لم يتم اختيار ملف."}
+        content = await file.read()
+        import json
+        data = json.loads(content)
+        result = db.import_backup(data, mode=mode)
+        db.add_log(f"📦 تم استيراد نسخة احتياطية: {result['restored_signals']} إشارة مُستعادة، "
+                    f"{result['skipped_duplicates']} مكررة تم تخطيها، {result['settings_restored']} إعداد.")
+        return {"success": True, **result}
+    except Exception as e:
+        return {"success": False, "message": f"فشل الاستيراد: {e}"}
+
+
 @app.get("/api/strategy-performance")
 def api_strategy_performance(request: Request):
     if not is_logged_in(request):
