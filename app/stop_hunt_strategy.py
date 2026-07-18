@@ -76,14 +76,23 @@ def _detect_stop_hunt(klines: List[Kline], lookback: int = 50, vol_period: int =
 
 
 def analyze_stop_hunt(symbol: str, k4h, k1h, k15m, k5m, k_daily,
-                       micro: Optional[MarketMicrostructure] = None) -> Optional[AnalysisResult]:
+                       micro: Optional[MarketMicrostructure] = None,
+                       trace: Optional[list] = None) -> Optional[AnalysisResult]:
+    def _log(label, value, ok=None):
+        if trace is not None:
+            trace.append({"check": label, "value": value, "ok": ok})
+
     signal = _detect_stop_hunt(k1h, lookback=50, vol_period=20)
+    _log("نمط صيد استوبات مكتشف على فريم الساعة", signal["type"] if signal else "لا يوجد", signal is not None)
     if signal is None:
+        _log("❌ القرار النهائي", "لم يُكسر أي قاع/قمة تاريخية بفتيلة مع رفض واضح خلال آخر 50 شمعة — رفض", False)
         return None
 
     # فلتر جودة (تحسين بسيط فوق الأصل): نشترط فوليوم أعلى من المتوسط فعلاً،
     # تأكيداً لملاحظة الكود الأصلي نفسه عن أهمية الـ Volume Spike
+    _log("نسبة فوليوم شمعة السحب مقابل المتوسط", f"{signal['volume_ratio']:.2f}x")
     if signal["volume_ratio"] < 1.2:
+        _log("❌ فلتر الحد الأدنى للفوليوم (1.2x)", f"{signal['volume_ratio']:.2f}x أقل من المطلوب — رفض", False)
         return None
 
     side = signal["side"]
@@ -95,7 +104,9 @@ def analyze_stop_hunt(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     # فلتر OI اختياري (نفس أسلوب بقية الاستراتيجيات): سيولة تخرج بقوة = إشارة ضعف حقيقي
     oi_change_pct = micro.oi_change_pct if micro else None
     if oi_change_pct is not None and oi_change_pct < -1.5:
+        _log("❌ فلتر الفائدة المفتوحة (OI)", f"تغيّر OI={oi_change_pct:.2f}% (أقل من -1.5%) — رفض", False)
         return None
+    _log("الفائدة المفتوحة (OI) تغيّر", f"{oi_change_pct:.2f}%" if oi_change_pct is not None else "غير متوفرة")
 
     probability = 78
     if signal["volume_ratio"] >= 2.0:
@@ -117,6 +128,7 @@ def analyze_stop_hunt(symbol: str, k4h, k1h, k15m, k5m, k_daily,
 
     probability = min(95, probability)
     rr = round(abs(tp - entry_price) / risk, 2) if risk > 0 else 3.0
+    _log("✅ القرار النهائي", f"{side} — احتمالية {probability}%", True)
 
     type_ar = "صعودي (سحب سيولة القيعان)" if side == "Long" else "هبوطي (سحب سيولة القمم)"
     behavior = (

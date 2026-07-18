@@ -22,14 +22,28 @@ from .ict_strategy import analyze_ict_smart_sweep
 
 
 def analyze_ict_guided_entry(symbol: str, k4h, k1h, k15m, k5m, k_daily,
-                              micro: Optional[MarketMicrostructure] = None) -> Optional[AnalysisResult]:
+                              micro: Optional[MarketMicrostructure] = None,
+                              trace: Optional[list] = None) -> Optional[AnalysisResult]:
+    def _log(label, value, ok=None):
+        if trace is not None:
+            trace.append({"check": label, "value": value, "ok": ok})
+
     # الخطوة 1: الانفجار السعري كمُطلِق — بدونه ما فيه أي شي نحلله
-    breakout_result = analyze(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro)
+    breakout_trace: list = []
+    breakout_result = analyze(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro, trace=breakout_trace)
+    if trace is not None:
+        trace.append({"check": "── ⚡ المرحلة 1: كاشف الحدث (الانفجار السعري) ──", "value": "", "ok": None})
+        trace.extend(breakout_trace)
     if breakout_result is None:
+        _log("❌ القرار النهائي", "ما فيه أي حدث انفجار سعري أصلاً — توقفنا هنا", False)
         return None
 
     # الخطوة 2: نحاول نحسّن الدخول عبر ICT، بدون ما نرفض الصفقة لو ما توفر
-    ict_result = analyze_ict_smart_sweep(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro)
+    ict_trace: list = []
+    ict_result = analyze_ict_smart_sweep(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro, trace=ict_trace)
+    if trace is not None:
+        trace.append({"check": "── 🧠 المرحلة 2: محاولة تحسين الدخول (ICT، اختياري)", "value": "", "ok": None})
+        trace.extend(ict_trace)
 
     if ict_result is not None:
         same_direction = ict_result.side == breakout_result.side
@@ -41,6 +55,7 @@ def analyze_ict_guided_entry(symbol: str, k4h, k1h, k15m, k5m, k_daily,
             f"⚡ [الحدث]: {breakout_result.behavior}\n\n"
             f"🧠 [التوجيه]: {ict_result.behavior}"
         )
+        _log("✅ القرار النهائي", f"{ict_result.side} (اعتماد نقاط ICT الأدق) — {note}", True)
         return AnalysisResult(
             symbol=symbol, trend=ict_result.trend, dt="", prob=ict_result.prob, price=ict_result.price,
             atr=ict_result.atr, side=ict_result.side,
@@ -56,6 +71,7 @@ def analyze_ict_guided_entry(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         f"بهذي اللحظة (شروطه لم تكتمل) — تم اعتماد نقاط الانفجار السعري الأصلية مباشرة.\n\n"
         f"⚡ [التحليل الكامل]: {breakout_result.behavior}"
     )
+    _log("✅ القرار النهائي", f"{breakout_result.side} (اعتماد نقاط الانفجار السعري الأصلية، ICT لم يتوفر هذي المرة)", True)
     return AnalysisResult(
         symbol=symbol, trend=breakout_result.trend, dt="", prob=breakout_result.prob, price=breakout_result.price,
         atr=breakout_result.atr, side=breakout_result.side,

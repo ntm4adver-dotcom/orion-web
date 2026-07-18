@@ -71,10 +71,20 @@ def _is_zone_valid(zone: Dict, klines: List[Kline], atr_val: float) -> bool:
 
 
 def analyze_supply_demand_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
-                                    micro: Optional[MarketMicrostructure] = None) -> Optional[AnalysisResult]:
+                                    micro: Optional[MarketMicrostructure] = None,
+                                    trace: Optional[list] = None) -> Optional[AnalysisResult]:
+    def _log(label, value, ok=None):
+        if trace is not None:
+            trace.append({"check": label, "value": value, "ok": ok})
+
     # الخطوة 1: الانفجار السعري كمُطلِق فقط — يخبرنا إن فيه حدث/زخم يحصل الآن
-    breakout_result = analyze(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro)
+    breakout_trace: list = []
+    breakout_result = analyze(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro, trace=breakout_trace)
+    if trace is not None:
+        trace.append({"check": "── ⚡ المرحلة 1: كاشف الحدث (الانفجار السعري) ──", "value": "", "ok": None})
+        trace.extend(breakout_trace)
     if breakout_result is None:
+        _log("❌ القرار النهائي", "ما فيه أي حدث انفجار سعري أصلاً — توقفنا هنا", False)
         return None
 
     atr_val = atr(k1h, 14)
@@ -84,15 +94,21 @@ def analyze_supply_demand_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     current_price = k5m[-1].close if k5m else k1h[-1].close
     zones = _detect_zones(k1h)
     fresh_zones = [z for z in zones if _is_zone_valid(z, k1h, atr_val)]
+    _log("مناطق عرض/طلب مكتشفة (خام)", len(zones))
+    _log("مناطق عرض/طلب صالحة (لم تنكسر)", len(fresh_zones))
 
     if breakout_result.side == "Long":
         # نتوقع فخ سيولة صاعد → نبحث عن أقرب منطقة عرض (Supply) فوق السعر الحالي للدخول Short منها
         candidates = [z for z in fresh_zones if z["type"] == "supply" and z["low"] > current_price]
+        _log("مناطق عرض (Supply) فوق السعر الحالي", len(candidates), len(candidates) > 0)
         if not candidates:
+            _log("❌ القرار النهائي", "ما فيه منطقة عرض طازجة فوق السعر لعكس اتجاه الانفجار الصاعد — رفض", False)
             return None
         nearest = min(candidates, key=lambda z: z["low"] - current_price)
         distance = nearest["low"] - current_price
+        _log("مسافة أقرب منطقة عرض (نسبة لـ ATR)", f"{distance/atr_val:.2f}x" if atr_val else "n/a")
         if distance > atr_val * 6 or distance < atr_val * 0.3:
+            _log("❌ فلتر مسافة المنطقة المنطقية (0.3x–6x ATR)", f"{distance/atr_val:.2f}x خارج النطاق المسموح — رفض", False)
             return None  # المسافة غير منطقية (بعيدة جداً أو قريبة جداً بلا معنى)
 
         entry_price = (nearest["low"] + nearest["high"]) / 2.0
@@ -104,11 +120,15 @@ def analyze_supply_demand_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     else:
         # نتوقع فخ سيولة هابط → نبحث عن أقرب منطقة طلب (Demand) تحت السعر الحالي للدخول Long منها
         candidates = [z for z in fresh_zones if z["type"] == "demand" and z["high"] < current_price]
+        _log("مناطق طلب (Demand) تحت السعر الحالي", len(candidates), len(candidates) > 0)
         if not candidates:
+            _log("❌ القرار النهائي", "ما فيه منطقة طلب طازجة تحت السعر لعكس اتجاه الانفجار الهابط — رفض", False)
             return None
         nearest = min(candidates, key=lambda z: current_price - z["high"])
         distance = current_price - nearest["high"]
+        _log("مسافة أقرب منطقة طلب (نسبة لـ ATR)", f"{distance/atr_val:.2f}x" if atr_val else "n/a")
         if distance > atr_val * 6 or distance < atr_val * 0.3:
+            _log("❌ فلتر مسافة المنطقة المنطقية (0.3x–6x ATR)", f"{distance/atr_val:.2f}x خارج النطاق المسموح — رفض", False)
             return None
 
         entry_price = (nearest["low"] + nearest["high"]) / 2.0
@@ -124,6 +144,8 @@ def analyze_supply_demand_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     probability = 76 + (5 if breakout_result.prob >= 80 else 0)
     probability = min(92, probability)
     rr = round(abs(tp - entry_price) / risk, 2) if risk > 0 else 3.0
+
+    _log("✅ القرار النهائي", f"{side} من {zone_desc}", True)
 
     behavior = (
         f"🔄 انعكاس عرض/طلب: رصد الانفجار السعري إشارة {breakout_result.side} أولية "
