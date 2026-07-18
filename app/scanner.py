@@ -117,6 +117,9 @@ class ScannerState:
         return symbols
 
     def _run_scan_cycle(self, settings: dict):
+        from . import ict_strategy
+        ict_strategy.set_ignore_kill_zone(settings.get("ict_ignore_kill_zone", False))
+
         symbols = self._resolve_symbols(settings)
         exchange = okx_client if settings["exchange"] == "okx" else binance_client
         db.add_log(f"[{time.strftime('%H:%M:%S')}] بدء فحص حزمة الأزواج الذكية المكتشفة...")

@@ -29,6 +29,15 @@ from .analyzer import (
     atr, _get_bias, daily_trend, in_kill_zone,
 )
 
+# مفتاح عام (يُضبط من scanner.py أو صفحة التشخيص حسب إعدادات المستخدم) لتجاهل قيد
+# جلسة التداول (Kill Zone) — الافتراضي هو التقيّد بالجلسة (False) كما بالتصميم الأصلي.
+_ignore_kill_zone = False
+
+
+def set_ignore_kill_zone(value: bool):
+    global _ignore_kill_zone
+    _ignore_kill_zone = bool(value)
+
 
 def _find_fvg_in_zone(klines: List[Kline], zone_low: float, zone_high: float, bullish: bool) -> Optional[float]:
     """يبحث عن فجوة سعرية (FVG) تقع مركزها داخل المنطقة الذهبية المحددة."""
@@ -80,11 +89,13 @@ def analyze_ict_smart_sweep(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
     if atr_val <= 0 or last_price <= 0:
         return None
 
-    # فلتر جلسة التداول (Kill Zone) — الاستراتيجية الأصلية تشترطه لكل إشارة
-    if not in_kill_zone():
+    # فلتر جلسة التداول (Kill Zone) — الاستراتيجية الأصلية تشترطه لكل إشارة، إلا لو
+    # فعّل المستخدم خيار تجاهل الجلسة صراحة من الإعدادات
+    if not _ignore_kill_zone and not in_kill_zone():
         _log("❌ فلتر جلسة التداول (Kill Zone)", "الوقت الحالي خارج نطاق جلسات لندن/نيويورك النشطة — رفض إلزامي", False)
         return None
-    _log("✅ جلسة تداول نشطة (Kill Zone)", "داخل النطاق", True)
+    _log("✅ جلسة تداول نشطة (Kill Zone)" if not _ignore_kill_zone else "▫️ قيد الجلسة (Kill Zone)",
+         "داخل النطاق" if not _ignore_kill_zone else "متجاهَل حسب إعدادات المستخدم — يشتغل بأي وقت", True)
 
     # 1) الاتجاه العام على 4 ساعات
     trend4h = _get_bias(k4h)

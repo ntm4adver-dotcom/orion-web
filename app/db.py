@@ -51,6 +51,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "gdrive_folder_id": "",
     "is_gdrive_backup_enabled": 0,
     "active_strategy": "explosive_breakout",  # 'explosive_breakout' أو 'ict_smart_sweep'
+    "ict_ignore_kill_zone": 0,  # تجاهل قيد جلسة التداول (Kill Zone) لاستراتيجية ICT — تشغيلها بأي وقت
     # OKX trading connection
     "okx_api_key": "",
     "okx_api_secret": "",
@@ -161,7 +162,8 @@ def get_settings() -> Dict[str, Any]:
                  "is_volume_filter_enabled", "is_vwap_filter_enabled", "is_4h_buyers_filter_enabled",
                  "is_cancel_if_exceeds_target_enabled", "okx_is_testnet", "okx_is_auto_trading_enabled",
                  "okx_is_max_leverage_enabled", "is_adaptive_stop_loss_enabled", "is_instant_entry_enabled",
-                 "is_coin_learning_enabled", "is_auto_backup_enabled", "is_gdrive_backup_enabled"):
+                 "is_coin_learning_enabled", "is_auto_backup_enabled", "is_gdrive_backup_enabled",
+                 "ict_ignore_kill_zone"):
         settings[bkey] = bool(int(settings.get(bkey, 0)))
     return settings
 
