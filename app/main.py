@@ -165,9 +165,10 @@ def api_diagnose(request: Request, symbol: str):
     if not is_logged_in(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
+    import inspect
     from . import binance_client, okx_client
-    from .analyzer import MarketMicrostructure, analyze_explosive_breakout
-    from .ict_strategy import analyze_ict_smart_sweep
+    from .analyzer import MarketMicrostructure
+    from .strategies import STRATEGY_REGISTRY
 
     symbol = symbol.strip().upper()
     if not symbol.endswith("USDT"):
@@ -203,18 +204,35 @@ def api_diagnose(request: Request, symbol: str):
         cvd_pct=exchange.get_cvd_24h_pct(symbol) if hasattr(exchange, "get_cvd_24h_pct") else None,
     )
 
-    trace1: list = []
-    result1 = analyze_explosive_breakout(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro, trace=trace1)
-
-    trace2: list = []
-    result2 = analyze_ict_smart_sweep(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro, trace=trace2)
-
     def _fmt_result(r):
         if r is None:
             return None
         return {
             "side": r.side, "probability": r.prob, "entry_price": r.entry_price,
             "stop_loss": r.stop_loss, "take_profit": r.take_profit, "rr": r.rr, "quality": r.quality,
+        }
+
+    # نشغّل كل استراتيجية مسجّلة بالسجل المركزي تلقائياً — أي استراتيجية تُضاف مستقبلاً
+    # تظهر هنا بدون أي تعديل إضافي بهذا الملف، بنفس مبدأ "الكل معاً"
+    strategies_out = {}
+    for key, info in STRATEGY_REGISTRY.items():
+        fn = info["fn"]
+        trace: list = []
+        try:
+            # لو الاستراتيجية تدعم معامل trace نمرره، وإلا نستدعيها بدونه بدون ما نكسر التوافق
+            if "trace" in inspect.signature(fn).parameters:
+                result = fn(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro, trace=trace)
+            else:
+                result = fn(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro)
+                trace = [{"check": "ℹ️ هذي الاستراتيجية لا تدعم التتبع التفصيلي بعد", "value": "", "ok": None}]
+        except Exception as e:
+            result = None
+            trace = [{"check": "❌ خطأ أثناء التحليل", "value": str(e), "ok": False}]
+
+        strategies_out[key] = {
+            "label": strategy_label(key),
+            "result": _fmt_result(result),
+            "trace": trace,
         }
 
     return {
@@ -224,8 +242,7 @@ def api_diagnose(request: Request, symbol: str):
             "ob_imbalance": micro.ob_imbalance, "taker_pressure": micro.taker_pressure,
             "long_short_ratio": micro.long_short_ratio, "cvd_pct": micro.cvd_pct,
         },
-        "explosive_breakout": {"result": _fmt_result(result1), "trace": trace1},
-        "ict_smart_sweep": {"result": _fmt_result(result2), "trace": trace2},
+        "strategies": strategies_out,
     }
 
 

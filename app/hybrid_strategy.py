@@ -28,15 +28,30 @@ from .ict_strategy import analyze_ict_smart_sweep
 
 
 def analyze_hybrid_confirmation(symbol: str, k4h, k1h, k15m, k5m, k_daily,
-                                 micro: Optional[MarketMicrostructure] = None) -> Optional[AnalysisResult]:
+                                 micro: Optional[MarketMicrostructure] = None,
+                                 trace: Optional[list] = None) -> Optional[AnalysisResult]:
+    def _log(label, value, ok=None):
+        if trace is not None:
+            trace.append({"check": label, "value": value, "ok": ok})
+
     # الخطوة 1: الانفجار السعري كـ"كاشف حدث" فقط — أي اتجاه يكفي لإثبات وجود زخم حقيقي
-    breakout_result = analyze(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro)
+    breakout_trace: list = []
+    breakout_result = analyze(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro, trace=breakout_trace)
+    if trace is not None:
+        trace.append({"check": "── ⚡ المرحلة 1: كاشف الحدث (الانفجار السعري) ──", "value": "", "ok": None})
+        trace.extend(breakout_trace)
     if breakout_result is None:
+        _log("❌ القرار النهائي", "ما فيه أي حدث سيولة/زخم يستاهل التحليل العميق أصلاً — توقفنا هنا ولم نشغّل ICT", False)
         return None  # ما فيه أي حدث سيولة/زخم يستاهل التحليل العميق أصلاً
 
     # الخطوة 2: ICT يحدد الاتجاه الحقيقي ونقاط الدخول/الخروج — قراره نهائي وحاسم
-    ict_result = analyze_ict_smart_sweep(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro)
+    ict_trace: list = []
+    ict_result = analyze_ict_smart_sweep(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro, trace=ict_trace)
+    if trace is not None:
+        trace.append({"check": "── 🧠 المرحلة 2: القرار الحاسم (النمط الذكي ICT) ──", "value": "", "ok": None})
+        trace.extend(ict_trace)
     if ict_result is None:
+        _log("❌ القرار النهائي", "فيه حدث زخم لكن ICT ما لقى نقطة دخول واضحة وموثوقة بعده — رُفضت الصفقة", False)
         return None  # فيه حدث لكن ICT ما لقى نقطة دخول واضحة وموثوقة بعده
 
     same_direction = ict_result.side == breakout_result.side
@@ -62,6 +77,8 @@ def analyze_hybrid_confirmation(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         f"🧠 [القرار النهائي - النمط الذكي]: {ict_result.behavior}"
     )
     volume_analysis = ("تأكيد مزدوج (نفس الاتجاه)" if same_direction else "انعكاس بعد فخ سيولة (اتجاه ICT هو النهائي)")
+
+    _log("✅ القرار النهائي", f"{ict_result.side} — {direction_note}", True)
 
     return AnalysisResult(
         symbol=symbol, trend=ict_result.trend, dt="", prob=combined_prob, price=ict_result.price,

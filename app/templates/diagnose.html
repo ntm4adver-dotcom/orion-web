@@ -75,18 +75,6 @@ function renderTrace(trace){
   }).join('');
 }
 
-function renderStrategyBlock(title, block){
-  const res = block.result;
-  const header = res
-    ? `<div style="background:rgba(34,197,94,.1); color:var(--green); padding:10px; border-radius:10px; margin-bottom:10px; font-weight:800;">
-         ✅ تم توليد إشارة: ${res.side} | احتمالية ${res.probability}% | دخول ${res.entry_price} | وقف ${res.stop_loss} | هدف ${res.take_profit} | R:R 1:${res.rr}
-       </div>`
-    : `<div style="background:rgba(239,68,68,.08); color:var(--red); padding:10px; border-radius:10px; margin-bottom:10px; font-weight:800;">
-         ❌ لم تتحقق شروط هذي الاستراتيجية الآن على هذي العملة
-       </div>`;
-  return `<div class="card"><h3>${title}</h3>${header}${renderTrace(block.trace)}</div>`;
-}
-
 function renderDiagnose(data){
   const resultDiv = document.getElementById('diagnose-result');
   if (data.error){
@@ -110,10 +98,26 @@ function renderDiagnose(data){
     </div>
   </div>`;
 
-  html += renderStrategyBlock('⚡ الانفجار السعري (Explosive Breakout Hunter)', data.explosive_breakout);
-  html += renderStrategyBlock('🧠 النمط الذكي لسحب السيولة (ICT / Smart Money Concepts)', data.ict_smart_sweep);
+  html += renderStrategyBlock(data.strategies);
 
   resultDiv.innerHTML = html;
+}
+
+function renderStrategyBlock(strategies){
+  let out = '';
+  for (const key in strategies){
+    const block = strategies[key];
+    const res = block.result;
+    const header = res
+      ? `<div style="background:rgba(34,197,94,.1); color:var(--green); padding:10px; border-radius:10px; margin-bottom:10px; font-weight:800;">
+           ✅ تم توليد إشارة: ${res.side} | احتمالية ${res.probability}% | دخول ${res.entry_price} | وقف ${res.stop_loss} | هدف ${res.take_profit} | R:R 1:${res.rr}
+         </div>`
+      : `<div style="background:rgba(239,68,68,.08); color:var(--red); padding:10px; border-radius:10px; margin-bottom:10px; font-weight:800;">
+           ❌ لم تتحقق شروط هذي الاستراتيجية الآن على هذي العملة
+         </div>`;
+    out += `<div class="card"><h3>${block.label}</h3>${header}${renderTrace(block.trace)}</div>`;
+  }
+  return out;
 }
 </script>
 {% endblock %}
