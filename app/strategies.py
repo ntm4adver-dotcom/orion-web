@@ -16,6 +16,7 @@ from .ict_strategy import analyze_ict_smart_sweep
 from .hybrid_strategy import analyze_hybrid_confirmation
 from .ict_guided_strategy import analyze_ict_guided_entry
 from .supply_demand_strategy import analyze_supply_demand_reversal
+from .stop_hunt_strategy import analyze_stop_hunt
 
 # كل استراتيجية: مفتاح فريد -> {label: الاسم المعروض, fn: دالة التحليل}
 # توقيع دالة التحليل الموحّد: fn(symbol, k4h, k1h, k15m, k5m, k_daily, micro=None) -> Optional[AnalysisResult]
@@ -39,6 +40,10 @@ STRATEGY_REGISTRY = {
     "supply_demand_reversal": {
         "label": "🔄 انعكاس عرض/طلب (يعكس اتجاه الانفجار السعري من أقرب منطقة Supply/Demand)",
         "fn": analyze_supply_demand_reversal,
+    },
+    "stop_hunt": {
+        "label": "🎣 صيد الاستوبات والمؤسسات (Stop-Loss Hunting)",
+        "fn": analyze_stop_hunt,
     },
 }
 
