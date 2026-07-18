@@ -56,12 +56,16 @@ def _detect_zones(klines: List[Kline], lookback: int = 80) -> List[Dict]:
     return zones
 
 
-def _is_zone_fresh(zone: Dict, klines: List[Kline]) -> bool:
-    """منطقة 'طازجة' = لم يُغلق أي سعر عبرها بالكامل منذ تشكّلها (لم تُخترق/تُلغَ بعد)."""
+def _is_zone_valid(zone: Dict, klines: List[Kline], atr_val: float) -> bool:
+    """منطقة 'صالحة' = يسمح بأي عدد اختبارات/ارتدادات سابقة منها (حتى لو دخل السعر
+    داخلها أو لامس حدودها أكثر من مرة)، وتُلغى فقط لو **انكسرت فعلياً وبشكل مؤكد**:
+    إغلاق شمعة (مو مجرد ظل/Wick) يتجاوز حدّها الخارجي بهامش أمان (0.15×ATR) لتفادي
+    إلغاء المنطقة بسبب اختراق هامشي بسيط لا يمثل انكساراً حقيقياً."""
+    buffer = atr_val * 0.15
     for k in klines[zone["index"] + 4:]:
-        if zone["type"] == "supply" and k.close > zone["high"]:
+        if zone["type"] == "supply" and k.close > zone["high"] + buffer:
             return False
-        if zone["type"] == "demand" and k.close < zone["low"]:
+        if zone["type"] == "demand" and k.close < zone["low"] - buffer:
             return False
     return True
 
@@ -79,7 +83,7 @@ def analyze_supply_demand_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
 
     current_price = k5m[-1].close if k5m else k1h[-1].close
     zones = _detect_zones(k1h)
-    fresh_zones = [z for z in zones if _is_zone_fresh(z, k1h)]
+    fresh_zones = [z for z in zones if _is_zone_valid(z, k1h, atr_val)]
 
     if breakout_result.side == "Long":
         # نتوقع فخ سيولة صاعد → نبحث عن أقرب منطقة عرض (Supply) فوق السعر الحالي للدخول Short منها
