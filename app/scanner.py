@@ -269,12 +269,13 @@ class ScannerState:
                 db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي إشارة هبوط: نسبة المبيعات غير كافية.")
                 return
 
-        # منع التكرار: تجاهل الإشارة الجديدة إذا فيه صفقة (معلقة أو نشطة) بالفعل لنفس العملة
-        # ونفس الاتجاه — بغض النظر عن الاستراتيجية، عشان ما نفتح صفقتين متطابقتين بنفس الاتجاه
-        existing = db.get_active_or_pending_signal(result.symbol, result.side)
+        # منع التكرار: تجاهل الإشارة الجديدة إذا فيه صفقة (معلقة أو نشطة) بالفعل لنفس
+        # العملة ونفس الاتجاه **ونفس الاستراتيجية** — استراتيجيات مختلفة تقدر تفتح
+        # صفقات مستقلة على نفس العملة بنفس الوقت (مفيد لمقارنة أدائها الحقيقي ببعض)
+        existing = db.get_active_or_pending_signal(result.symbol, result.side, strategy_key)
         if existing:
             status_ar = "نشطة" if existing["status"] == "ACTIVE" else "معلقة"
-            db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تجاهل الإشارة الجديدة ({result.side}) لوجود صفقة {status_ar} بالفعل من نفس الاتجاه (بروبابيليتي {existing['probability']}%).")
+            db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تجاهل الإشارة الجديدة ({result.side}) لوجود صفقة {status_ar} بنفس الاستراتيجية بالفعل من نفس الاتجاه (بروبابيليتي {existing['probability']}%).")
             return
 
         # منع إعادة اكتشاف نفس النمط اللي أُغلق (رابحاً أو خاسراً) خلال آخر ساعات قليلة —

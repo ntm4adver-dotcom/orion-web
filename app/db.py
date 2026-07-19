@@ -288,14 +288,16 @@ def get_recent_similar_signal(symbol: str, side: str, strategy: str, entry_price
     return None
 
 
-def get_active_or_pending_signal(symbol: str, side: str) -> Optional[Dict[str, Any]]:
-    """يعادل signalDao.getActiveOrPendingSignal الأصلي — يتحقق من وجود صفقة بنفس
-    الرمز والاتجاه حالتها PENDING أو ACTIVE، لمنع تكرار نفس الإشارة."""
+def get_active_or_pending_signal(symbol: str, side: str, strategy: str = "") -> Optional[Dict[str, Any]]:
+    """يتحقق من وجود صفقة بنفس الرمز والاتجاه **ونفس الاستراتيجية** حالتها PENDING
+    أو ACTIVE، لمنع تكرار نفس الإشارة من نفس الاستراتيجية فقط. هذا يسمح لاستراتيجيات
+    مختلفة إنها تفتح صفقات مستقلة على نفس العملة بنفس الوقت — مفيد لمقارنة أداء
+    الاستراتيجيات ببعض على نفس ظروف السوق الحقيقية، بدل ما وحدة تمنع البقية."""
     with _lock, _connect() as conn:
         cur = conn.execute(
-            "SELECT * FROM trade_signals WHERE symbol=? AND side=? AND status IN ('PENDING','ACTIVE') "
+            "SELECT * FROM trade_signals WHERE symbol=? AND side=? AND strategy=? AND status IN ('PENDING','ACTIVE') "
             "ORDER BY id DESC LIMIT 1",
-            (symbol, side),
+            (symbol, side, strategy),
         )
         row = cur.fetchone()
         return dict(row) if row else None
