@@ -165,6 +165,42 @@ def diagnose_page(request: Request):
     return templates.TemplateResponse("diagnose.html", {"request": request, "active": "diagnose", "s": db.get_settings()})
 
 
+@app.get("/api/liquidation-heatmap")
+def api_liquidation_heatmap(request: Request, symbol: str):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    from . import binance_client, okx_client
+    from .liquidation_heatmap import estimate_liquidation_heatmap
+
+    symbol = symbol.strip().upper()
+    if not symbol.endswith("USDT"):
+        symbol += "USDT"
+
+    s = db.get_settings()
+    exchange = okx_client if s["exchange"] == "okx" else binance_client
+    exchange_name = "OKX" if s["exchange"] == "okx" else "Binance"
+
+    # آخر ~7 أيام على فريم الساعة (168 شمعة) كنافذة "بروفايل الفوليوم" لتقدير مواقع الدخول المحتملة
+    klines = exchange.fetch_klines(symbol, "1h", 168)
+    if len(klines) < 20:
+        return {"symbol": symbol, "exchange": exchange_name, "error": "بيانات غير كافية لهذا الرمز"}
+
+    current_price = klines[-1].close
+    funding_rate = exchange.fetch_funding_rate(symbol) if hasattr(exchange, "fetch_funding_rate") else None
+    long_short_ratio = exchange.fetch_long_short_ratio(symbol) if hasattr(exchange, "fetch_long_short_ratio") else None
+
+    result = estimate_liquidation_heatmap(klines, current_price, funding_rate=funding_rate, long_short_ratio=long_short_ratio)
+    return {
+        "symbol": symbol, "exchange": exchange_name, "current_price": current_price,
+        "funding_rate": funding_rate, "long_short_ratio": long_short_ratio,
+        "top_long_liq_zones": result["top_long_liq_zones"],
+        "top_short_liq_zones": result["top_short_liq_zones"],
+        "is_estimate": True,
+        "disclaimer": "تقدير إحصائي تقريبي مبني على بروفايل الفوليوم ورافعات شائعة — مو بيانات تصفية حقيقية مؤكدة من المنصة.",
+    }
+
+
 @app.get("/api/diagnose")
 def api_diagnose(request: Request, symbol: str):
     if not is_logged_in(request):

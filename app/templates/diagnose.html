@@ -36,6 +36,29 @@
 </style>
 
 <script>
+function renderLiquidationHeatmap(data){
+  if (data.error){
+    return `<div class="card"><h3>🔥 خارطة التصفية الحرارية (تقدير)</h3><p class="muted">${data.error}</p></div>`;
+  }
+  const longRows = data.top_long_liq_zones.map(z =>
+    `<div class="trace-row fail"><span class="trace-icon">🔴</span><span style="flex:1; text-align:right;">تصفية Long متوقعة (تحت السعر بـ ${Math.abs(z.distance_pct)}%)</span><span style="font-weight:700;">${z.price.toFixed(6)}</span></div>`
+  ).join('') || '<p class="muted">لا توجد مناطق واضحة.</p>';
+  const shortRows = data.top_short_liq_zones.map(z =>
+    `<div class="trace-row pass"><span class="trace-icon">🟢</span><span style="flex:1; text-align:right;">تصفية Short متوقعة (فوق السعر بـ ${Math.abs(z.distance_pct)}%)</span><span style="font-weight:700;">${z.price.toFixed(6)}</span></div>`
+  ).join('') || '<p class="muted">لا توجد مناطق واضحة.</p>';
+
+  return `<div class="card">
+    <h3>🔥 خارطة التصفية الحرارية (تقدير تقريبي)</h3>
+    <p class="muted" style="font-size:11px; margin-bottom:10px;">${data.disclaimer}</p>
+    <div style="margin-bottom:10px;">السعر الحالي: <b>${data.current_price}</b> ${data.funding_rate !== null ? '| معدل التمويل: <b>' + (data.funding_rate*100).toFixed(4) + '%</b>' : ''} ${data.long_short_ratio !== null ? '| نسبة Long/Short: <b>' + data.long_short_ratio.toFixed(2) + '</b>' : ''}</div>
+    <b style="color:var(--red); font-size:13px;">⬇️ أقرب مناطق تصفية Long محتملة (مناطق جذب هابطة)</b>
+    ${longRows}
+    <div style="height:8px;"></div>
+    <b style="color:var(--green); font-size:13px;">⬆️ أقرب مناطق تصفية Short محتملة (مناطق جذب صاعدة)</b>
+    ${shortRows}
+  </div>`;
+}
+
 async function runDiagnose(){
   const symbolInput = document.getElementById('symbol-input');
   const symbol = symbolInput.value.trim();
@@ -47,9 +70,14 @@ async function runDiagnose(){
   resultDiv.innerHTML = '<div class="card muted" style="text-align:center;">جاري سحب بيانات حقيقية الآن وتشغيل التحليل الكامل — قد يأخذ بضع ثوانٍ...</div>';
 
   try {
-    const r = await fetch('/api/diagnose?symbol=' + encodeURIComponent(symbol));
+    const [r, rHeat] = await Promise.all([
+      fetch('/api/diagnose?symbol=' + encodeURIComponent(symbol)),
+      fetch('/api/liquidation-heatmap?symbol=' + encodeURIComponent(symbol)),
+    ]);
     const data = await r.json();
+    const heatData = await rHeat.json();
     renderDiagnose(data);
+    resultDiv.insertAdjacentHTML('afterbegin', renderLiquidationHeatmap(heatData));
   } catch(e) {
     resultDiv.innerHTML = '<div class="card" style="color:var(--red);">خطأ بالاتصال: ' + e + '</div>';
   } finally {

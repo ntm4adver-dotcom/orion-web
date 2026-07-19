@@ -18,6 +18,8 @@ from .ict_guided_strategy import analyze_ict_guided_entry
 from .supply_demand_strategy import analyze_supply_demand_reversal
 from .stop_hunt_strategy import analyze_stop_hunt
 from .scalp_strategy import analyze_scalp_precision
+from .liquidation_strategy import analyze_liquidation_hunter
+from .fabio_scalper_strategy import analyze_fabio_scalper
 
 # كل استراتيجية: مفتاح فريد -> {label: الاسم المعروض, fn: دالة التحليل}
 # توقيع دالة التحليل الموحّد: fn(symbol, k4h, k1h, k15m, k5m, k_daily, micro=None) -> Optional[AnalysisResult]
@@ -49,6 +51,14 @@ STRATEGY_REGISTRY = {
     "scalp_precision": {
         "label": "🎯 السكالب السريع الدقيق (R:R≥5 مفروض حقيقياً)",
         "fn": analyze_scalp_precision,
+    },
+    "liquidation_hunter": {
+        "label": "🔥 صيد التصفيات (Liquidation Hunter) — تقدير تقريبي",
+        "fn": analyze_liquidation_hunter,
+    },
+    "fabio_scalper": {
+        "label": "📊 سكالب فابيو فالنتيني (Direction-Location-Aggression)",
+        "fn": analyze_fabio_scalper,
     },
 }
 
