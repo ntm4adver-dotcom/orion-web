@@ -59,13 +59,36 @@ def _request(method: str, path: str, body: dict | None, api_key: str, api_secret
     return None
 
 
-def _public_get(path: str) -> Optional[dict]:
+def _public_get(path: str, error_key: Optional[str] = None) -> Optional[dict]:
+    """نسخة مطوّرة: تسجّل سبب الفشل الحقيقي (شبكة/انتهاء مهلة/رفض من OKX) بدل ابتلاعه
+    بصمت — عشان نقدر نشخّص المشكلة الفعلية بدل التخمين. لو error_key محدد، السبب
+    يُسجَّل بقاموس last_error تحت هذا المفتاح، وتقدر تشوفه عبر صفحة التشخيص."""
     try:
         with httpx.Client(timeout=15) as client:
             r = client.get(BASE_URL + path)
-            r.raise_for_status()
-            return r.json()
-    except Exception:
+            if r.status_code != 200:
+                if error_key:
+                    last_error[error_key] = f"رفض HTTP {r.status_code} من OKX — {r.text[:150]}"
+                return None
+            data = r.json()
+            if error_key:
+                code = data.get("code")
+                if code not in (None, "0"):
+                    last_error[error_key] = f"رفضت OKX الطلب: {data.get('msg', 'بدون تفاصيل')} (كود {code})"
+                else:
+                    last_error.pop(error_key, None)
+            return data
+    except httpx.TimeoutException:
+        if error_key:
+            last_error[error_key] = "انتهت مهلة الاتصال (Timeout 15 ثانية) — الشبكة بطيئة أو OKX لا يستجيب"
+        return None
+    except httpx.ConnectError as e:
+        if error_key:
+            last_error[error_key] = f"فشل الاتصال بالخادم: {e}"
+        return None
+    except Exception as e:
+        if error_key:
+            last_error[error_key] = f"خطأ غير متوقع: {type(e).__name__}: {e}"
         return None
 
 
@@ -446,8 +469,12 @@ def fetch_taker_pressure(symbol: str, limit: int = 100) -> Optional[float]:
     ترجع رقم بين -1 (ضغط بيع كامل) و 1 (ضغط شراء كامل).
     كل استدعاء لهذي الدالة يغذّي أيضاً متتبع CVD التراكمي (انظر get_cvd_24h_pct)."""
     inst_id = _to_inst_id(symbol)
-    resp = _public_get(f"/api/v5/market/trades?instId={inst_id}&limit={limit}")
-    if not resp or resp.get("code") != "0" or not resp.get("data"):
+    error_key = f"taker_pressure:{symbol}"
+    resp = _public_get(f"/api/v5/market/trades?instId={inst_id}&limit={limit}", error_key=error_key)
+    if not resp or resp.get("code") != "0":
+        return None  # السبب مسجّل تلقائياً بـ last_error[error_key] عبر _public_get
+    if not resp.get("data"):
+        last_error[error_key] = "لا توجد صفقات حديثة مسجّلة لهذي العملة على OKX (سيولة منخفضة جداً أو الزوج غير نشط)"
         return None
     try:
         buy_vol = 0.0
@@ -460,8 +487,13 @@ def fetch_taker_pressure(symbol: str, limit: int = 100) -> Optional[float]:
                 sell_vol += sz
         _record_cvd_sample(symbol, buy_vol, sell_vol)
         total = buy_vol + sell_vol
-        return (buy_vol - sell_vol) / total if total > 0 else None
-    except Exception:
+        if total <= 0:
+            last_error[error_key] = "إجمالي حجم الصفقات المسحوبة صفر (بيانات غير صالحة من المنصة)"
+            return None
+        last_error.pop(error_key, None)
+        return (buy_vol - sell_vol) / total
+    except Exception as e:
+        last_error[error_key] = f"خطأ أثناء معالجة بيانات الصفقات: {type(e).__name__}: {e}"
         return None
 
 

@@ -242,6 +242,13 @@ def api_diagnose(request: Request, symbol: str):
             "trace": trace,
         }
 
+    micro_errors = {}
+    if hasattr(exchange, "last_error"):
+        for field, key_prefix in (("taker_pressure", "taker_pressure"),):
+            err = exchange.last_error.get(f"{key_prefix}:{symbol}")
+            if err:
+                micro_errors[field] = err
+
     return {
         "symbol": symbol, "exchange": exchange_name, "data_status": data_status,
         "microstructure": {
@@ -249,6 +256,7 @@ def api_diagnose(request: Request, symbol: str):
             "ob_imbalance": micro.ob_imbalance, "taker_pressure": micro.taker_pressure,
             "long_short_ratio": micro.long_short_ratio, "cvd_pct": micro.cvd_pct,
         },
+        "microstructure_errors": micro_errors,
         "strategies": strategies_out,
     }
 

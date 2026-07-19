@@ -96,6 +96,10 @@ function renderDiagnose(data){
       <div class="micro-box"><div class="lbl">نسبة Long/Short</div><div class="val">${data.microstructure.long_short_ratio !== null ? data.microstructure.long_short_ratio.toFixed(2) : '—'}</div></div>
       <div class="micro-box"><div class="lbl">CVD (24س)</div><div class="val">${data.microstructure.cvd_pct !== null ? data.microstructure.cvd_pct.toFixed(1)+'%' : '— (يحتاج وقت تجميع)'}</div></div>
     </div>
+    ${data.microstructure_errors && data.microstructure_errors.taker_pressure ? `
+    <div style="margin-top:10px; padding:10px; background:rgba(239,68,68,.1); border-radius:10px; color:var(--red); font-size:12px;">
+      ⚠️ <b>سبب تعذّر جلب ضغط المتداولين:</b> ${data.microstructure_errors.taker_pressure}
+    </div>` : ''}
   </div>`;
 
   html += renderStrategyBlock(data.strategies);
