@@ -272,6 +272,13 @@ class ScannerState:
             db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تجاهل الإشارة الجديدة ({result.side}) لوجود صفقة {status_ar} بالفعل من نفس الاتجاه (بروبابيليتي {existing['probability']}%).")
             return
 
+        # منع إعادة اكتشاف نفس النمط اللي أُغلق (رابحاً أو خاسراً) خلال آخر ساعات قليلة —
+        # يحل مشكلة إعادة التقاط نفس شمعة الفريم الأعلى كإشارة "جديدة" فوراً بعد إغلاقها
+        recent_dup = db.get_recent_similar_signal(result.symbol, result.side, strategy_key, result.entry_price)
+        if recent_dup:
+            db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تجاهل إشارة مكررة — نفس النمط تقريباً ظهر بآخر ساعات (سعر دخول قريب من صفقة سابقة برقم #{recent_dup['id']}).")
+            return
+
         strategy_display = strategy_label(strategy_key)
         db.add_log(f"🎯 [{symbol}] ({strategy_display}) تم رصد فرصة {result.side}! الاحتمالية: {result.prob}% | الجودة: {result.quality}")
         signal_id = db.add_signal({

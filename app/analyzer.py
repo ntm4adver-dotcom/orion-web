@@ -414,22 +414,24 @@ def analyze_explosive_breakout(
         return None
     _log("الفائدة المفتوحة (OI) تغيّر", f"{oi_change_pct:.2f}%" if oi_change_pct is not None else "غير متوفرة")
 
-    # ✅ شرط إلزامي جديد: التحقق الحقيقي من اتجاه الفوليوم الداخل وقت الاختراق
-    # (Taker Buy/Sell Pressure) — هذا يجاوب سؤال "هل الفوليوم اللي دخل فعلاً كان
-    # شراء أو بيع؟" بدل الاعتماد على نمط السعر بس (RSI/EMA/شكل الشمعة). لو ما
-    # توفرت هذي البيانات، أو كانت تعاكس اتجاه الصفقة المقترح من نمط السعر، نرفض
-    # الصفقة بالكامل — هذا فحص إلزامي على كل الصفقات (مو بس الدخول المبكر).
+    # 📊 تعديل مبني على بيانات إنتاج فعلية (تصدير صفقات حقيقي): كان هذا الشرط إلزامياً
+    # 100% (يرفض الصفقة لو ما توفرت البيانات، حتى لو باقي كل الشروط ممتازة). بفحص سجل
+    # حقيقي لعدة ساعات تشغيل، ثبت إن هذا الشرط أوقف تماماً 4 استراتيجيات كاملة تعتمد
+    # على هذي البوابة كمُطلِق (الانفجار السعري، التأكيد المزدوج، الانفجار الموجّه بـICT،
+    # انعكاس عرض/طلب) — صفر إشارات من الأربعة رغم توفر فرص حقيقية. الحل: نفس فكرة
+    # التأكيد الحقيقي من الصفقات الفعلية، لكن كفلتر رفض عند **تعارض واضح** فقط (مو غياب
+    # البيانات)، ونضيفه كنقطة ثقة إضافية بدل بوابة إلزامية توقف النظام بالكامل.
     taker_pressure = micro.taker_pressure if micro else None
-    if taker_pressure is None:
-        _log("❌ فلتر ضغط المتداولين الفعليين (إلزامي)", "تعذّر جلب بيانات الصفقات الفعلية من المنصة — رفض إلزامي بغض النظر عن باقي الشروط", False)
-        return None  # ما قدرنا نتأكد من اتجاه الفوليوم الفعلي = لا ندخل
-    if side == "Long" and taker_pressure < 0.10:
-        _log("❌ فلتر ضغط المتداولين الفعليين (إلزامي)", f"القيمة {taker_pressure:.2f} أقل من الحد الأدنى المطلوب (0.10) لصفقة شراء — رفض", False)
-        return None  # الفوليوم الداخل ما يثبت ضغط شراء حقيقي يدعم الصفقة
-    if side == "Short" and taker_pressure > -0.10:
-        _log("❌ فلتر ضغط المتداولين الفعليين (إلزامي)", f"القيمة {taker_pressure:.2f} أعلى من الحد الأقصى المسموح (-0.10) لصفقة بيع — رفض", False)
-        return None  # الفوليوم الداخل ما يثبت ضغط بيع حقيقي يدعم الصفقة
-    _log("✅ فلتر ضغط المتداولين الفعليين (إلزامي)", f"{taker_pressure:.2f} — تجاوز الحد المطلوب", True)
+    if taker_pressure is not None:
+        if side == "Long" and taker_pressure < -0.25:
+            _log("❌ فلتر ضغط المتداولين الفعليين", f"القيمة {taker_pressure:.2f} تعاكس صفقة الشراء بوضوح — رفض", False)
+            return None
+        if side == "Short" and taker_pressure > 0.25:
+            _log("❌ فلتر ضغط المتداولين الفعليين", f"القيمة {taker_pressure:.2f} تعاكس صفقة البيع بوضوح — رفض", False)
+            return None
+        _log("✅ فلتر ضغط المتداولين الفعليين", f"{taker_pressure:.2f} — لا يعارض الصفقة", True)
+    else:
+        _log("فلتر ضغط المتداولين الفعليين", "بيانات غير متوفرة هذي المرة — تم تخطي هذا الفلتر (مو رفض)", None)
 
     ob_imbalance = micro.ob_imbalance if micro else None
     if is_early_entry and ob_imbalance is not None:
@@ -534,7 +536,7 @@ def analyze_explosive_breakout(
     if funding_crowded:
         parts.append("⚠️ تنبيه: معدل التمويل (Funding) مزدحم بنفس اتجاه الصفقة - خطر ارتداد مفاجئ أعلى من المعتاد")
     if taker_pressure is not None:
-        parts.append(f"💥 ضغط المتداولين الفعليين (Taker Pressure) المؤكَّد إلزامياً: {taker_pressure:.2f} - {'قوي جداً (تأكيد إضافي)' if (side=='Long' and taker_pressure>0.15) or (side=='Short' and taker_pressure<-0.15) else 'متوافق (فوق الحد الأدنى المطلوب)'}")
+        parts.append(f"💥 ضغط المتداولين الفعليين (Taker Pressure): {taker_pressure:.2f} - {'قوي جداً (تأكيد إضافي)' if (side=='Long' and taker_pressure>0.15) or (side=='Short' and taker_pressure<-0.15) else 'محايد'}")
     if long_short_ratio is not None:
         crowded_txt = "⚠️ ازدحام حسابات بنفس اتجاهنا - خطر تصفية مزدحمة" if ((side=='Long' and long_short_ratio>2.2) or (side=='Short' and long_short_ratio<0.45)) else "طبيعي"
         parts.append(f"👥 نسبة تمركز الحسابات (Long/Short): {long_short_ratio:.2f} - {crowded_txt}")

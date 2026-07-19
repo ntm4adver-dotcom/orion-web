@@ -266,6 +266,28 @@ def get_coin_performance_for(symbol: str, side: str) -> Optional[Dict[str, Any]]
             "total": total, "win_rate": round((wins / total) * 100.0, 1)}
 
 
+def get_recent_similar_signal(symbol: str, side: str, strategy: str, entry_price: float,
+                               tolerance_pct: float = 0.002, since_hours: int = 6) -> Optional[Dict[str, Any]]:
+    """يكشف لو نفس النمط (نفس الرمز/الاتجاه/الاستراتيجية/سعر دخول قريب جداً) تكرر بآخر
+    عدة ساعات — حتى لو الإشارة السابقة أُغلقت (رابحة أو خاسرة). هذا يمنع مشكلة حقيقية:
+    بعض الاستراتيجيات (خصوصاً صيد الاستوبات) تعتمد على شموع فريم أعلى (ساعة مثلاً) ما
+    تتغير كل دقيقة، فتكتشف نفس النمط التاريخي مرة ثانية فوراً بعد إغلاق الصفقة السابقة،
+    وتفتح صفقة "جديدة" بنفس السعر بالضبط تكراراً — رغم إنها فعلياً نفس القرار الفاشل يتكرر."""
+    since_ts = int(time.time() * 1000) - (since_hours * 60 * 60 * 1000)
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            "SELECT * FROM trade_signals WHERE symbol=? AND side=? AND strategy=? AND timestamp>=? "
+            "ORDER BY id DESC LIMIT 10",
+            (symbol, side, strategy, since_ts),
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+    for row in rows:
+        prev_entry = row.get("entry_price") or 0
+        if prev_entry > 0 and abs(entry_price - prev_entry) / prev_entry <= tolerance_pct:
+            return row
+    return None
+
+
 def get_active_or_pending_signal(symbol: str, side: str) -> Optional[Dict[str, Any]]:
     """يعادل signalDao.getActiveOrPendingSignal الأصلي — يتحقق من وجود صفقة بنفس
     الرمز والاتجاه حالتها PENDING أو ACTIVE، لمنع تكرار نفس الإشارة."""
