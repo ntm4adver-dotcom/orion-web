@@ -54,7 +54,9 @@ def _detect_stop_hunt(klines: List[Kline], lookback: int = 50, vol_period: int =
         highest_high = max(k.high for k in historical)
         volume_ratio = (current.volume / avg_volume) if avg_volume > 0 else 1.0
         candle_range = current.high - current.low
-        buffer = candle_range * 0.1
+        # هامش وقف واقعي: الأكبر بين 40% من مدى الشمعة أو 0.4% من السعر — كان 10%
+        # بس (ضيق جداً)، يخلي الوقف يُضرب بضوضاء عادية قبل ما تتضح الحركة الحقيقية
+        buffer = max(candle_range * 0.4, current.close * 0.004)
 
         # صيد استوبات صاعد (سحب سيولة القيعان)
         if current.low < lowest_low and current.close > lowest_low:

@@ -112,10 +112,11 @@ def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
         return None
 
     entry_price = last.close
+    safe_buffer = max(atr5m * 0.6, entry_price * 0.004)  # الأكبر بين ATR موسَّع أو 0.4% من السعر
     if side == "Long":
-        stop_loss = min(prev.low, last.low) - atr5m * 0.25
+        stop_loss = min(prev.low, last.low) - safe_buffer
     else:
-        stop_loss = max(prev.high, last.high) + atr5m * 0.25
+        stop_loss = max(prev.high, last.high) + safe_buffer
 
     risk = abs(entry_price - stop_loss)
     if risk <= 0:

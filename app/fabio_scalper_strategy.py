@@ -90,20 +90,26 @@ def analyze_fabio_scalper(symbol: str, k4h, k1h, k15m, k5m, k_daily,
 
     is_imbalance = current_price > profile["vah"] * 1.0005 or current_price < profile["val"] * 0.9995
 
+    def _safe_buffer(atr_multiple: float, price_pct_floor: float = 0.006) -> float:
+        """هامش وقف واقعي: الأكبر بين مضاعف ATR الموسَّع، أو نسبة دنيا من السعر (0.6% افتراضياً).
+        هذا يحمي من الوقف الضيق جداً وقت هدوء السوق (ATR منخفض مؤقتاً)، اللي كان يخلي
+        السعر يضرب الوقف بمجرد تذبذب عادي — مو لأن اتجاه الصفقة كان غلط فعلاً."""
+        return max(atr_val * atr_multiple, current_price * price_pct_floor)
+
     # ── الخطوة 3: العدوانية (Aggression) + بناء الصفقة حسب النموذج المناسب ──
     if is_imbalance:
         # نموذج الاختلال (Trend/Continuation): كسر حافة منطقة القيمة بنفس اتجاه Direction
         if current_price > profile["vah"] and direction == "Long":
             side = "Long"
             entry_price = current_price
-            stop_loss = profile["vah"] - atr_val * 0.2
+            stop_loss = profile["vah"] - _safe_buffer(0.8)
             measured = profile["vah"] - profile["val"]
             take_profit = entry_price + max(measured, atr_val * 2.0)
             model = "اختلال/استمرار (Trend Model)"
         elif current_price < profile["val"] and direction == "Short":
             side = "Short"
             entry_price = current_price
-            stop_loss = profile["val"] + atr_val * 0.2
+            stop_loss = profile["val"] + _safe_buffer(0.8)
             measured = profile["vah"] - profile["val"]
             take_profit = entry_price - max(measured, atr_val * 2.0)
             model = "اختلال/استمرار (Trend Model)"
@@ -115,13 +121,13 @@ def analyze_fabio_scalper(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         if nearest_name == "VAH" and direction == "Short":
             side = "Short"
             entry_price = nearest_price
-            stop_loss = nearest_price + atr_val * 0.3
+            stop_loss = nearest_price + _safe_buffer(1.0)
             take_profit = profile["poc"]
             model = "توازن/ارتداد (Mean Reversion)"
         elif nearest_name == "VAL" and direction == "Long":
             side = "Long"
             entry_price = nearest_price
-            stop_loss = nearest_price - atr_val * 0.3
+            stop_loss = nearest_price - _safe_buffer(1.0)
             take_profit = profile["poc"]
             model = "توازن/ارتداد (Mean Reversion)"
         elif nearest_name == "LVN":
@@ -129,10 +135,10 @@ def analyze_fabio_scalper(symbol: str, k4h, k1h, k15m, k5m, k_daily,
             side = direction
             entry_price = nearest_price
             if side == "Long":
-                stop_loss = nearest_price - atr_val * 0.35
+                stop_loss = nearest_price - _safe_buffer(1.2)
                 take_profit = profile["vah"]
             else:
-                stop_loss = nearest_price + atr_val * 0.35
+                stop_loss = nearest_price + _safe_buffer(1.2)
                 take_profit = profile["val"]
             model = "فراغ سيولة (LVN Pass-Through)"
         else:
@@ -150,6 +156,13 @@ def analyze_fabio_scalper(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     # قاعدة فابيو المعلنة: عائد/مخاطرة 2:1 كحد أدنى إلزامياً
     if rr < 2.0:
         _log("❌ فلتر أدنى عائد/مخاطرة (2:1 — قاعدة فابيو المعلنة)", f"1:{rr} غير كافٍ — رفض", False)
+        return None
+
+    # سقف منطقي أعلى: عائد/مخاطرة متطرف جداً (>8) غالباً عرَض لوقف ضيق جداً مقابل
+    # هدف بعيد، مو صفقة "ممتازة" فعلاً — احتمال ضرب الوقف بضوضاء عادية قبل نجاح الحركة
+    # أعلى بكثير مما يوحي الرقم الجذاب. نرفضها بدل ما نعتبرها فرصة ذهبية.
+    if rr > 8.0:
+        _log("❌ فلتر سقف عائد/مخاطرة (>8 — إشارة وقف ضيق غير واقعي)", f"1:{rr} مبالغ فيه — رفض احترازي", False)
         return None
 
     # العدوانية: تأكيد نهائي إلزامي إن ضغط المتداولين (لو متوفر) يدعم نفس اتجاه الصفقة فعلياً
