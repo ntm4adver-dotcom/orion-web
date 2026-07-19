@@ -63,12 +63,16 @@ def get_strategy_options() -> list:
     return options
 
 
-def get_active_strategies(active_strategy_setting: str) -> list:
+def get_active_strategies(active_strategy_setting: str, combined_enabled_keys: str = "") -> list:
     """يرجع قائمة (مفتاح الاستراتيجية، دالة التحليل) اللي لازم تشتغل فعلياً حسب اختيار المستخدم.
-    لو اختار 'combined' يرجع كل الاستراتيجيات المسجّلة تلقائياً — أي إضافة مستقبلية للسجل
-    بتنعكس هنا بدون أي تعديل إضافي."""
+    لو اختار 'combined' يرجع الاستراتيجيات المسجّلة المفعّلة فقط (حسب combined_enabled_keys —
+    نص مفصول بفاصلة؛ فاضي أو غير محدد = كل الاستراتيجيات مفعّلة افتراضياً، بما فيها أي
+    استراتيجية جديدة تُضاف مستقبلاً دون حاجة لتحديث هذا الإعداد يدوياً)."""
     if active_strategy_setting == COMBINED_STRATEGY_KEY:
-        return [(key, info["fn"]) for key, info in STRATEGY_REGISTRY.items()]
+        enabled = set(k.strip() for k in combined_enabled_keys.split(",") if k.strip())
+        if not enabled:
+            return [(key, info["fn"]) for key, info in STRATEGY_REGISTRY.items()]
+        return [(key, info["fn"]) for key, info in STRATEGY_REGISTRY.items() if key in enabled]
     if active_strategy_setting in STRATEGY_REGISTRY:
         return [(active_strategy_setting, STRATEGY_REGISTRY[active_strategy_setting]["fn"])]
     # قيمة غير معروفة (مثلاً من نسخة قديمة) → نرجع للاستراتيجية الافتراضية الأولى

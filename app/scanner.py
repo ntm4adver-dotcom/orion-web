@@ -192,7 +192,9 @@ class ScannerState:
                 )
 
                 matched_any = False
-                for strategy_key, strategy_fn in get_active_strategies(settings.get("active_strategy", "explosive_breakout")):
+                for strategy_key, strategy_fn in get_active_strategies(
+                        settings.get("active_strategy", "explosive_breakout"),
+                        settings.get("combined_enabled_strategies", "")):
                     result = strategy_fn(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro)
                     if result is None:
                         continue

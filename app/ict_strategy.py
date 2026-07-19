@@ -69,6 +69,28 @@ def _find_high_volume_node(klines: List[Kline], zone_low: float, zone_high: floa
     return mid if zone_low <= mid <= zone_high else None
 
 
+def _pick_cluster_entry(fib618: float, fvg_price: Optional[float], hv_price: Optional[float],
+                         swing_range: float) -> tuple:
+    """يكشف تجمّع (Cluster) حقيقي بين نقاط الدخول المرشحة بدل خلطها دائماً بشكل مصطنع.
+    فيبوناتشي 61.8% هو المرجع الأساسي الثابت دائماً. أي نقطة إضافية (FVG أو Volume Node)
+    تُضاف للتجميع فقط لو كانت **قريبة فعلياً** من فيبوناتشي (تقارب حقيقي = كلاستر قوي)،
+    وإلا تُهمَل تماماً بدل ما تُخلط بنقطة بعيدة تشوّه الدخول لمكان غير منطقي.
+    ترجع: (نقطة الدخول النهائية، قائمة أسماء النقاط المتجمّعة، عدد نقاط التجمّع)."""
+    tolerance = max(swing_range * 0.08, 1e-9)  # نطاق تقارب معقول نسبة لحجم الحركة الكلي
+    cluster_prices = [fib618]
+    cluster_labels = ["فيبوناتشي الذهبي 61.8%"]
+
+    if fvg_price is not None and abs(fvg_price - fib618) <= tolerance:
+        cluster_prices.append(fvg_price)
+        cluster_labels.append("فجوة سعرية (FVG)")
+    if hv_price is not None and abs(hv_price - fib618) <= tolerance:
+        cluster_prices.append(hv_price)
+        cluster_labels.append("أعلى حجم تداول (Volume Node)")
+
+    entry_price = sum(cluster_prices) / len(cluster_prices)
+    return entry_price, cluster_labels, len(cluster_prices)
+
+
 def analyze_ict_smart_sweep(symbol: str, k4h: List[Kline], k1h: List[Kline], k15m: List[Kline],
                              k5m: List[Kline], k_daily: List[Kline],
                              micro: Optional[MarketMicrostructure] = None,
@@ -195,12 +217,13 @@ def analyze_ict_smart_sweep(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
         fib618 = swing_high - 0.618 * swing_range
         fib786 = swing_high - 0.786 * swing_range
 
-        fvg_price = _find_fvg_in_zone(k15m, fib786, fib50, bullish=True) or fib618
-        hv_price = _find_high_volume_node(k15m, fib786, fib50) or fib618
+        fvg_price = _find_fvg_in_zone(k15m, fib786, fib50, bullish=True)
+        hv_price = _find_high_volume_node(k15m, fib786, fib50)
 
-        entry_price = (fib618 * 0.4) + (fvg_price * 0.3) + (hv_price * 0.3)
+        entry_price, cluster_labels, cluster_count = _pick_cluster_entry(fib618, fvg_price, hv_price, swing_range)
         if entry_price > last_price * 1.01 or entry_price < last_price * 0.95:
             entry_price = last_price * 0.995
+            cluster_labels, cluster_count = ["فيبوناتشي الذهبي 61.8% (بعيد عن السعر — تم تعديل الدخول)"], 1
 
         sl = swing_low - (atr_val * 0.15)
         if sl >= entry_price:
@@ -208,8 +231,10 @@ def analyze_ict_smart_sweep(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
 
         risk = entry_price - sl
         tp = entry_price + 3.0 * risk
-        behavior = (f"🧠 النمط الذكي: تجميع كلاستر [فيبوناتشي الذهبي 61.8% + جاب فجوة سعرية FVG + "
-                    f"تكتل حجم فوليوم مرتفع] بعد سحب سيولة قاع 1H ({swing_low:.6g}) وتأكيد كسر الاتجاه CHoCH صاعد فريم 15د.")
+        cluster_txt = " + ".join(cluster_labels)
+        behavior = (f"🧠 النمط الذكي: نقطة دخول من التقاء {cluster_count} عنصر [{cluster_txt}] "
+                    f"بعد سحب سيولة قاع 1H ({swing_low:.6g}) وتأكيد كسر الاتجاه CHoCH صاعد فريم 15د.")
+        _log("📍 عدد نقاط تجمّع الدخول (Cluster)", f"{cluster_count} — [{cluster_txt}]", cluster_count >= 2)
     else:
         swing_high = sweep_high_value if sweep_high_value > 0 else max(k.high for k in k15m[-20:])
         swing_low = min(k.low for k in k15m[-20:])
@@ -221,12 +246,13 @@ def analyze_ict_smart_sweep(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
         fib618 = swing_low + 0.618 * swing_range
         fib786 = swing_low + 0.786 * swing_range
 
-        fvg_price = _find_fvg_in_zone(k15m, fib50, fib786, bullish=False) or fib618
-        hv_price = _find_high_volume_node(k15m, fib50, fib786) or fib618
+        fvg_price = _find_fvg_in_zone(k15m, fib50, fib786, bullish=False)
+        hv_price = _find_high_volume_node(k15m, fib50, fib786)
 
-        entry_price = (fib618 * 0.4) + (fvg_price * 0.3) + (hv_price * 0.3)
+        entry_price, cluster_labels, cluster_count = _pick_cluster_entry(fib618, fvg_price, hv_price, swing_range)
         if entry_price < last_price * 0.99 or entry_price > last_price * 1.05:
             entry_price = last_price * 1.005
+            cluster_labels, cluster_count = ["فيبوناتشي الذهبي 61.8% (بعيد عن السعر — تم تعديل الدخول)"], 1
 
         sl = swing_high + (atr_val * 0.15)
         if sl <= entry_price:
@@ -234,8 +260,10 @@ def analyze_ict_smart_sweep(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
 
         risk = sl - entry_price
         tp = entry_price - 3.0 * risk
-        behavior = (f"🧠 النمط الذكي: تجميع كلاستر [فيبوناتشي الذهبي 61.8% + جاب فجوة سعرية FVG + "
-                    f"تكتل حجم فوليوم مرتفع] بعد سحب سيولة قمة 1H ({swing_high:.6g}) وتأكيد كسر الاتجاه CHoCH هابط فريم 15د.")
+        cluster_txt = " + ".join(cluster_labels)
+        behavior = (f"🧠 النمط الذكي: نقطة دخول من التقاء {cluster_count} عنصر [{cluster_txt}] "
+                    f"بعد سحب سيولة قمة 1H ({swing_high:.6g}) وتأكيد كسر الاتجاه CHoCH هابط فريم 15د.")
+        _log("📍 عدد نقاط تجمّع الدخول (Cluster)", f"{cluster_count} — [{cluster_txt}]", cluster_count >= 2)
 
     if risk <= 0:
         return None
@@ -255,6 +283,12 @@ def analyze_ict_smart_sweep(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
         probability += 3
     if bullish_choch or bearish_choch:
         probability += 3
+
+    # مكافأة تجمّع نقاط الدخول (Cluster) — كلما اجتمعت نقاط أكثر بنفس المكان، الثقة أعلى
+    if cluster_count >= 3:
+        probability += 8  # فيبوناتشي + FVG + Volume Node اجتمعوا معاً — تقاطع قوي جداً
+    elif cluster_count == 2:
+        probability += 4  # عنصرين اجتمعا معاً — تقاطع جيد
 
     if oi_change_pct is not None and oi_change_pct > 1.5:
         probability += 4  # فائدة مفتوحة ترتفع = دخول سيولة/أموال جديدة حقيقية تدعم الاختراق

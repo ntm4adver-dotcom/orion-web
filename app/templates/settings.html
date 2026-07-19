@@ -42,7 +42,7 @@
     </p>
 
     <label style="margin-top:14px; display:block;">استراتيجية التحليل النشطة</label>
-    <select name="active_strategy">
+    <select name="active_strategy" id="active-strategy-select" onchange="toggleCombinedBox()">
       {% for key, label in strategy_options %}
       <option value="{{ key }}" {{ 'selected' if s.active_strategy==key }}>{{ label }}</option>
       {% endfor %}
@@ -51,9 +51,24 @@
       <b>الانفجار السعري:</b> يصطاد اختراقات مضغوطة بزخم فوليوم مؤكد.<br>
       <b>النمط الذكي (ICT):</b> يبحث عن سحب سيولة (Liquidity Sweep) + فجوة سعرية (FVG) + كسر هيكل (CHoCH)
       داخل المنطقة الذهبية لفيبوناتشي، بعائد/مخاطرة ثابت 1:3. يشترط جلسة تداول نشطة (Kill Zone) افتراضياً.<br>
-      <b>الكل معاً:</b> يشغّل كل الاستراتيجيات المسجّلة على كل عملة بكل دورة فحص، وأي إشارة تنجح
-      بأي استراتيجية تُسجَّل وتُنفَّذ بشكل مستقل. أي استراتيجية تُضاف مستقبلاً تدخل ضمن هذا الخيار تلقائياً.
+      <b>الكل معاً:</b> يشغّل الاستراتيجيات المفعّلة أدناه فقط على كل عملة بكل دورة فحص، وأي إشارة تنجح
+      بأي استراتيجية منها تُسجَّل وتُنفَّذ بشكل مستقل.
     </p>
+
+    <div id="combined-strategies-box" class="card" style="margin-top:10px; {{ '' if s.active_strategy=='combined' else 'display:none;' }}">
+      <label style="display:block; margin-bottom:8px;">الاستراتيجيات المفعّلة داخل وضع "الكل معاً"</label>
+      {% set enabled_list = s.combined_enabled_strategies.split(',') if s.combined_enabled_strategies else [] %}
+      {% for key, label in strategy_options %}
+        {% if key != 'combined' %}
+        <div class="switch" style="margin-top:4px;">
+          <input type="checkbox" name="combined_strategies" value="{{ key }}"
+                 {{ 'checked' if (not s.combined_enabled_strategies) or (key in enabled_list) }}>
+          <label style="margin:0; font-size:13px;">{{ label }}</label>
+        </div>
+        {% endif %}
+      {% endfor %}
+      <p class="muted" style="margin-top:8px; font-size:11px;">أي استراتيجية تُضاف مستقبلاً تكون مفعّلة افتراضياً هنا تلقائياً إلى أن تلغي تحديدها بنفسك.</p>
+    </div>
 
     <div class="switch" style="margin-top:10px;">
       <input type="checkbox" name="ict_ignore_kill_zone" {{ 'checked' if s.ict_ignore_kill_zone }}>
@@ -63,6 +78,14 @@
       افتراضياً، ICT تشتغل بس بجلستي لندن ونيويورك (أعلى سيولة حقيقية بالسوق، وهذا أساس فكرة سحب السيولة).
       تفعيل هذا الخيار يشغّلها 24/7 بأي وقت، على حساب دقة افتراضية بالتصميم الأصلي — جرّبه وقارن النتائج بنفسك.
     </p>
+
+    <script>
+    function toggleCombinedBox(){
+      const sel = document.getElementById('active-strategy-select');
+      const box = document.getElementById('combined-strategies-box');
+      box.style.display = (sel.value === 'combined') ? 'block' : 'none';
+    }
+    </script>
   </div>
 
   <div class="card">

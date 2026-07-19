@@ -1,6 +1,6 @@
 import os
 from fastapi import FastAPI, Request, Form
-from fastapi.responses import RedirectResponse, JSONResponse, FileResponse
+from fastapi.responses import RedirectResponse, JSONResponse, FileResponse, Response
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -98,6 +98,11 @@ async def settings_save(request: Request):
             updates[key] = 1 if key in form else 0
         elif key in form:
             updates[key] = form[key]
+
+    # صناديق اختيار الاستراتيجيات المفعّلة داخل وضع "الكل معاً" — أسماء متعددة بنفس الحقل
+    checked_strategies = form.getlist("combined_strategies")
+    updates["combined_enabled_strategies"] = ",".join(checked_strategies)
+
     db.update_settings(updates)
     return templates.TemplateResponse("settings.html", {"request": request, "active": "settings", "s": db.get_settings(), "saved": True})
 
@@ -497,6 +502,49 @@ def api_learning(request: Request):
         p["is_weak"] = p["win_rate"] < settings.get("coin_learning_weak_threshold", 35) and p["total"] >= settings.get("coin_learning_min_trades", 5)
         p["is_strong"] = p["win_rate"] >= settings.get("coin_learning_strong_threshold", 70) and p["total"] >= settings.get("coin_learning_min_trades", 5)
     return perf
+
+
+@app.get("/api/signals/export")
+def api_signals_export(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    import json
+    from datetime import datetime
+
+    signals = db.get_signals(limit=100000)  # كل الصفقات المسجّلة بدون حد
+    strategy_perf = db.get_strategy_performance()
+    coin_perf = db.get_coin_performance(limit=1000)
+    settings = db.get_settings()
+
+    # نحذف الحقول الحساسة (مفاتيح API وكلمات المرور) قبل التصدير، حتى لو المستخدم أرسل
+    # الملف لجهة خارجية للمراجعة
+    safe_settings = {k: v for k, v in settings.items()
+                      if k not in ("okx_api_key", "okx_api_secret", "okx_passphrase", "telegram_token")}
+
+    export_data = {
+        "exported_at": datetime.utcnow().isoformat() + "Z",
+        "total_signals": len(signals),
+        "summary": {
+            "wins": sum(1 for s in signals if s["status"] == "HIT_TP"),
+            "losses": sum(1 for s in signals if s["status"] == "HIT_SL"),
+            "active": sum(1 for s in signals if s["status"] == "ACTIVE"),
+            "pending": sum(1 for s in signals if s["status"] == "PENDING"),
+            "cancelled": sum(1 for s in signals if s["status"] in ("CANCELLED", "REPLACED")),
+        },
+        "strategy_performance": strategy_perf,
+        "coin_performance": coin_perf,
+        "active_settings_snapshot": safe_settings,
+        "signals": signals,
+    }
+
+    content = json.dumps(export_data, ensure_ascii=False, indent=2, default=str)
+    filename = f"orion_signals_export_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
+    return Response(
+        content=content,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/signals")

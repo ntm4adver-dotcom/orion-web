@@ -440,7 +440,21 @@ def analyze_explosive_breakout(
             _log("❌ فلتر عمق السوق (دخول مبكر فقط)", f"توازن الأوامر {ob_imbalance:.2f} يعاكس صفقة البيع — رفض", False)
             return None
 
-    entry_price = last_price
+    # نقطة الدخول: بدل مطاردة السعر بالسوق اللحظي بعد ما يكون قد تحرك فعلاً، نستخدم
+    # أمر محدد (Limit) عند المستوى الهيكلي الحقيقي:
+    #  - دخول مبكر (Path A): السعر أصلاً قريب من النطاق ولسا ما اخترق بعد، فسعر السوق
+    #    الحالي منطقي كنقطة دخول (ما فيه "مطاردة" حقيقية بهذي الحالة).
+    #  - اختراق مؤكَّد (Path B): السعر تجاوز النطاق فعلاً، فندخل عند حافة النطاق نفسها
+    #    (upper/lower) على أمل إعادة اختبار (Retest) — نقطة أدق ومخاطرة أقل من الشراء
+    #    بالسعر المرتفع مباشرة بعد الاختراق.
+    if is_early_entry:
+        entry_price = last_price
+        entry_note = "دخول مبكر (السعر لسا عند حافة النطاق، لا حاجة لإعادة اختبار)"
+    else:
+        entry_price = upper if side == "Long" else lower
+        entry_note = f"دخول محدد (Limit) عند مستوى النطاق المكسور {entry_price:.6g} — بانتظار إعادة اختبار (Retest)"
+    _log("📍 منطق نقطة الدخول", entry_note)
+
     sl = structural_stop_loss(k5m, side, entry_price, effective_atr, lookback=8)
     risk_distance = abs(entry_price - sl)
     if entry_price and risk_distance / entry_price < 0.0015:

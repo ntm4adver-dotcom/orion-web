@@ -56,27 +56,34 @@ def _detect_stop_hunt(klines: List[Kline], lookback: int = 50, vol_period: int =
         candle_range = current.high - current.low
         buffer = candle_range * 0.1
 
+        # صيد استوبات صاعد (سحب سيولة القيعان)
         if current.low < lowest_low and current.close > lowest_low:
+            # نقطة الدخول: المستوى الهيكلي نفسه (القاع المكسور) بدل إغلاق الشمعة الحالي —
+            # نتوقع إعادة اختبار (Retest) لهذا المستوى قبل الاستمرار صعوداً، فندخل هناك
+            # بدل مطاردة السعر بعد الارتداد. هامش صغير فوق القاع مباشرة لضمان واقعية التنفيذ.
+            entry_price = lowest_low + candle_range * 0.05
             stop_loss = current.low - buffer
-            risk = current.close - stop_loss
+            risk = entry_price - stop_loss
             if risk <= 0:
                 continue
-            take_profit = current.close + (risk * 3.0)
+            take_profit = entry_price + (risk * 3.0)
             return {
                 "type": "BULLISH_STOP_HUNT", "side": "Long", "swept_level": lowest_low,
-                "entry_price": current.close, "stop_loss": stop_loss, "take_profit": take_profit,
+                "entry_price": entry_price, "stop_loss": stop_loss, "take_profit": take_profit,
                 "volume_ratio": volume_ratio, "candles_ago": offset,
             }
 
+        # صيد استوبات هابط (سحب سيولة القمم)
         if current.high > highest_high and current.close < highest_high:
+            entry_price = highest_high - candle_range * 0.05
             stop_loss = current.high + buffer
-            risk = stop_loss - current.close
+            risk = stop_loss - entry_price
             if risk <= 0:
                 continue
-            take_profit = current.close - (risk * 3.0)
+            take_profit = entry_price - (risk * 3.0)
             return {
                 "type": "BEARISH_STOP_HUNT", "side": "Short", "swept_level": highest_high,
-                "entry_price": current.close, "stop_loss": stop_loss, "take_profit": take_profit,
+                "entry_price": entry_price, "stop_loss": stop_loss, "take_profit": take_profit,
                 "volume_ratio": volume_ratio, "candles_ago": offset,
             }
 

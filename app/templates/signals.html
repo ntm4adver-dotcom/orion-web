@@ -4,7 +4,10 @@
 
 <div class="flex-between" style="margin-bottom:10px;">
   <h2 style="margin:0;">📋 سجل الفرص والإشارات <span id="total-count" class="muted"></span></h2>
-  <button class="btn danger" onclick="clearAllSignals()">🗑️ مسح السجل</button>
+  <div style="display:flex; gap:8px;">
+    <button class="btn secondary" onclick="exportSignals()">📥 تصدير كل الصفقات (ملف)</button>
+    <button class="btn danger" onclick="clearAllSignals()">🗑️ مسح السجل</button>
+  </div>
 </div>
 
 <div class="card">
@@ -287,6 +290,10 @@ async function executeSignal(sig){
   });
   const data = await r.json();
   alert(data.message);
+}
+
+function exportSignals(){
+  window.location.href = '/api/signals/export';
 }
 
 async function clearAllSignals(){

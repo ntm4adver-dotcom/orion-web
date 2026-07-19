@@ -52,6 +52,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "is_gdrive_backup_enabled": 0,
     "active_strategy": "explosive_breakout",  # 'explosive_breakout' أو 'ict_smart_sweep'
     "ict_ignore_kill_zone": 0,  # تجاهل قيد جلسة التداول (Kill Zone) لاستراتيجية ICT — تشغيلها بأي وقت
+    "combined_enabled_strategies": "",  # قائمة مفاتيح استراتيجيات مفصولة بفاصلة تعمل داخل وضع "الكل معاً" — فاضي = الكل مفعّل
     # OKX trading connection
     "okx_api_key": "",
     "okx_api_secret": "",
