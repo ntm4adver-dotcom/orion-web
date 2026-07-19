@@ -146,9 +146,14 @@ class ScannerState:
                 db.add_log(f"جاري سحب بيانات الشموع لزوج {symbol}...")
                 k4h = exchange.fetch_klines(symbol, "4h", 100)
                 time.sleep(0.25)
-                k1h = exchange.fetch_klines(symbol, "1h", 100)
+                # 170 شمعة ساعة (~7 أيام) بدل 100 — استراتيجية "صيد التصفيات" مصممة
+                # تحتاج نافذة أسبوع كامل لتقدير خارطة تصفية شاملة (كانت تشتغل بـ4 أيام
+                # بس فعلياً أثناء الفحص التلقائي، أقل من المصمَّم له)
+                k1h = exchange.fetch_klines(symbol, "1h", 170)
                 time.sleep(0.25)
-                k15m = exchange.fetch_klines(symbol, "15m", 100)
+                # 110 شمعة 15د بدل 100 — هامش أمان بسيط فوق حاجة استراتيجية فابيو
+                # فالنتيني (بروفايل الفوليوم يحتاج بالضبط آخر 100 شمعة)
+                k15m = exchange.fetch_klines(symbol, "15m", 110)
                 time.sleep(0.25)
                 k5m = exchange.fetch_klines(symbol, "5m", 150)
                 time.sleep(0.25)
