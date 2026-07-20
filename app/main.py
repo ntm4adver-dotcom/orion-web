@@ -555,6 +555,37 @@ def api_learning(request: Request):
     return perf
 
 
+def _drawdown_analysis(signals):
+    """يلخّص أقصى تراجع (Maximum Adverse Excursion) لكل استراتيجية — يفرّق بين
+    'فوز نظيف' (تراجع بسيط قبل النجاح، دخول دقيق) و'فوز مهزوز' (تراجع كبير قبل ما
+    يرجع وينجح، دخول ضعيف نجح بالصدفة) — مفيد لتقييم جودة نقاط الدخول الحقيقية
+    بمعزل عن نتيجة الصفقة النهائية فقط."""
+    by_strategy = {}
+    for s in signals:
+        if s["status"] not in ("HIT_TP", "HIT_SL"):
+            continue
+        strat = s.get("strategy") or "غير محدد"
+        by_strategy.setdefault(strat, {"win_dd": [], "loss_dd": []})
+        dd = s.get("max_drawdown_pct") or 0.0
+        if s["status"] == "HIT_TP":
+            by_strategy[strat]["win_dd"].append(dd)
+        else:
+            by_strategy[strat]["loss_dd"].append(dd)
+
+    result = []
+    for strat, d in by_strategy.items():
+        wins_dd, losses_dd = d["win_dd"], d["loss_dd"]
+        result.append({
+            "strategy": strat,
+            "avg_drawdown_on_wins_pct": round(sum(wins_dd) / len(wins_dd), 3) if wins_dd else None,
+            "avg_drawdown_on_losses_pct": round(sum(losses_dd) / len(losses_dd), 3) if losses_dd else None,
+            "max_drawdown_on_a_win_pct": round(max(wins_dd), 3) if wins_dd else None,
+            "shaky_wins_count": sum(1 for x in wins_dd if x > 0.5),
+            "shaky_wins_note": "فوز لكن السعر رجع أكثر من 0.5% ضد الصفقة قبل ما ينجح — دخول ضعيف نسبياً نجح رغم ذلك",
+        })
+    return result
+
+
 @app.get("/api/signals/export")
 def api_signals_export(request: Request):
     if not is_logged_in(request):
@@ -585,6 +616,7 @@ def api_signals_export(request: Request):
         },
         "strategy_performance": strategy_perf,
         "coin_performance": coin_perf,
+        "drawdown_analysis": _drawdown_analysis(signals),
         "active_settings_snapshot": safe_settings,
         "signals": signals,
     }
