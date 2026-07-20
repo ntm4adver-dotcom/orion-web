@@ -328,7 +328,14 @@ def api_logs_clear(request: Request):
 def api_signals(request: Request):
     if not is_logged_in(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-    return db.get_signals(100)
+    return db.get_signals(300)
+
+
+@app.get("/api/signals/stats")
+def api_signals_stats(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return db.get_signal_stats()
 
 
 @app.get("/evolution")

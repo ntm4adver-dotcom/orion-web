@@ -199,7 +199,35 @@ def add_signal(signal: Dict[str, Any]) -> int:
         return cur.lastrowid
 
 
-def get_signals(limit: int = 100) -> List[Dict[str, Any]]:
+def get_signal_stats() -> Dict[str, Any]:
+    """إحصائيات دقيقة 100% محسوبة من **كامل** جدول الإشارات مباشرة عبر SQL —
+    بدون أي حد أقصى (LIMIT) — بعكس get_signals() اللي مصمم للعرض فقط ومحدود.
+    هذا يضمن العدادات صحيحة دائماً بغض النظر عن عدد الصفقات الكلي (حتى لو مليون)،
+    لأنها ما تعتمد على جلب كل الصفوف للمتصفح، بس عدّها مباشرة بقاعدة البيانات."""
+    with _lock, _connect() as conn:
+        cur = conn.execute("""
+            SELECT status, COUNT(*) as cnt FROM trade_signals GROUP BY status
+        """)
+        counts = {row["status"]: row["cnt"] for row in cur.fetchall()}
+        total_cur = conn.execute("SELECT COUNT(*) as cnt FROM trade_signals")
+        total = total_cur.fetchone()["cnt"]
+
+    wins = counts.get("HIT_TP", 0)
+    losses = counts.get("HIT_SL", 0)
+    closed = wins + losses
+    return {
+        "total": total,
+        "active": counts.get("ACTIVE", 0),
+        "pending": counts.get("PENDING", 0),
+        "wins": wins,
+        "losses": losses,
+        "cancelled": counts.get("CANCELLED", 0) + counts.get("REPLACED", 0),
+        "closed_total": closed,
+        "win_rate": round((wins / closed) * 100.0, 1) if closed > 0 else 0.0,
+    }
+
+
+def get_signals(limit: int = 300) -> List[Dict[str, Any]]:
     with _lock, _connect() as conn:
         cur = conn.execute("SELECT * FROM trade_signals ORDER BY id DESC LIMIT ?", (limit,))
         return [dict(row) for row in cur.fetchall()]

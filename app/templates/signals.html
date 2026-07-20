@@ -72,6 +72,7 @@
 
 <script>
 let allSignals = [];
+let signalStats = {};
 let currentFilter = 'all';
 
 function setFilter(f){
@@ -198,12 +199,15 @@ function renderSignals(){
   let list = allSignals;
   if (search) list = list.filter(s => s.symbol.toUpperCase().includes(search));
 
+  // العدادات والإحصائيات تُحسب من signalStats (يجيها من السيرفر مباشرة عبر SQL على
+  // كامل الجدول، بدون أي حد أقصى) — مو من allSignals المحدودة بعدد العرض بالمتصفح.
+  // هذا يضمن الأرقام صحيحة دائماً مهما زاد عدد الصفقات (حتى لو مليون).
   const counts = {
-    all: allSignals.length,
-    ACTIVE: allSignals.filter(s => s.status === 'ACTIVE').length,
-    PENDING: allSignals.filter(s => s.status === 'PENDING').length,
-    HIT_TP: allSignals.filter(s => s.status === 'HIT_TP').length,
-    HIT_SL: allSignals.filter(s => s.status === 'HIT_SL').length,
+    all: signalStats.total || 0,
+    ACTIVE: signalStats.active || 0,
+    PENDING: signalStats.pending || 0,
+    HIT_TP: signalStats.wins || 0,
+    HIT_SL: signalStats.losses || 0,
   };
   document.getElementById('c-all').innerText = counts.all;
   document.getElementById('c-active').innerText = counts.ACTIVE;
@@ -212,12 +216,9 @@ function renderSignals(){
   document.getElementById('c-stopped').innerText = counts.HIT_SL;
   document.getElementById('total-count').innerText = `(${counts.all})`;
 
-  const wins = allSignals.filter(s => s.status === 'HIT_TP').length;
-  const losses = allSignals.filter(s => s.status === 'HIT_SL').length;
-  const totalClosed = wins + losses;
-  document.getElementById('win-count').innerText = wins;
-  document.getElementById('loss-count').innerText = losses;
-  document.getElementById('win-rate').innerText = totalClosed > 0 ? ((wins/totalClosed)*100).toFixed(1) + '%' : '—';
+  document.getElementById('win-count').innerText = signalStats.wins || 0;
+  document.getElementById('loss-count').innerText = signalStats.losses || 0;
+  document.getElementById('win-rate').innerText = signalStats.closed_total > 0 ? signalStats.win_rate + '%' : '—';
 
   if (currentFilter === 'ACTIVE') list = list.filter(s => s.status === 'ACTIVE');
   else if (currentFilter === 'PENDING') list = list.filter(s => s.status === 'PENDING');
@@ -304,8 +305,9 @@ async function clearAllSignals(){
 
 async function fetchAndRender(){
   try{
-    const r = await fetch('/api/signals');
+    const [r, rStats] = await Promise.all([fetch('/api/signals'), fetch('/api/signals/stats')]);
     allSignals = await r.json();
+    signalStats = await rStats.json();
     renderSignals();
   }catch(e){}
 }
