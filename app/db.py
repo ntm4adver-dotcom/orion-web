@@ -111,7 +111,8 @@ def init_db():
                 update_timestamp INTEGER,
                 current_price REAL DEFAULT 0,
                 last_notified_status TEXT DEFAULT '',
-                strategy TEXT DEFAULT ''
+                strategy TEXT DEFAULT '',
+                max_drawdown_pct REAL DEFAULT 0
             )
         """)
         # هجرة آمنة: إضافة عمود strategy لو قاعدة البيانات كانت موجودة قبل هذا التحديث
@@ -119,6 +120,8 @@ def init_db():
             existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(trade_signals)").fetchall()}
             if "strategy" not in existing_cols:
                 conn.execute("ALTER TABLE trade_signals ADD COLUMN strategy TEXT DEFAULT ''")
+            if "max_drawdown_pct" not in existing_cols:
+                conn.execute("ALTER TABLE trade_signals ADD COLUMN max_drawdown_pct REAL DEFAULT 0")
         except Exception:
             pass
         conn.execute("""
@@ -344,6 +347,21 @@ def update_signal_status(signal_id: int, status: str, current_price: float, last
             (status, current_price, int(time.time() * 1000), last_notified_status, signal_id),
         )
         conn.commit()
+
+
+def update_max_drawdown_if_worse(signal_id: int, drawdown_pct: float):
+    """يحدّث أقصى تراجع سعري من نقطة الدخول **فقط لو الرقم الجديد أسوأ** من المسجَّل
+    حالياً — بهذا يبقى العمود دائماً "أسوأ نقطة وصلها السعر ضد الصفقة" طول عمرها،
+    مفيد لقياس قوة نقطة الدخول فعلياً (مو بس هل ربحت أو خسرت بالنهاية)."""
+    with _lock, _connect() as conn:
+        cur = conn.execute("SELECT max_drawdown_pct FROM trade_signals WHERE id=?", (signal_id,))
+        row = cur.fetchone()
+        if row is None:
+            return
+        current_max = row["max_drawdown_pct"] or 0.0
+        if drawdown_pct > current_max:
+            conn.execute("UPDATE trade_signals SET max_drawdown_pct=? WHERE id=?", (drawdown_pct, signal_id))
+            conn.commit()
 
 
 def clear_signals():

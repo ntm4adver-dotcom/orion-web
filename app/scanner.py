@@ -365,6 +365,17 @@ class ScannerState:
                     elif live_price <= signal["take_profit"] and settings["is_cancel_if_exceeds_target_enabled"]:
                         new_status, changed = "CANCELLED", True
             elif signal["status"] == "ACTIVE":
+                # قياس التراجع اللحظي من نقطة الدخول (مو الربح/الخسارة النهائي) —
+                # يقيس "كم رجع السعر ضدنا" أثناء الصفقة، مفيد لتقييم قوة نقطة الدخول
+                # نفسها بمعزل عن نتيجة الصفقة بالنهاية (رابحة أو خاسرة)
+                entry_price = signal["entry_price"]
+                if entry_price and entry_price > 0:
+                    if signal["side"] == "Long":
+                        adverse_pct = max(0.0, (entry_price - live_price) / entry_price * 100.0)
+                    else:
+                        adverse_pct = max(0.0, (live_price - entry_price) / entry_price * 100.0)
+                    db.update_max_drawdown_if_worse(signal["id"], adverse_pct)
+
                 if signal["side"] == "Long":
                     if live_price <= signal["stop_loss"]:
                         new_status, changed = "HIT_SL", True
