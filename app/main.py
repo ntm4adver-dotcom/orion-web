@@ -556,32 +556,41 @@ def api_learning(request: Request):
 
 
 def _drawdown_analysis(signals):
-    """يلخّص أقصى تراجع (Maximum Adverse Excursion) لكل استراتيجية — يفرّق بين
-    'فوز نظيف' (تراجع بسيط قبل النجاح، دخول دقيق) و'فوز مهزوز' (تراجع كبير قبل ما
-    يرجع وينجح، دخول ضعيف نجح بالصدفة) — مفيد لتقييم جودة نقاط الدخول الحقيقية
-    بمعزل عن نتيجة الصفقة النهائية فقط."""
+    """يلخّص أقصى تراجع (Maximum Adverse Excursion) وأعلى ربح عائم (Maximum Favorable
+    Excursion) لكل استراتيجية — يفرّق بين 'فوز نظيف' (تراجع بسيط قبل النجاح، دخول
+    دقيق) و'فوز مهزوز' (تراجع كبير قبل ما يرجع وينجح)، وبين 'خسارة كانت أصلاً خطأ
+    اتجاه' و'خسارة كانت رابحة وانعكست' (صعدت للربح ثم رجعت وضربت الوقف — يعني
+    الاتجاه كان صح لكن الخروج/الهدف يحتاج تحسين، مو الدخول نفسه)."""
     by_strategy = {}
     for s in signals:
         if s["status"] not in ("HIT_TP", "HIT_SL"):
             continue
         strat = s.get("strategy") or "غير محدد"
-        by_strategy.setdefault(strat, {"win_dd": [], "loss_dd": []})
+        by_strategy.setdefault(strat, {"win_dd": [], "loss_dd": [], "loss_mfe": []})
         dd = s.get("max_drawdown_pct") or 0.0
+        mfe = s.get("max_favorable_pct") or 0.0
         if s["status"] == "HIT_TP":
             by_strategy[strat]["win_dd"].append(dd)
         else:
             by_strategy[strat]["loss_dd"].append(dd)
+            by_strategy[strat]["loss_mfe"].append(mfe)
 
     result = []
     for strat, d in by_strategy.items():
-        wins_dd, losses_dd = d["win_dd"], d["loss_dd"]
+        wins_dd, losses_dd, losses_mfe = d["win_dd"], d["loss_dd"], d["loss_mfe"]
+        # خسارة "انعكاس حقيقي": كانت بربح عائم واضح (>0.5%) قبل ما ترجع تضرب الوقف —
+        # الاتجاه كان صحيحاً، المشكلة بإدارة الخروج مو باختيار نقطة الدخول
+        reversed_losses = sum(1 for x in losses_mfe if x > 0.5)
         result.append({
             "strategy": strat,
             "avg_drawdown_on_wins_pct": round(sum(wins_dd) / len(wins_dd), 3) if wins_dd else None,
             "avg_drawdown_on_losses_pct": round(sum(losses_dd) / len(losses_dd), 3) if losses_dd else None,
             "max_drawdown_on_a_win_pct": round(max(wins_dd), 3) if wins_dd else None,
             "shaky_wins_count": sum(1 for x in wins_dd if x > 0.5),
-            "shaky_wins_note": "فوز لكن السعر رجع أكثر من 0.5% ضد الصفقة قبل ما ينجح — دخول ضعيف نسبياً نجح رغم ذلك",
+            "reversed_losses_count": reversed_losses,
+            "reversed_losses_note": ("صعدت للربح (>0.5%) ثم رجعت وضربت الوقف — الاتجاه كان صح، "
+                                      "المشكلة بالهدف/الخروج مو بالدخول") if reversed_losses else None,
+            "avg_mfe_before_loss_pct": round(sum(losses_mfe) / len(losses_mfe), 3) if losses_mfe else None,
         })
     return result
 

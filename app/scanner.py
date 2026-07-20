@@ -372,9 +372,12 @@ class ScannerState:
                 if entry_price and entry_price > 0:
                     if signal["side"] == "Long":
                         adverse_pct = max(0.0, (entry_price - live_price) / entry_price * 100.0)
+                        favorable_pct = max(0.0, (live_price - entry_price) / entry_price * 100.0)
                     else:
                         adverse_pct = max(0.0, (live_price - entry_price) / entry_price * 100.0)
+                        favorable_pct = max(0.0, (entry_price - live_price) / entry_price * 100.0)
                     db.update_max_drawdown_if_worse(signal["id"], adverse_pct)
+                    db.update_max_favorable_if_better(signal["id"], favorable_pct)
 
                 if signal["side"] == "Long":
                     if live_price <= signal["stop_loss"]:

@@ -258,10 +258,11 @@ function renderSignals(){
       <div class="pnl-box" style="background:${isProfit ? 'rgba(34,197,94,.08)' : 'rgba(239,68,68,.08)'}; color:${isProfit ? 'var(--green)' : 'var(--red)'};">
         الربح العائم الحالي: ${isProfit ? '+' : ''}${pnlPct.toFixed(2)}%
       </div>` : ''}
-      ${sig.status === 'ACTIVE' && sig.max_drawdown_pct > 0 ? `
+      ${sig.status === 'ACTIVE' && (sig.max_drawdown_pct > 0 || sig.max_favorable_pct > 0) ? `
       <div class="muted" style="text-align:center; font-size:11px; margin-bottom:10px;">
-        📉 أقصى تراجع من نقطة الدخول حتى الآن: <b style="color:var(--red);">${sig.max_drawdown_pct.toFixed(2)}%</b>
-        <span style="opacity:.7;">(يقيس قوة نقطة الدخول — كل ما قلّ، كل ما كانت أدق)</span>
+        📈 أعلى ربح وصلته: <b style="color:var(--green);">${(sig.max_favorable_pct||0).toFixed(2)}%</b>
+        &nbsp;|&nbsp;
+        📉 أقصى تراجع: <b style="color:var(--red);">${(sig.max_drawdown_pct||0).toFixed(2)}%</b>
       </div>` : ''}
       <div class="levels-row">
         <div class="level-box"><div class="lbl">سعر الدخول</div><div class="val">${fmt(sig.entry_price)}</div></div>
@@ -274,9 +275,12 @@ function renderSignals(){
         ${canExecute ? `<button class="btn" style="font-size:12px; padding:8px 14px;" onclick='executeSignal(${JSON.stringify(sig)})'>⚡ تنفيذ على OKX</button>` : '<span></span>'}
         <span class="muted" style="cursor:pointer;" onclick="toggleDetails(this, ${sig.id})">ℹ️ تفاصيل التحليل</span>
       </div>
-      ${['HIT_TP','HIT_SL'].includes(sig.status) && sig.max_drawdown_pct > 0 ? `
+      ${['HIT_TP','HIT_SL'].includes(sig.status) && (sig.max_drawdown_pct > 0 || sig.max_favorable_pct > 0) ? `
       <div class="muted" style="text-align:center; font-size:11px; margin-top:8px; padding-top:8px; border-top:1px solid var(--dark-accent);">
-        📉 أقصى تراجع سجّلته الصفقة قبل الإغلاق: <b style="color:var(--red);">${sig.max_drawdown_pct.toFixed(2)}%</b>
+        📈 أعلى ربح وصلته قبل الإغلاق: <b style="color:var(--green);">${(sig.max_favorable_pct||0).toFixed(2)}%</b>
+        &nbsp;|&nbsp;
+        📉 أقصى تراجع: <b style="color:var(--red);">${(sig.max_drawdown_pct||0).toFixed(2)}%</b>
+        ${sig.status==='HIT_SL' && sig.max_favorable_pct > 0.5 ? '<br><span style="color:var(--gold);">⚠️ صعدت للربح ثم انعكست وضربت الوقف — الاتجاه كان صح، المشكلة بالخروج</span>' : ''}
       </div>` : ''}
       <div class="details-box" style="${openDetailsIds.has(sig.id) ? 'display:block;' : ''}">
         <b>الجودة:</b> ${sig.quality || '—'}<br>

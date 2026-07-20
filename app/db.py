@@ -112,7 +112,8 @@ def init_db():
                 current_price REAL DEFAULT 0,
                 last_notified_status TEXT DEFAULT '',
                 strategy TEXT DEFAULT '',
-                max_drawdown_pct REAL DEFAULT 0
+                max_drawdown_pct REAL DEFAULT 0,
+                max_favorable_pct REAL DEFAULT 0
             )
         """)
         # هجرة آمنة: إضافة عمود strategy لو قاعدة البيانات كانت موجودة قبل هذا التحديث
@@ -122,6 +123,8 @@ def init_db():
                 conn.execute("ALTER TABLE trade_signals ADD COLUMN strategy TEXT DEFAULT ''")
             if "max_drawdown_pct" not in existing_cols:
                 conn.execute("ALTER TABLE trade_signals ADD COLUMN max_drawdown_pct REAL DEFAULT 0")
+            if "max_favorable_pct" not in existing_cols:
+                conn.execute("ALTER TABLE trade_signals ADD COLUMN max_favorable_pct REAL DEFAULT 0")
         except Exception:
             pass
         conn.execute("""
@@ -361,6 +364,22 @@ def update_max_drawdown_if_worse(signal_id: int, drawdown_pct: float):
         current_max = row["max_drawdown_pct"] or 0.0
         if drawdown_pct > current_max:
             conn.execute("UPDATE trade_signals SET max_drawdown_pct=? WHERE id=?", (drawdown_pct, signal_id))
+            conn.commit()
+
+
+def update_max_favorable_if_better(signal_id: int, favorable_pct: float):
+    """المرآة العكسية لأقصى تراجع — يسجّل **أعلى مستوى ربح عائم** وصلته الصفقة قبل
+    أي انعكاس، حتى لو انتهت لاحقاً بضرب وقف الخسارة. يجاوب سؤال: 'هل الاتجاه كان
+    صحيحاً فعلاً وبس الهدف كان بعيد/الوقف قريب؟' أو 'الاتجاه كان غلط من الأساس؟' —
+    فرق جوهري لتحسين اختيار نقاط الدخول والخروج مستقبلاً."""
+    with _lock, _connect() as conn:
+        cur = conn.execute("SELECT max_favorable_pct FROM trade_signals WHERE id=?", (signal_id,))
+        row = cur.fetchone()
+        if row is None:
+            return
+        current_max = row["max_favorable_pct"] or 0.0
+        if favorable_pct > current_max:
+            conn.execute("UPDATE trade_signals SET max_favorable_pct=? WHERE id=?", (favorable_pct, signal_id))
             conn.commit()
 
 
