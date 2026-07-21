@@ -192,14 +192,16 @@ def analyze_ict_smart_sweep(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
     _log("كسر هيكل صاعد (CHoCH)", bullish_choch)
     _log("كسر هيكل هابط (CHoCH)", bearish_choch)
 
-    is_long_setup = (trend4h == "صاعد" and is_bullish_sweep and bullish_fvg_exists and bullish_choch
-                      and coin_trend == "صاعد" and market_trend_value >= 50)
-    is_short_setup = (trend4h == "هابط" and is_bearish_sweep and bearish_fvg_exists and bearish_choch
-                       and coin_trend == "هابط" and market_trend_value < 50)
+    # 📊 تخفيف مبني على مراجعة منطقية: market_trend_value مشتق حرفياً من coin_trend
+    # (70 لو صاعد، 30 لو هابط) — يعني الشرطين كانا يفحصان نفس الشي مرتين، ويضيفان
+    # بوابة خامسة شبه مكررة تقلل الفرص بدون فائدة حقيقية إضافية. الآن اتجاه العملة
+    # اليومي صار تأكيد اختياري يرفع الثقة لو توافق، بدل شرط إلزامي يرفض الفرصة كاملة.
+    is_long_setup = trend4h == "صاعد" and is_bullish_sweep and bullish_fvg_exists and bullish_choch
+    is_short_setup = trend4h == "هابط" and is_bearish_sweep and bearish_fvg_exists and bearish_choch
 
     matched = is_long_setup or is_short_setup
     if not matched:
-        _log("❌ القرار النهائي", "لم تتحقق كل الشروط الخمسة بنفس الوقت (اتجاه 4س + سحب سيولة + FVG + CHoCH + اتجاه يومي) — هذا سبب الرفض", False)
+        _log("❌ القرار النهائي", "لم تتحقق الشروط الأربعة الأساسية بنفس الوقت (اتجاه 4س + سحب سيولة + FVG + CHoCH) — هذا سبب الرفض", False)
         return None
 
     side = "Long" if is_long_setup else "Short"
@@ -283,6 +285,11 @@ def analyze_ict_smart_sweep(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
         probability += 3
     if bullish_choch or bearish_choch:
         probability += 3
+
+    # تأكيد اختياري (بعد ما كان شرطاً إلزامياً): اتجاه العملة اليومي يتوافق مع الصفقة
+    if (side == "Long" and coin_trend == "صاعد") or (side == "Short" and coin_trend == "هابط"):
+        probability += 4
+        _log("✅ تأكيد إضافي: اتجاه العملة اليومي متوافق", coin_trend, True)
 
     # مكافأة تجمّع نقاط الدخول (Cluster) — كلما اجتمعت نقاط أكثر بنفس المكان، الثقة أعلى
     if cluster_count >= 3:

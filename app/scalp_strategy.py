@@ -126,10 +126,15 @@ def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
     recent_low = min(k.low for k in k5m[-30:])
     swing_range = recent_high - recent_low
 
+    # 🔴 إصلاح مبني على بيانات فعلية: كان الهدف = max(المخاطرة×5, امتداد الحركة×1.5)،
+    # وهذا يخلي الهدف يتضخّم تلقائياً كل ما اتسع الوقف (من إصلاح الحد الأدنى النسبي)
+    # — فحص حقيقي أظهر 0% نجاح من 15 صفقة! الآن الهدف مبني **حصراً** على امتداد
+    # الحركة الفعلي بالسوق (بدون ربطه بالمخاطرة إطلاقاً)، ونتحقق بعدها هل عائد/
+    # المخاطرة الناتج طبيعياً يحقق 1:5، بدل ما نفرض هدف غير واقعي عشان نوصل للرقم.
     if side == "Long":
-        take_profit = entry_price + max(risk * 5.0, swing_range * 1.5)
+        take_profit = entry_price + swing_range * 2.0
     else:
-        take_profit = entry_price - max(risk * 5.0, swing_range * 1.5)
+        take_profit = entry_price - swing_range * 2.0
 
     reward = abs(take_profit - entry_price)
     rr = round(reward / risk, 2) if risk > 0 else 0.0

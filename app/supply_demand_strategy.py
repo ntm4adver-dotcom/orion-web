@@ -107,8 +107,8 @@ def analyze_supply_demand_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         nearest = min(candidates, key=lambda z: z["low"] - current_price)
         distance = nearest["low"] - current_price
         _log("مسافة أقرب منطقة عرض (نسبة لـ ATR)", f"{distance/atr_val:.2f}x" if atr_val else "n/a")
-        if distance > atr_val * 6 or distance < atr_val * 0.3:
-            _log("❌ فلتر مسافة المنطقة المنطقية (0.3x–6x ATR)", f"{distance/atr_val:.2f}x خارج النطاق المسموح — رفض", False)
+        if distance > atr_val * 9 or distance < atr_val * 0.2:
+            _log("❌ فلتر مسافة المنطقة المنطقية (0.2x–9x ATR)", f"{distance/atr_val:.2f}x خارج النطاق المسموح — رفض", False)
             return None  # المسافة غير منطقية (بعيدة جداً أو قريبة جداً بلا معنى)
 
         entry_price = (nearest["low"] + nearest["high"]) / 2.0
@@ -127,8 +127,8 @@ def analyze_supply_demand_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         nearest = min(candidates, key=lambda z: current_price - z["high"])
         distance = current_price - nearest["high"]
         _log("مسافة أقرب منطقة طلب (نسبة لـ ATR)", f"{distance/atr_val:.2f}x" if atr_val else "n/a")
-        if distance > atr_val * 6 or distance < atr_val * 0.3:
-            _log("❌ فلتر مسافة المنطقة المنطقية (0.3x–6x ATR)", f"{distance/atr_val:.2f}x خارج النطاق المسموح — رفض", False)
+        if distance > atr_val * 9 or distance < atr_val * 0.2:
+            _log("❌ فلتر مسافة المنطقة المنطقية (0.2x–9x ATR)", f"{distance/atr_val:.2f}x خارج النطاق المسموح — رفض", False)
             return None
 
         entry_price = (nearest["low"] + nearest["high"]) / 2.0

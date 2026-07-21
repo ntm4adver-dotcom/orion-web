@@ -147,19 +147,15 @@ def analyze_fabio_scalper(symbol: str, k4h, k1h, k15m, k5m, k_daily,
             stop_loss = nearest_price - _safe_buffer(1.0)
             take_profit = profile["poc"]
             model = "توازن/ارتداد (Mean Reversion)"
-        elif nearest_name == "LVN":
-            # فراغ سيولة: الدخول بنفس اتجاه Direction متوقعاً عبور سريع خلال الفراغ
-            side = direction
-            entry_price = nearest_price
-            if side == "Long":
-                stop_loss = nearest_price - _safe_buffer(1.2)
-                take_profit = profile["vah"]
-            else:
-                stop_loss = nearest_price + _safe_buffer(1.2)
-                take_profit = profile["val"]
-            model = "فراغ سيولة (LVN Pass-Through)"
         else:
-            _log("❌ القرار النهائي", "السعر عند حافة منطقة القيمة لكن الاتجاه لا يدعم نموذج الارتداد — رفض", False)
+            # 🔴 نموذج "فراغ السيولة (LVN)" أُلغي بالكامل — فحص بيانات إنتاج فعلية أظهر
+            # 10 خسارة مقابل فوز وحيد فقط (نسبة نجاح 9%)، مقارنة بنموذج التوازن/الارتداد
+            # اللي أثبت 66.7% نجاح بنفس الفترة. السبب الأرجح: دخول عند LVN بدون تأكيد
+            # زخم حقيقي عابر للفراغ وقت الدخول، وهدف طموح جداً (حافة منطقة القيمة
+            # المقابلة) بدون تأكيد كافٍ. بدل تخمين إصلاح، أُلغي هذا النموذج بالكامل.
+            reason = "نموذج فراغ السيولة (LVN) مُعطَّل — بيانات فعلية أظهرت 9% نجاح فقط من 11 صفقة" \
+                if nearest_name == "LVN" else "السعر عند حافة منطقة القيمة لكن الاتجاه لا يدعم نموذج الارتداد — رفض"
+            _log("❌ القرار النهائي", reason, False)
             return None
 
     risk = abs(entry_price - stop_loss)

@@ -64,8 +64,9 @@ def analyze_crowd_trap(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     crowd_desc = ""
 
     # حالة 1: الحشد متمركز Long بقوة (نسبة عالية + تمويل موجب) لكن التدفق الحقيقي يبيع
-    crowd_long = long_short_ratio > 1.8 and funding_rate > 0.0003
-    real_flow_selling = cvd_pct < 42 and taker_pressure < -0.05
+    # 📊 تخفيف: الحدود كانت صارمة جداً (نادرة الحدوث بالتصميم)، خُففت بمقدار معقول
+    crowd_long = long_short_ratio > 1.5 and funding_rate > 0.00015
+    real_flow_selling = cvd_pct < 46 and taker_pressure < -0.03
     if crowd_long and real_flow_selling:
         side = "Short"
         crowd_desc = (f"الحشد متمركز Long بقوة (نسبة {long_short_ratio:.2f}, تمويل {funding_rate*100:.4f}%) "
@@ -73,8 +74,8 @@ def analyze_crowd_trap(symbol: str, k4h, k1h, k15m, k5m, k_daily,
                        f"تناقض يرجّح تصفية مراكز Long المزدحمة")
 
     # حالة 2 (معاكسة تماماً): الحشد متمركز Short بقوة لكن التدفق الحقيقي يشتري
-    crowd_short = long_short_ratio < 0.55 and funding_rate < -0.0003
-    real_flow_buying = cvd_pct > 58 and taker_pressure > 0.05
+    crowd_short = long_short_ratio < 0.67 and funding_rate < -0.00015
+    real_flow_buying = cvd_pct > 54 and taker_pressure > 0.03
     if crowd_short and real_flow_buying:
         side = "Long"
         crowd_desc = (f"الحشد متمركز Short بقوة (نسبة {long_short_ratio:.2f}, تمويل {funding_rate*100:.4f}%) "
