@@ -78,10 +78,14 @@ def analyze_mtf_fib_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
 
         side = "Long"
         entry_price = swing_low + 0.72 * swing_range  # منطقة 0.72 من القاع نحو القمة
-        # الوقف عند مستوى 50% (منتصف حركة التراجع) بدل الرجوع لكل المدى حتى القاع —
-        # دخول عميق بمنطقة 0.72 يستاهل وقف أضيق نسبياً عند نقطة إبطال منطقية (50%)
-        # بدل مخاطرة مبالغ فيها بالرجوع لكل الطريق للقاع الأصلي
-        stop_loss = swing_low + swing_range * 0.5 - atr(k5m, 14) * 0.2
+        # 🔴 إصلاح حرج مبني على صفقة حقيقية فشلت خلال 6.4 ثانية بس: كان الوقف يُحسب
+        # من نسبة الحركة نفسها بدون أي حد أدنى مطلق — على عملات قليلة التقلب (زي
+        # NOTUSDT) هذا ينتج مسافة وقف ضئيلة جداً (0.22% بالحالة الفعلية) تُضرب فوراً
+        # بأول تذبذب عادي. نفس الحماية المطبَّقة بباقي الاستراتيجيات: الأكبر بين
+        # (مستوى 50% من الحركة) أو (0.8% من السعر كحد أدنى مطلق).
+        stop_candidate = swing_low + swing_range * 0.5 - atr(k5m, 14) * 0.2
+        min_stop_distance = entry_price * 0.008
+        stop_loss = min(stop_candidate, entry_price - min_stop_distance)
         take_profit = swing_high + swing_range * 1.0  # امتداد ما بعد القمة السابقة بنفس مدى الحركة
 
     elif main_trend == "هابط":
@@ -104,7 +108,9 @@ def analyze_mtf_fib_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
 
         side = "Short"
         entry_price = swing_high - 0.72 * swing_range  # منطقة 0.72 من القمة نحو القاع
-        stop_loss = swing_high - swing_range * 0.5 + atr(k5m, 14) * 0.2
+        stop_candidate = swing_high - swing_range * 0.5 + atr(k5m, 14) * 0.2
+        min_stop_distance = entry_price * 0.008
+        stop_loss = max(stop_candidate, entry_price + min_stop_distance)
         take_profit = swing_low - swing_range * 1.0
 
     else:

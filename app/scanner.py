@@ -227,6 +227,23 @@ class ScannerState:
             )
 
     def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k5m):
+        # 🔴 تحقق مركزي حرج (يحمي كل الاستراتيجيات دفعة وحدة، حالياً ومستقبلاً):
+        # لصفقة Long، نقطة الدخول يجب تكون **أقل من أو تساوي** السعر الحالي (ننتظر
+        # السعر ينزل لها = أمر Limit شراء منطقي). لو طلعت أعلى من السعر الحالي، يعني
+        # الصفقة "تُفعَّل" فوراً بأول تحديث سعر (لأن الشرط `السعر<=الدخول` يتحقق مباشرة
+        # بدون أي انتظار حقيقي)، وممكن يكون السعر وقتها أصلاً قريب جداً أو تجاوز الوقف
+        # — هذا بالضبط سبب صفقات ضربت وقف خلال ثوانٍ من إنشائها. نفس المنطق بالعكس
+        # لصفقات Short (الدخول لازم يكون أعلى من أو يساوي السعر الحالي).
+        current_live_price = k5m[-1].close if k5m else None
+        if current_live_price and current_live_price > 0:
+            tolerance = current_live_price * 0.0005  # هامش تقريب بسيط (0.05%) لتفادي رفض حالات حدّية طبيعية
+            if result.side == "Long" and result.entry_price > current_live_price + tolerance:
+                db.add_log(f"❌ [{symbol}/{strategy_key}] رُفضت الإشارة: نقطة الدخول ({result.entry_price:.6g}) أعلى من السعر الحالي ({current_live_price:.6g}) بصفقة شراء — خطأ منطقي بحساب الاستراتيجية يمنع التفعيل الصحيح.")
+                return
+            if result.side == "Short" and result.entry_price < current_live_price - tolerance:
+                db.add_log(f"❌ [{symbol}/{strategy_key}] رُفضت الإشارة: نقطة الدخول ({result.entry_price:.6g}) أقل من السعر الحالي ({current_live_price:.6g}) بصفقة بيع — خطأ منطقي بحساب الاستراتيجية يمنع التفعيل الصحيح.")
+                return
+
         req_prob, learning_msg = learning.effective_threshold(result.symbol, result.side, settings, strategy_key=strategy_key)
         if learning_msg:
             db.add_log(learning_msg)
@@ -378,6 +395,18 @@ class ScannerState:
                         favorable_pct = max(0.0, (entry_price - live_price) / entry_price * 100.0)
                     db.update_max_drawdown_if_worse(signal["id"], adverse_pct)
                     db.update_max_favorable_if_better(signal["id"], favorable_pct)
+
+                    # 🎯 وقف التعادل التلقائي (Breakeven Stop) — إصلاح مباشر مبني على
+                    # تحليل بيانات إنتاج فعلية: نسبة كبيرة من الخسائر (37-48% حسب
+                    # الاستراتيجية) كانت أصلاً صفقات رابحة قبل ما تنعكس وتضرب الوقف
+                    # الأصلي كاملاً. بمجرد ما الربح العائم يعادل المخاطرة الأصلية (1R)،
+                    # ننقل الوقف لنقطة الدخول — أي انعكاس لاحق يصير "تعادل" لا خسارة.
+                    initial_risk = signal.get("initial_risk_pct") or 0
+                    if (not signal.get("breakeven_activated") and initial_risk > 0
+                            and favorable_pct >= initial_risk):
+                        db.activate_breakeven(signal["id"], entry_price)
+                        signal["stop_loss"] = entry_price  # نحدّث النسخة المحلية بنفس هذي الدورة أيضاً
+                        db.add_log(f"🎯 [{signal['symbol']}] تفعيل وقف التعادل تلقائياً — الصفقة حققت ربح 1R، الوقف انتقل لنقطة الدخول لحماية الأرباح.")
 
                 if signal["side"] == "Long":
                     if live_price <= signal["stop_loss"]:

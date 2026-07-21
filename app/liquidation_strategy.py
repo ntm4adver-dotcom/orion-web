@@ -101,10 +101,12 @@ def analyze_liquidation_hunter(symbol: str, k4h, k1h, k15m, k5m, k_daily,
 
     if side == "Long":
         take_profit = zone_price + distance_to_zone * 0.5  # امتداد بعد كسر المنطقة (تسارع الكسكارة)
-        stop_loss = entry_price - distance_to_zone * 0.4
+        min_stop_distance = entry_price * 0.008  # حد أدنى مطلق وقائي 0.8%
+        stop_loss = min(entry_price - distance_to_zone * 0.4, entry_price - min_stop_distance)
     else:
         take_profit = zone_price - distance_to_zone * 0.5
-        stop_loss = entry_price + distance_to_zone * 0.4
+        min_stop_distance = entry_price * 0.008
+        stop_loss = max(entry_price + distance_to_zone * 0.4, entry_price + min_stop_distance)
 
     risk = abs(entry_price - stop_loss)
     if risk <= 0:

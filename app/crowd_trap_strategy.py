@@ -102,11 +102,13 @@ def analyze_crowd_trap(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     entry_price = current_price
 
     if side == "Long":
-        stop_loss = min(recent_swing_low, entry_price - atr_val * 1.2)
+        min_stop_distance = entry_price * 0.008  # حد أدنى مطلق 0.8% وقائي
+        stop_loss = min(recent_swing_low, entry_price - atr_val * 1.2, entry_price - min_stop_distance)
         risk = entry_price - stop_loss
         take_profit = entry_price + risk * 2.5
     else:
-        stop_loss = max(recent_swing_high, entry_price + atr_val * 1.2)
+        min_stop_distance = entry_price * 0.008
+        stop_loss = max(recent_swing_high, entry_price + atr_val * 1.2, entry_price + min_stop_distance)
         risk = stop_loss - entry_price
         take_profit = entry_price - risk * 2.5
 
