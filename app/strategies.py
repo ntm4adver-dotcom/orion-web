@@ -20,6 +20,8 @@ from .stop_hunt_strategy import analyze_stop_hunt
 from .scalp_strategy import analyze_scalp_precision
 from .liquidation_strategy import analyze_liquidation_hunter
 from .fabio_scalper_strategy import analyze_fabio_scalper
+from .mtf_fib_strategy import analyze_mtf_fib_trend
+from .crowd_trap_strategy import analyze_crowd_trap
 
 # كل استراتيجية: مفتاح فريد -> {label: الاسم المعروض, fn: دالة التحليل}
 # توقيع دالة التحليل الموحّد: fn(symbol, k4h, k1h, k15m, k5m, k_daily, micro=None) -> Optional[AnalysisResult]
@@ -59,6 +61,14 @@ STRATEGY_REGISTRY = {
     "fabio_scalper": {
         "label": "📊 سكالب فابيو فالنتيني (Direction-Location-Aggression)",
         "fn": analyze_fabio_scalper,
+    },
+    "mtf_fib_trend": {
+        "label": "📐 فيبوناتشي الترند المتعدد الفريمات (15د اتجاه / 5د تراجع منكسر / دخول 0.72)",
+        "fn": analyze_mtf_fib_trend,
+    },
+    "crowd_trap": {
+        "label": "🎭 مصيدة الحشد (Crowd Trap Divergence) — تصميم أصيل، بدون نمط سعري",
+        "fn": analyze_crowd_trap,
     },
 }
 

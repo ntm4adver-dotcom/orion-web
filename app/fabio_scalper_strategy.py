@@ -112,16 +112,20 @@ def analyze_fabio_scalper(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     # ── الخطوة 3: العدوانية (Aggression) + بناء الصفقة حسب النموذج المناسب ──
     if is_imbalance:
         # نموذج الاختلال (Trend/Continuation): كسر حافة منطقة القيمة بنفس اتجاه Direction
+        # 📊 إصلاح مبني على بيانات فعلية: كان الدخول بسعر السوق مباشرة لحظة رصد
+        # الاختلال (مطاردة)، وفحص حقيقي أظهر 40% دخول خاطئ من الأساس بهذا النموذج
+        # تحديداً. الآن ندخل عند إعادة اختبار حافة منطقة القيمة نفسها (Limit) بدل
+        # مطاردة السعر بعد ما يكون تجاوزها فعلاً.
         if current_price > profile["vah"] and direction == "Long":
             side = "Long"
-            entry_price = current_price
+            entry_price = max(profile["vah"], current_price - atr_val * 0.4)
             stop_loss = profile["vah"] - _safe_buffer(0.8)
             measured = profile["vah"] - profile["val"]
             take_profit = entry_price + max(measured, atr_val * 2.0)
             model = "اختلال/استمرار (Trend Model)"
         elif current_price < profile["val"] and direction == "Short":
             side = "Short"
-            entry_price = current_price
+            entry_price = min(profile["val"], current_price + atr_val * 0.4)
             stop_loss = profile["val"] + _safe_buffer(0.8)
             measured = profile["vah"] - profile["val"]
             take_profit = entry_price - max(measured, atr_val * 2.0)

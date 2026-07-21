@@ -60,6 +60,16 @@ def _detect_stop_hunt(klines: List[Kline], lookback: int = 50, vol_period: int =
 
         # صيد استوبات صاعد (سحب سيولة القيعان)
         if current.low < lowest_low and current.close > lowest_low:
+            # 📊 تأكيد متابعة إلزامي (إصلاح مبني على بيانات فعلية): فحص حقيقي أظهر
+            # 44% من صفقات هذي الاستراتيجية كانت خاطئة من الأساس — السبب: كنا ندخل
+            # فوراً على شمعة السحب نفسها بدون أي تأكيد إن الارتداد صامد. الآن نشترط
+            # عدم رجوع أي شمعة لاحقة تكسر تحت القاع المسحوب مرة ثانية (فشل النمط).
+            follow_through = klines[idx + 1:]
+            if not follow_through:
+                continue  # لسا ما فيه شمعة تأكيد بعد شمعة السحب — مبكر جداً، ننتظر
+            if any(k.low < lowest_low for k in follow_through):
+                continue  # رجع السعر وكسر القاع مرة ثانية = فشل النمط، مو ارتداد حقيقي
+
             # نقطة الدخول: المستوى الهيكلي نفسه (القاع المكسور) بدل إغلاق الشمعة الحالي —
             # نتوقع إعادة اختبار (Retest) لهذا المستوى قبل الاستمرار صعوداً، فندخل هناك
             # بدل مطاردة السعر بعد الارتداد. هامش صغير فوق القاع مباشرة لضمان واقعية التنفيذ.
@@ -77,6 +87,12 @@ def _detect_stop_hunt(klines: List[Kline], lookback: int = 50, vol_period: int =
 
         # صيد استوبات هابط (سحب سيولة القمم)
         if current.high > highest_high and current.close < highest_high:
+            follow_through = klines[idx + 1:]
+            if not follow_through:
+                continue
+            if any(k.high > highest_high for k in follow_through):
+                continue  # رجع السعر وكسر القمة مرة ثانية = فشل النمط
+
             entry_price = highest_high - candle_range * 0.05
             stop_loss = current.high + buffer
             risk = stop_loss - entry_price

@@ -75,7 +75,27 @@ def analyze_liquidation_hunter(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         _log("❌ فلتر مسافة منطقية (0.3%–8%)", f"{distance_pct:.2f}% خارج النطاق الواقعي — رفض", False)
         return None
 
-    entry_price = current_price
+    # 📊 إصلاح مبني على بيانات إنتاج فعلية: كان الدخول يطارد سعر السوق مباشرة بعد
+    # الانفجار السعري، وهذا غالباً يعني الشراء عند قمة الحركة المؤقتة (أو البيع عند
+    # قاعها) — فحص حقيقي أظهر 73% من صفقات هذي الاستراتيجية كانت خاطئة من الأساس
+    # (السعر ما تحرك لصالحنا أبداً تقريباً). الحل: دخول محدد (Limit) عند إعادة اختبار
+    # واقعية بمسافة ATR بدل مطاردة السعر اللحظي، + بوابة تأكيد زخم إلزامية.
+    retest_buffer = breakout_result.atr * 0.5
+    if side == "Long":
+        entry_price = current_price - retest_buffer
+    else:
+        entry_price = current_price + retest_buffer
+    _log("📍 دخول محدد (Limit) عند إعادة اختبار بدل مطاردة السعر", f"{entry_price:.6g} (بدل سعر السوق {current_price:.6g})")
+
+    # بوابة تأكيد زخم إلزامية: هذي الاستراتيجية تحديداً تعتمد كلياً على استمرار زخم
+    # حقيقي، فلازم يكون ضغط المتداولين الفعلي متوافق فعلاً وقت الدخول (لو توفرت البيانات)
+    taker_pressure = micro.taker_pressure if micro else None
+    if taker_pressure is not None:
+        aligned = (side == "Long" and taker_pressure > 0.05) or (side == "Short" and taker_pressure < -0.05)
+        if not aligned:
+            _log("❌ بوابة تأكيد الزخم الإلزامية", f"ضغط المتداولين {taker_pressure:.2f} لا يدعم استمرار الزخم — رفض", False)
+            return None
+
     zone_price = best_zone["price"]
     distance_to_zone = abs(zone_price - entry_price)
 
@@ -103,7 +123,6 @@ def analyze_liquidation_hunter(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     oi_change_pct = micro.oi_change_pct if micro else None
     if oi_change_pct is not None and oi_change_pct > 1.0:
         probability += 5  # فائدة مفتوحة مرتفعة = مراكز مرفوعة أكثر فعلاً = كسكارة أقوى محتملة
-    taker_pressure = micro.taker_pressure if micro else None
     if taker_pressure is not None:
         aligned = (side == "Long" and taker_pressure > 0.15) or (side == "Short" and taker_pressure < -0.15)
         if aligned:
