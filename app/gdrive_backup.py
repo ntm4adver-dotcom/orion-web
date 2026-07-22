@@ -133,4 +133,4 @@ def upload_backup_file(local_filepath: str, filename: str) -> tuple:
 
 
 def disconnect():
-    db.update_settings({"gdrive_refresh_token": "", "gdrive_folder_id": ""})
+    db.update_settings({"gdrive_refresh_token": "", "gdrive_folder_id": "", "is_gdrive_backup_enabled": 0})
