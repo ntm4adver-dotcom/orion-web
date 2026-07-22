@@ -142,6 +142,7 @@ class ScannerState:
         # العام، لأن أغلب العملات البديلة مرتبطة بحركة البيتكوين بقوة، وصفقة تعاكسه
         # معرّضة لانعكاس مفاجئ بغض النظر عن قوة إعداد العملة نفسها محلياً.
         btc_trend = None
+        btc_klines = None
         try:
             btc_klines = exchange.fetch_klines("BTCUSDT", "4h", 60)
             if btc_klines and len(btc_klines) >= 20:
@@ -150,6 +151,7 @@ class ScannerState:
                 db.add_log(f"📊 اتجاه السوق العام (البيتكوين، 4 ساعات): {btc_trend}")
         except Exception:
             btc_trend = None
+            btc_klines = None
 
         for idx, symbol in enumerate(symbols):
             if self._stop_flag.is_set():
@@ -218,7 +220,7 @@ class ScannerState:
                     if result is None:
                         continue
                     matched_any = True
-                    self._process_signal(settings, symbol, strategy_key, result, k4h, k1h, k5m, btc_trend)
+                    self._process_signal(settings, symbol, strategy_key, result, k4h, k1h, k5m, btc_trend, btc_klines)
 
                 if not matched_any:
                     db.add_log(f"▫️ {symbol}: ليس له اتجاه كافٍ حالياً.")
@@ -240,7 +242,7 @@ class ScannerState:
                 f"أو حصل خطأ أثناء التحليل:\n\n{body}",
             )
 
-    def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k5m, btc_trend=None):
+    def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k5m, btc_trend=None, btc_klines=None):
         # 🔴 تحقق مركزي حرج (يحمي كل الاستراتيجيات دفعة وحدة، حالياً ومستقبلاً):
         # لصفقة Long، نقطة الدخول يجب تكون **أقل من أو تساوي** السعر الحالي (ننتظر
         # السعر ينزل لها = أمر Limit شراء منطقي). لو طلعت أعلى من السعر الحالي، يعني
@@ -270,12 +272,31 @@ class ScannerState:
                 db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: العملة تتحرك بشكل عشوائي/جانبي (كفاءة اتجاهية {er:.2f} أقل من {min_er}) — لا اتجاه حقيقي واضح.")
                 return
 
-        # 🆕 فلتر 2: توافق مع اتجاه السوق العام (البيتكوين) — إلزامي لكل استراتيجية.
-        # نرفض أي صفقة تعاكس اتجاه البيتكوين العام، لأن أغلب العملات مرتبطة بحركته
-        # بقوة، وصفقة معاكسة معرّضة لانعكاس مفاجئ بغض النظر عن قوة الإعداد المحلي.
-        if settings.get("is_market_alignment_filter_enabled", True) and btc_trend and not symbol.startswith("BTC"):
+        # 🆕 فلتر 2: توافق مع اتجاه السوق العام (البيتكوين) — إلزامي لكل استراتيجية،
+        # **إلا لو العملة فكّت ارتباطها بالبيتكوين فعلياً**. نحسب معامل الارتباط
+        # (Correlation) بين حركة العملة وحركة البيتكوين على فريم 4 ساعات؛ لو الارتباط
+        # ضعيف (العملة تتحرك بمنطقها الخاص، مو تابعة للبيتكوين)، نتجاهل شرط توافق
+        # البيتكوين، لكن **نشترط بدلاً منه توافق اتجاه العملة نفسها العام (4 ساعات)**
+        # — لأن فك الارتباط بالسوق العام ما يعني عدم أهمية اتجاه العملة نفسها.
+        if settings.get("is_market_alignment_filter_enabled", True) and not symbol.startswith("BTC"):
             side_trend = "صاعد" if result.side == "Long" else "هابط"
-            if side_trend != btc_trend:
+            is_decoupled = False
+            correlation = None
+            if btc_klines:
+                from .analyzer import correlation_with
+                correlation = correlation_with(k4h, btc_klines, period=30)
+                min_corr = settings.get("min_btc_correlation", 0.35)
+                is_decoupled = abs(correlation) < min_corr
+
+            if is_decoupled:
+                # فكّت الارتباط بالبيتكوين — نشترط توافق اتجاه العملة نفسها بدلاً منه
+                from .analyzer import _get_bias as _get_coin_bias
+                coin_trend = _get_coin_bias(k4h)
+                if side_trend != coin_trend:
+                    db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: العملة فكّت ارتباطها بالبيتكوين (ارتباط {correlation:.2f})، لكن الصفقة ({result.side}) تعاكس اتجاه العملة نفسها ({coin_trend}) — رفض.")
+                    return
+                db.add_log(f"ℹ️ [{symbol}/{strategy_key}] العملة فكّت ارتباطها بالبيتكوين (ارتباط {correlation:.2f}) — تم تجاوز فلتر السوق العام، والاعتماد على اتجاه العملة نفسها ({coin_trend}) بدلاً منه.")
+            elif btc_trend and side_trend != btc_trend:
                 db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: الصفقة ({result.side}) تعاكس اتجاه السوق العام (البيتكوين: {btc_trend}) — رفض وقائي.")
                 return
 
@@ -437,20 +458,24 @@ class ScannerState:
                     # الأصلي كاملاً. بمجرد ما الربح العائم يعادل المخاطرة الأصلية (1R)،
                     # ننقل الوقف لنقطة الدخول — أي انعكاس لاحق يصير "تعادل" لا خسارة.
                     initial_risk = signal.get("initial_risk_pct") or 0
-                    if (not signal.get("breakeven_activated") and initial_risk > 0
-                            and favorable_pct >= initial_risk):
+                    if (settings.get("is_breakeven_stop_enabled", True) and not signal.get("breakeven_activated")
+                            and initial_risk > 0 and favorable_pct >= initial_risk):
                         db.activate_breakeven(signal["id"], entry_price)
                         signal["stop_loss"] = entry_price  # نحدّث النسخة المحلية بنفس هذي الدورة أيضاً
                         db.add_log(f"🎯 [{signal['symbol']}] تفعيل وقف التعادل تلقائياً — الصفقة حققت ربح 1R، الوقف انتقل لنقطة الدخول لحماية الأرباح.")
 
                 if signal["side"] == "Long":
                     if live_price <= signal["stop_loss"]:
-                        new_status, changed = "HIT_SL", True
+                        # لو الوقف الحالي هو وقف التعادل المُفعَّل (مو الوقف الأصلي)، هذي
+                        # "تعادل" وقائي حمى رأس المال، مو خسارة حقيقية بالتحليل نفسه
+                        new_status = "BREAKEVEN" if signal.get("breakeven_activated") else "HIT_SL"
+                        changed = True
                     elif live_price >= signal["take_profit"]:
                         new_status, changed = "HIT_TP", True
                 else:
                     if live_price >= signal["stop_loss"]:
-                        new_status, changed = "HIT_SL", True
+                        new_status = "BREAKEVEN" if signal.get("breakeven_activated") else "HIT_SL"
+                        changed = True
                     elif live_price <= signal["take_profit"]:
                         new_status, changed = "HIT_TP", True
 

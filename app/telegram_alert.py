@@ -65,9 +65,10 @@ _STATUS_TEXT = {
     "ACTIVE": "🟢 تم تفعيل الصفقة بنجاح! السعر الحالي واجه نقطة الدخول وجاري مراقبة حركة السوق...",
     "HIT_TP": "🎯 مبروووك! تم ضرب الهدف (Take Profit) بالكامل بنجاح تحقيق ربح رائع 🎉",
     "HIT_SL": "🛑 تنبيه: تم ضرب وقف الخسارة (Stop Loss) والخروج التلقائي من الصفقة.",
+    "BREAKEVEN": "⚖️ تعادل: الصفقة حققت ربحاً كافياً وانتقل وقفها لنقطة الدخول تلقائياً لحماية رأس المال، ثم انعكس السعر وأُغلقت عند التعادل تقريباً — بدون خسارة حقيقية.",
     "CANCELLED": "⚠️ تم إلغاء الصفقة: السعر ضرب الهدف مباشرة دون ملامسة سعر الدخول أولاً.",
 }
-_STATUS_EMOJI = {"ACTIVE": "⚡", "HIT_TP": "💰", "HIT_SL": "📉", "CANCELLED": "❌"}
+_STATUS_EMOJI = {"ACTIVE": "⚡", "HIT_TP": "💰", "HIT_SL": "📉", "BREAKEVEN": "⚖️", "CANCELLED": "❌"}
 
 
 def send_status_alert(token: str, chat_ids_string: str, symbol: str, direction: str, status: str, price: float):

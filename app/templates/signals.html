@@ -27,6 +27,23 @@
       </div>
     </div>
   </div>
+  <div style="display:flex; gap:10px; margin-top:14px; padding-top:14px; border-top:1px solid var(--dark-accent);">
+    <div style="flex:1; text-align:center;">
+      <div class="muted" style="font-size:11px;">إجمالي % الربح المتحقق</div>
+      <div id="total-win-pct" style="color:var(--green); font-weight:800; font-size:18px;">—</div>
+    </div>
+    <div style="flex:1; text-align:center;">
+      <div class="muted" style="font-size:11px;">إجمالي % الخسارة المتحققة</div>
+      <div id="total-loss-pct" style="color:var(--red); font-weight:800; font-size:18px;">—</div>
+    </div>
+    <div style="flex:1; text-align:center;">
+      <div class="muted" style="font-size:11px;">📊 صافي العائد الإجمالي</div>
+      <div id="net-pct" style="font-weight:800; font-size:18px;">—</div>
+    </div>
+  </div>
+  <p class="muted" style="font-size:11px; margin-top:8px; text-align:center;">
+    مجموع نسبة الربح/الخسارة الفعلية لكل صفقة مغلقة (مو بس عدد الصفقات) — تقييم أدق لأداء البوت الحقيقي
+  </p>
 </div>
 
 <input type="text" id="search-box" placeholder="ابحث عن عملة... (مثال: BTC)" style="margin-bottom:12px;" oninput="renderSignals()">
@@ -89,6 +106,11 @@ const STRATEGY_LABELS = {
   'ict_guided_entry': '🎯 الانفجار الموجّه بـICT',
   'supply_demand_reversal': '🔄 انعكاس عرض/طلب',
   'stop_hunt': '🎣 صيد الاستوبات',
+  'scalp_precision': '🎯 السكالب السريع الدقيق',
+  'liquidation_hunter': '🔥 صيد التصفيات',
+  'fabio_scalper': '📊 سكالب فابيو فالنتيني',
+  'mtf_fib_trend': '📐 فيبوناتشي الترند المتعدد الفريمات',
+  'crowd_trap': '🎭 مصيدة الحشد',
 };
 function strategyLabel(key){
   return STRATEGY_LABELS[key] || key;
@@ -177,6 +199,7 @@ function statusMeta(status){
     'ACTIVE': {label:'⚡ نشط ومراقب', cls:'status-ACTIVE'},
     'HIT_TP': {label:'✅ تحقق الهدف', cls:'status-HIT_TP'},
     'HIT_SL': {label:'🛑 تفعيل وقف الخسارة', cls:'status-HIT_SL'},
+    'BREAKEVEN': {label:'⚖️ تعادل (وقف حماية)', cls:'status-BREAKEVEN'},
     'CANCELLED': {label:'⚪ ملغاة', cls:'status-CANCELLED'},
     'REPLACED': {label:'♻️ تم الاستبدال', cls:'status-CANCELLED'},
   };
@@ -189,6 +212,7 @@ function captionFor(status){
     'ACTIVE': 'الصفقة مفعّلة ونشطة وتحت المراقبة المستمرة لمستويات الأهداف والإيقاف.',
     'HIT_TP': 'تم تحقيق الهدف بنجاح وإغلاق الصفقة رابحة.',
     'HIT_SL': 'تم الوصول لوقف الخسارة وإغلاق الصفقة.',
+    'BREAKEVEN': 'الصفقة حققت ربحاً كافياً وانتقل وقفها لنقطة الدخول تلقائياً، ثم انعكس السعر — تعادل تقريبي، مو خسارة حقيقية.',
     'CANCELLED': 'تم إلغاء هذه الفرصة قبل تفعيلها.',
     'REPLACED': 'تم استبدال هذه الصفقة بفرصة أقوى.',
   };
@@ -221,6 +245,15 @@ function renderSignals(){
   document.getElementById('loss-count').innerText = signalStats.losses || 0;
   document.getElementById('win-rate').innerText = signalStats.closed_total > 0 ? signalStats.win_rate + '%' : '—';
 
+  const totalWinPct = signalStats.total_win_pct || 0;
+  const totalLossPct = signalStats.total_loss_pct || 0;
+  const netPct = signalStats.net_pct || 0;
+  document.getElementById('total-win-pct').innerText = signalStats.closed_total > 0 ? '+' + totalWinPct.toFixed(2) + '%' : '—';
+  document.getElementById('total-loss-pct').innerText = signalStats.closed_total > 0 ? totalLossPct.toFixed(2) + '%' : '—';
+  const netEl = document.getElementById('net-pct');
+  netEl.innerText = signalStats.closed_total > 0 ? (netPct >= 0 ? '+' : '') + netPct.toFixed(2) + '%' : '—';
+  netEl.style.color = netPct >= 0 ? 'var(--green)' : 'var(--red)';
+
   if (currentFilter === 'ACTIVE') list = list.filter(s => s.status === 'ACTIVE');
   else if (currentFilter === 'PENDING') list = list.filter(s => s.status === 'PENDING');
   else if (currentFilter === 'HIT_TP') list = list.filter(s => s.status === 'HIT_TP');
@@ -252,6 +285,7 @@ function renderSignals(){
       ${sig.strategy ? `<div class="muted" style="font-size:11px; margin-bottom:8px;">${strategyLabel(sig.strategy)}</div>` : ''}
       <div class="sig-mid">
         <span class="status-pill ${st.cls}">${st.label}</span>
+        ${sig.breakeven_activated ? '<span style="color:var(--cyan); font-size:11px; font-weight:700;">🎯 وقف تعادل مفعّل</span>' : ''}
         <span>السعر الحالي: <b>${fmt(live)}</b></span>
       </div>
       ${sig.status === 'ACTIVE' ? `

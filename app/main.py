@@ -92,7 +92,8 @@ async def settings_save(request: Request):
     checkboxes = ["is_auto_scanning", "is_single_coin_mode_enabled", "is_telegram_enabled",
                   "is_volume_filter_enabled", "is_vwap_filter_enabled", "is_4h_buyers_filter_enabled",
                   "is_cancel_if_exceeds_target_enabled", "ict_ignore_kill_zone",
-                  "is_efficiency_filter_enabled", "is_market_alignment_filter_enabled"]
+                  "is_efficiency_filter_enabled", "is_market_alignment_filter_enabled",
+                  "is_breakeven_stop_enabled"]
     updates = {}
     for key in db.DEFAULT_SETTINGS:
         if key in checkboxes:

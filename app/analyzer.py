@@ -197,6 +197,34 @@ def check_irrational_market(k5m: List[Kline], k15m: List[Kline], k1h: List[Kline
     return False
 
 
+def correlation_with(klines_a: List[Kline], klines_b: List[Kline], period: int = 30) -> float:
+    """معامل ارتباط بيرسون (Pearson Correlation) بين عوائد عملتين — يقيس هل العملة
+    فعلاً "تتبع" حركة البيتكوين، أو "فكّت ارتباطها" وتتحرك بمنطقها الخاص. القيمة
+    بين -1 و 1: قريبة من 1 = ارتباط قوي موجب (تتحرك مع بعض)، قريبة من 0 = لا علاقة
+    (فك ارتباط)، قريبة من -1 = ارتباط عكسي."""
+    if len(klines_a) < period + 1 or len(klines_b) < period + 1:
+        return 1.0  # افتراضياً نعتبرها مرتبطة لو البيانات غير كافية (الوضع الآمن الافتراضي)
+
+    closes_a = [k.close for k in klines_a[-(period + 1):]]
+    closes_b = [k.close for k in klines_b[-(period + 1):]]
+    returns_a = [(closes_a[i] - closes_a[i - 1]) / closes_a[i - 1] for i in range(1, len(closes_a)) if closes_a[i - 1] > 0]
+    returns_b = [(closes_b[i] - closes_b[i - 1]) / closes_b[i - 1] for i in range(1, len(closes_b)) if closes_b[i - 1] > 0]
+
+    n = min(len(returns_a), len(returns_b))
+    if n < 5:
+        return 1.0
+    returns_a, returns_b = returns_a[-n:], returns_b[-n:]
+
+    mean_a = sum(returns_a) / n
+    mean_b = sum(returns_b) / n
+    cov = sum((returns_a[i] - mean_a) * (returns_b[i] - mean_b) for i in range(n))
+    std_a = sum((x - mean_a) ** 2 for x in returns_a) ** 0.5
+    std_b = sum((x - mean_b) ** 2 for x in returns_b) ** 0.5
+    if std_a == 0 or std_b == 0:
+        return 1.0
+    return cov / (std_a * std_b)
+
+
 def efficiency_ratio(klines: List[Kline], period: int = 20) -> float:
     """نسبة الكفاءة الاتجاهية (Kaufman's Efficiency Ratio) — تقيس هل حركة السعر
     'نظيفة' باتجاه واحد، أو 'عشوائية' (تتذبذب كثير لكن ما توصل لمكان فعلياً).

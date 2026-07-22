@@ -55,6 +55,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "is_efficiency_filter_enabled": 1,  # رفض العملات اللي تتحرك عشوائياً/جانبياً (نسبة الكفاءة الاتجاهية)
     "min_efficiency_ratio": 0.28,  # الحد الأدنى لنسبة الكفاءة الاتجاهية (0-1، كل ما زاد كل ما كان الاتجاه أنظف)
     "is_market_alignment_filter_enabled": 1,  # رفض أي صفقة تعاكس اتجاه السوق العام (البيتكوين)
+    "min_btc_correlation": 0.35,  # الحد الأدنى لمعامل الارتباط بالبيتكوين قبل اعتبار العملة "فكّت الارتباط"
+    "is_breakeven_stop_enabled": 1,  # نقل الوقف لنقطة الدخول تلقائياً عند تحقيق ربح 1R
     "combined_enabled_strategies": "",  # قائمة مفاتيح استراتيجيات مفصولة بفاصلة تعمل داخل وضع "الكل معاً" — فاضي = الكل مفعّل
     # OKX trading connection
     "okx_api_key": "",
@@ -179,7 +181,8 @@ def get_settings() -> Dict[str, Any]:
                  "is_cancel_if_exceeds_target_enabled", "okx_is_testnet", "okx_is_auto_trading_enabled",
                  "okx_is_max_leverage_enabled", "is_adaptive_stop_loss_enabled", "is_instant_entry_enabled",
                  "is_coin_learning_enabled", "is_auto_backup_enabled", "is_gdrive_backup_enabled",
-                 "ict_ignore_kill_zone", "is_efficiency_filter_enabled", "is_market_alignment_filter_enabled"):
+                 "ict_ignore_kill_zone", "is_efficiency_filter_enabled", "is_market_alignment_filter_enabled",
+                 "is_breakeven_stop_enabled"):
         settings[bkey] = bool(int(settings.get(bkey, 0)))
     return settings
 
@@ -231,8 +234,33 @@ def get_signal_stats() -> Dict[str, Any]:
         total_cur = conn.execute("SELECT COUNT(*) as cnt FROM trade_signals")
         total = total_cur.fetchone()["cnt"]
 
+        # العائد الإجمالي الحقيقي: نسبة الربح% المتحقق فعلياً من كل صفقة رابحة مقابل
+        # نسبة الخسارة% المتحققة من كل صفقة خاسرة حقيقية — التعادل (BREAKEVEN) مستبعد
+        # تماماً من هذا الحساب لأنه مو خسارة حقيقية بالتحليل، بس وقاية حمت رأس المال
+        closed_rows = conn.execute("""
+            SELECT side, entry_price, current_price, status FROM trade_signals
+            WHERE status IN ('HIT_TP','HIT_SL') AND entry_price > 0
+        """).fetchall()
+
+    total_win_pct = 0.0
+    total_loss_pct = 0.0
+    for row in closed_rows:
+        entry = row["entry_price"]
+        exit_p = row["current_price"]
+        if not entry or not exit_p:
+            continue
+        if row["side"] == "Long":
+            pct = (exit_p - entry) / entry * 100.0
+        else:
+            pct = (entry - exit_p) / entry * 100.0
+        if row["status"] == "HIT_TP":
+            total_win_pct += pct
+        else:
+            total_loss_pct += pct
+
     wins = counts.get("HIT_TP", 0)
-    losses = counts.get("HIT_SL", 0)
+    losses = counts.get("HIT_SL", 0)  # خسائر حقيقية فقط — التعادل ما يُحسب هنا
+    breakeven = counts.get("BREAKEVEN", 0)
     closed = wins + losses
     return {
         "total": total,
@@ -240,9 +268,13 @@ def get_signal_stats() -> Dict[str, Any]:
         "pending": counts.get("PENDING", 0),
         "wins": wins,
         "losses": losses,
+        "breakeven": breakeven,
         "cancelled": counts.get("CANCELLED", 0) + counts.get("REPLACED", 0),
         "closed_total": closed,
         "win_rate": round((wins / closed) * 100.0, 1) if closed > 0 else 0.0,
+        "total_win_pct": round(total_win_pct, 2),
+        "total_loss_pct": round(total_loss_pct, 2),  # قيمة سالبة (أو قريبة من صفر)
+        "net_pct": round(total_win_pct + total_loss_pct, 2),
     }
 
 
@@ -253,12 +285,15 @@ def get_signals(limit: int = 300) -> List[Dict[str, Any]]:
 
 
 def get_strategy_performance() -> List[Dict[str, Any]]:
-    """يقارن أداء كل استراتيجية على حدة (رابحة/خاسرة/نسبة نجاح) من الصفقات المغلقة الحقيقية فقط."""
+    """يقارن أداء كل استراتيجية على حدة (رابحة/خاسرة/تعادل/نسبة نجاح) من الصفقات
+    المغلقة الحقيقية فقط. صفقات التعادل (BREAKEVEN) مستبعدة من حساب نسبة النجاح
+    لأنها مو فوز ولا خسارة حقيقية بالتحليل — بس وقاية حمت رأس المال."""
     with _lock, _connect() as conn:
         cur = conn.execute("""
             SELECT COALESCE(NULLIF(strategy,''), 'غير محدد') AS strategy,
                    SUM(CASE WHEN status='HIT_TP' THEN 1 ELSE 0 END) AS wins,
                    SUM(CASE WHEN status='HIT_SL' THEN 1 ELSE 0 END) AS losses,
+                   SUM(CASE WHEN status='BREAKEVEN' THEN 1 ELSE 0 END) AS breakeven,
                    COUNT(*) AS total_all_statuses
             FROM trade_signals
             GROUP BY strategy
