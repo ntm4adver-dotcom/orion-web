@@ -161,6 +161,15 @@ def analyze_fabio_scalper(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     risk = abs(entry_price - stop_loss)
     if risk <= 0:
         return None
+
+    # 🔴 نفس التحقق المُضاف لفيبوناتشي الترند: نتأكد صراحة إن نقطة الدخول بالجهة
+    # الصحيحة مقابل السعر الحالي، مو بس نعتمد على تصنيف "توازن/اختلال" التقريبي
+    if side == "Long" and entry_price > current_price * 1.0005:
+        _log("❌ اتجاه نقطة الدخول غير صالح", f"نقطة الدخول ({entry_price:.6g}) فوق السعر الحالي ({current_price:.6g}) لصفقة شراء — الفرصة فاتت هذي الدورة", False)
+        return None
+    if side == "Short" and entry_price < current_price * 0.9995:
+        _log("❌ اتجاه نقطة الدخول غير صالح", f"نقطة الدخول ({entry_price:.6g}) تحت السعر الحالي ({current_price:.6g}) لصفقة بيع — الفرصة فاتت هذي الدورة", False)
+        return None
     reward = abs(take_profit - entry_price)
     rr = round(reward / risk, 2)
     _log(f"النموذج المطبَّق: {model}", f"دخول {entry_price:.6g} / وقف {stop_loss:.6g} / هدف {take_profit:.6g}")
