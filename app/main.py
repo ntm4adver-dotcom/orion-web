@@ -224,8 +224,8 @@ def api_diagnose(request: Request, symbol: str):
     exchange_name = "OKX" if s["exchange"] == "okx" else "Binance"
 
     k4h = exchange.fetch_klines(symbol, "4h", 100)
-    k1h = exchange.fetch_klines(symbol, "1h", 100)
-    k15m = exchange.fetch_klines(symbol, "15m", 100)
+    k1h = exchange.fetch_klines(symbol, "1h", 170)
+    k15m = exchange.fetch_klines(symbol, "15m", 110)
     k5m = exchange.fetch_klines(symbol, "5m", 150)
     k_daily = exchange.fetch_klines(symbol, "1d", 100)
 

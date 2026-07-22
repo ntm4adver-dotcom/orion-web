@@ -262,14 +262,17 @@ class ScannerState:
                 db.increment_rejection_counter("entry_direction_check")
                 return
 
-        # 🆕 فلتر 1: العملة ما تتحرك عشوائياً — نسبة الكفاءة الاتجاهية (Efficiency Ratio)
-        # على فريم 15 دقيقة. مبني على طلب صريح ودليل حقيقي: نسبة كبيرة من الخسائر كانت
-        # "انعكاس" (تربح شوي ثم ترجع تخسر) — نمط كلاسيكي لحركة عشوائية/جانبية بلا اتجاه
-        # حقيقي، حتى لو الإعداد الفني نفسه بدا صحيحاً لحظياً.
+        # 🆕 فلتر 1: العملة ما تتحرك عشوائياً — نسبة الكفاءة الاتجاهية (Efficiency Ratio).
+        # 📊 إصلاح مبني على بيانات فعلية: كان الفلتر يفحص k1h (20 ساعة كاملة!) رغم إن
+        # أغلب استراتيجياتنا سكالب سريع يتداول على فريم 5-15 دقيقة — مقياس بطيء جداً
+        # لصفقة سريعة. فحص حقيقي أظهر هذا الفلتر وحده مسؤول عن أكثر من 85% من كل
+        # الرفض (365 من 421)، بدون دليل تحسّن جودة يوازي هالانخفاض الهائل بالكمية.
+        # الآن يفحص فريم 15 دقيقة (مطابق فعلياً لطبيعة الاستراتيجيات)، والحد خُفّف
+        # بشكل كبير (0.28 → 0.15) — يرفض بس الحركة العشوائية المتطرفة جداً.
         if settings.get("is_efficiency_filter_enabled", True):
             from .analyzer import efficiency_ratio
-            er = efficiency_ratio(k1h, period=20)
-            min_er = settings.get("min_efficiency_ratio", 0.28)
+            er = efficiency_ratio(k15m, period=16)
+            min_er = settings.get("min_efficiency_ratio", 0.15)
             if er < min_er:
                 db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: العملة تتحرك بشكل عشوائي/جانبي (كفاءة اتجاهية {er:.2f} أقل من {min_er}) — لا اتجاه حقيقي واضح.")
                 db.increment_rejection_counter("efficiency_ratio_filter")

@@ -29,20 +29,21 @@
   </div>
   <div style="display:flex; gap:10px; margin-top:14px; padding-top:14px; border-top:1px solid var(--dark-accent);">
     <div style="flex:1; text-align:center;">
-      <div class="muted" style="font-size:11px;">إجمالي % الربح المتحقق</div>
+      <div class="muted" style="font-size:11px;">إجمالي الربح (R)</div>
       <div id="total-win-pct" style="color:var(--green); font-weight:800; font-size:18px;">—</div>
     </div>
     <div style="flex:1; text-align:center;">
-      <div class="muted" style="font-size:11px;">إجمالي % الخسارة المتحققة</div>
+      <div class="muted" style="font-size:11px;">إجمالي الخسارة (R)</div>
       <div id="total-loss-pct" style="color:var(--red); font-weight:800; font-size:18px;">—</div>
     </div>
     <div style="flex:1; text-align:center;">
-      <div class="muted" style="font-size:11px;">📊 صافي العائد الإجمالي</div>
+      <div class="muted" style="font-size:11px;">📊 صافي العائد (R)</div>
       <div id="net-pct" style="font-weight:800; font-size:18px;">—</div>
     </div>
   </div>
   <p class="muted" style="font-size:11px; margin-top:8px; text-align:center;">
-    مجموع نسبة الربح/الخسارة الفعلية لكل صفقة مغلقة (مو بس عدد الصفقات) — تقييم أدق لأداء البوت الحقيقي
+    مقياس R-Multiple: كل خسارة = -1R (بالتعريف)، وكل ربح = عائد/مخاطرة (R:R) المخطط له فعلياً — يقيس
+    الأداء نسبة لحجم المخاطرة، بغض النظر عن سعر العملة، وهذا المعيار الاحترافي القياسي لتقييم الاستراتيجيات
   </p>
 </div>
 
@@ -245,14 +246,14 @@ function renderSignals(){
   document.getElementById('loss-count').innerText = signalStats.losses || 0;
   document.getElementById('win-rate').innerText = signalStats.closed_total > 0 ? signalStats.win_rate + '%' : '—';
 
-  const totalWinPct = signalStats.total_win_pct || 0;
-  const totalLossPct = signalStats.total_loss_pct || 0;
-  const netPct = signalStats.net_pct || 0;
-  document.getElementById('total-win-pct').innerText = signalStats.closed_total > 0 ? '+' + totalWinPct.toFixed(2) + '%' : '—';
-  document.getElementById('total-loss-pct').innerText = signalStats.closed_total > 0 ? totalLossPct.toFixed(2) + '%' : '—';
+  const totalWinR = signalStats.total_win_r || 0;
+  const totalLossR = signalStats.total_loss_r || 0;
+  const netR = signalStats.net_r || 0;
+  document.getElementById('total-win-pct').innerText = signalStats.closed_total > 0 ? '+' + totalWinR.toFixed(2) + 'R' : '—';
+  document.getElementById('total-loss-pct').innerText = signalStats.closed_total > 0 ? totalLossR.toFixed(2) + 'R' : '—';
   const netEl = document.getElementById('net-pct');
-  netEl.innerText = signalStats.closed_total > 0 ? (netPct >= 0 ? '+' : '') + netPct.toFixed(2) + '%' : '—';
-  netEl.style.color = netPct >= 0 ? 'var(--green)' : 'var(--red)';
+  netEl.innerText = signalStats.closed_total > 0 ? (netR >= 0 ? '+' : '') + netR.toFixed(2) + 'R' : '—';
+  netEl.style.color = netR >= 0 ? 'var(--green)' : 'var(--red)';
 
   if (currentFilter === 'ACTIVE') list = list.filter(s => s.status === 'ACTIVE');
   else if (currentFilter === 'PENDING') list = list.filter(s => s.status === 'PENDING');

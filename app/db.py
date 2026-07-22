@@ -53,7 +53,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "active_strategy": "explosive_breakout",  # 'explosive_breakout' أو 'ict_smart_sweep'
     "ict_ignore_kill_zone": 0,  # تجاهل قيد جلسة التداول (Kill Zone) لاستراتيجية ICT — تشغيلها بأي وقت
     "is_efficiency_filter_enabled": 1,  # رفض العملات اللي تتحرك عشوائياً/جانبياً (نسبة الكفاءة الاتجاهية)
-    "min_efficiency_ratio": 0.28,  # الحد الأدنى لنسبة الكفاءة الاتجاهية (0-1، كل ما زاد كل ما كان الاتجاه أنظف)
+    "min_efficiency_ratio": 0.15,  # الحد الأدنى لنسبة الكفاءة الاتجاهية (0-1، كل ما زاد كل ما كان الاتجاه أنظف) — خُفّض من 0.28 بناءً على دليل رفض مفرط فعلي
     "is_market_alignment_filter_enabled": 1,  # رفض أي صفقة تعاكس اتجاه السوق العام (البيتكوين)
     "min_btc_correlation": 0.35,  # الحد الأدنى لمعامل الارتباط بالبيتكوين قبل اعتبار العملة "فكّت الارتباط"
     "is_breakeven_stop_enabled": 1,  # نقل الوقف لنقطة الدخول تلقائياً عند تحقيق ربح 1R
@@ -258,29 +258,24 @@ def get_signal_stats() -> Dict[str, Any]:
         total_cur = conn.execute("SELECT COUNT(*) as cnt FROM trade_signals")
         total = total_cur.fetchone()["cnt"]
 
-        # العائد الإجمالي الحقيقي: نسبة الربح% المتحقق فعلياً من كل صفقة رابحة مقابل
-        # نسبة الخسارة% المتحققة من كل صفقة خاسرة حقيقية — التعادل (BREAKEVEN) مستبعد
-        # تماماً من هذا الحساب لأنه مو خسارة حقيقية بالتحليل، بس وقاية حمت رأس المال
+        # 📊 القياس بنظام R-Multiple بدل النسبة المئوية الخام (بطلب صريح): كل صفقة
+        # خاسرة (HIT_SL) = -1R بالتعريف (خسرت بالضبط مقدار مخاطرتها المحسوبة مسبقاً،
+        # بافتراض عدم وجود انزلاق سعري كبير). كل صفقة رابحة (HIT_TP) = +RR المخطط لها
+        # فعلياً (العمود rr المخزَّن بالصفقة نفسها)، لأنها وصلت الهدف بالضبط عند
+        # المستوى المحسوب. هذا معيار احترافي قياسي يقيس الأداء **نسبة لحجم المخاطرة**
+        # بدل حجم الحركة الخام بالسعر — يسهّل مقارنة صفقات بعملات مختلفة الأسعار.
         closed_rows = conn.execute("""
-            SELECT side, entry_price, current_price, status FROM trade_signals
-            WHERE status IN ('HIT_TP','HIT_SL') AND entry_price > 0
+            SELECT status, rr FROM trade_signals
+            WHERE status IN ('HIT_TP','HIT_SL')
         """).fetchall()
 
-    total_win_pct = 0.0
-    total_loss_pct = 0.0
+    total_win_r = 0.0
+    total_loss_r = 0.0
     for row in closed_rows:
-        entry = row["entry_price"]
-        exit_p = row["current_price"]
-        if not entry or not exit_p:
-            continue
-        if row["side"] == "Long":
-            pct = (exit_p - entry) / entry * 100.0
-        else:
-            pct = (entry - exit_p) / entry * 100.0
         if row["status"] == "HIT_TP":
-            total_win_pct += pct
+            total_win_r += (row["rr"] or 0.0)
         else:
-            total_loss_pct += pct
+            total_loss_r += 1.0  # كل خسارة = 1R بالتعريف، نجمعها موجبة ونعرضها سالبة لاحقاً
 
     wins = counts.get("HIT_TP", 0)
     losses = counts.get("HIT_SL", 0)  # خسائر حقيقية فقط — التعادل ما يُحسب هنا
@@ -296,9 +291,9 @@ def get_signal_stats() -> Dict[str, Any]:
         "cancelled": counts.get("CANCELLED", 0) + counts.get("REPLACED", 0),
         "closed_total": closed,
         "win_rate": round((wins / closed) * 100.0, 1) if closed > 0 else 0.0,
-        "total_win_pct": round(total_win_pct, 2),
-        "total_loss_pct": round(total_loss_pct, 2),  # قيمة سالبة (أو قريبة من صفر)
-        "net_pct": round(total_win_pct + total_loss_pct, 2),
+        "total_win_r": round(total_win_r, 2),
+        "total_loss_r": round(-total_loss_r, 2),  # سالبة دائماً — كل خسارة = -1R بالتعريف
+        "net_r": round(total_win_r - total_loss_r, 2),
     }
 
 
