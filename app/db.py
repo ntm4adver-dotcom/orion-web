@@ -52,6 +52,9 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "is_gdrive_backup_enabled": 0,
     "active_strategy": "explosive_breakout",  # 'explosive_breakout' أو 'ict_smart_sweep'
     "ict_ignore_kill_zone": 0,  # تجاهل قيد جلسة التداول (Kill Zone) لاستراتيجية ICT — تشغيلها بأي وقت
+    "is_efficiency_filter_enabled": 1,  # رفض العملات اللي تتحرك عشوائياً/جانبياً (نسبة الكفاءة الاتجاهية)
+    "min_efficiency_ratio": 0.28,  # الحد الأدنى لنسبة الكفاءة الاتجاهية (0-1، كل ما زاد كل ما كان الاتجاه أنظف)
+    "is_market_alignment_filter_enabled": 1,  # رفض أي صفقة تعاكس اتجاه السوق العام (البيتكوين)
     "combined_enabled_strategies": "",  # قائمة مفاتيح استراتيجيات مفصولة بفاصلة تعمل داخل وضع "الكل معاً" — فاضي = الكل مفعّل
     # OKX trading connection
     "okx_api_key": "",
@@ -113,7 +116,9 @@ def init_db():
                 last_notified_status TEXT DEFAULT '',
                 strategy TEXT DEFAULT '',
                 max_drawdown_pct REAL DEFAULT 0,
-                max_favorable_pct REAL DEFAULT 0
+                max_favorable_pct REAL DEFAULT 0,
+                initial_risk_pct REAL DEFAULT 0,
+                breakeven_activated INTEGER DEFAULT 0
             )
         """)
         # هجرة آمنة: إضافة عمود strategy لو قاعدة البيانات كانت موجودة قبل هذا التحديث
@@ -125,6 +130,10 @@ def init_db():
                 conn.execute("ALTER TABLE trade_signals ADD COLUMN max_drawdown_pct REAL DEFAULT 0")
             if "max_favorable_pct" not in existing_cols:
                 conn.execute("ALTER TABLE trade_signals ADD COLUMN max_favorable_pct REAL DEFAULT 0")
+            if "initial_risk_pct" not in existing_cols:
+                conn.execute("ALTER TABLE trade_signals ADD COLUMN initial_risk_pct REAL DEFAULT 0")
+            if "breakeven_activated" not in existing_cols:
+                conn.execute("ALTER TABLE trade_signals ADD COLUMN breakeven_activated INTEGER DEFAULT 0")
         except Exception:
             pass
         conn.execute("""
@@ -170,7 +179,7 @@ def get_settings() -> Dict[str, Any]:
                  "is_cancel_if_exceeds_target_enabled", "okx_is_testnet", "okx_is_auto_trading_enabled",
                  "okx_is_max_leverage_enabled", "is_adaptive_stop_loss_enabled", "is_instant_entry_enabled",
                  "is_coin_learning_enabled", "is_auto_backup_enabled", "is_gdrive_backup_enabled",
-                 "ict_ignore_kill_zone"):
+                 "ict_ignore_kill_zone", "is_efficiency_filter_enabled", "is_market_alignment_filter_enabled"):
         settings[bkey] = bool(int(settings.get(bkey, 0)))
     return settings
 
@@ -189,17 +198,21 @@ def update_settings(updates: Dict[str, Any]):
 
 
 def add_signal(signal: Dict[str, Any]) -> int:
+    entry_price = signal["entry_price"]
+    stop_loss = signal["stop_loss"]
+    initial_risk_pct = abs(entry_price - stop_loss) / entry_price * 100.0 if entry_price else 0.0
     with _lock, _connect() as conn:
         cur = conn.execute("""
             INSERT INTO trade_signals
             (timestamp, symbol, side, entry_price, stop_loss, take_profit, rr, probability,
-             quality, behavior, volume_analysis, status, update_timestamp, current_price, last_notified_status, strategy)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             quality, behavior, volume_analysis, status, update_timestamp, current_price,
+             last_notified_status, strategy, initial_risk_pct)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
-            int(time.time() * 1000), signal["symbol"], signal["side"], signal["entry_price"],
-            signal["stop_loss"], signal["take_profit"], signal["rr"], signal["probability"],
+            int(time.time() * 1000), signal["symbol"], signal["side"], entry_price,
+            stop_loss, signal["take_profit"], signal["rr"], signal["probability"],
             signal["quality"], signal["behavior"], signal["volume_analysis"], "PENDING",
-            int(time.time() * 1000), signal["entry_price"], "", signal.get("strategy", ""),
+            int(time.time() * 1000), entry_price, "", signal.get("strategy", ""), initial_risk_pct,
         ))
         conn.commit()
         return cur.lastrowid
@@ -365,6 +378,19 @@ def update_max_drawdown_if_worse(signal_id: int, drawdown_pct: float):
         if drawdown_pct > current_max:
             conn.execute("UPDATE trade_signals SET max_drawdown_pct=? WHERE id=?", (drawdown_pct, signal_id))
             conn.commit()
+
+
+def activate_breakeven(signal_id: int, new_stop_loss: float):
+    """ينقل وقف الخسارة لنقطة الدخول (أو قريب منها) بمجرد ما الصفقة تحقق ربح عائم
+    يعادل مخاطرتها الأصلية (1R) — يحوّل أي انعكاس لاحق من 'خسارة كاملة' إلى 'تعادل
+    تقريبي' بدل ما يخسر كامل الوقف الأصلي. هذا إصلاح مباشر لنمط اكتُشف فعلياً
+    بسجل الصفقات: نسبة كبيرة من الخسائر كانت أصلاً صفقات رابحة قبل ما تنعكس."""
+    with _lock, _connect() as conn:
+        conn.execute(
+            "UPDATE trade_signals SET stop_loss=?, breakeven_activated=1 WHERE id=?",
+            (new_stop_loss, signal_id),
+        )
+        conn.commit()
 
 
 def update_max_favorable_if_better(signal_id: int, favorable_pct: float):

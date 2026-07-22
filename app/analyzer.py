@@ -197,6 +197,21 @@ def check_irrational_market(k5m: List[Kline], k15m: List[Kline], k1h: List[Kline
     return False
 
 
+def efficiency_ratio(klines: List[Kline], period: int = 20) -> float:
+    """نسبة الكفاءة الاتجاهية (Kaufman's Efficiency Ratio) — تقيس هل حركة السعر
+    'نظيفة' باتجاه واحد، أو 'عشوائية' (تتذبذب كثير لكن ما توصل لمكان فعلياً).
+    = |التغيّر الصافي بالسعر| ÷ مجموع كل الحركات المطلقة خلال نفس الفترة.
+    القيمة قريبة من 1 = اتجاه نظيف وقوي. قريبة من 0 = حركة عشوائية/جانبية بلا معنى."""
+    if len(klines) < period + 1:
+        return 0.0
+    closes = [k.close for k in klines[-(period + 1):]]
+    net_change = abs(closes[-1] - closes[0])
+    total_movement = sum(abs(closes[i] - closes[i - 1]) for i in range(1, len(closes)))
+    if total_movement <= 0:
+        return 0.0
+    return net_change / total_movement
+
+
 def _get_bias(klines: List[Kline]) -> str:
     if not klines:
         return "صاعد"

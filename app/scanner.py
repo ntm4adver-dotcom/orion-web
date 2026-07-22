@@ -137,6 +137,20 @@ class ScannerState:
                     )
                 return
 
+        # جلب اتجاه السوق العام (البيتكوين كمؤشر مرجعي) مرة وحدة بداية الدورة — يُستخدم
+        # كفلتر توافق إلزامي لكل صفقة بكل استراتيجية: لا تُقبل صفقة تعاكس اتجاه السوق
+        # العام، لأن أغلب العملات البديلة مرتبطة بحركة البيتكوين بقوة، وصفقة تعاكسه
+        # معرّضة لانعكاس مفاجئ بغض النظر عن قوة إعداد العملة نفسها محلياً.
+        btc_trend = None
+        try:
+            btc_klines = exchange.fetch_klines("BTCUSDT", "4h", 60)
+            if btc_klines and len(btc_klines) >= 20:
+                from .analyzer import _get_bias as _get_market_bias
+                btc_trend = _get_market_bias(btc_klines)
+                db.add_log(f"📊 اتجاه السوق العام (البيتكوين، 4 ساعات): {btc_trend}")
+        except Exception:
+            btc_trend = None
+
         for idx, symbol in enumerate(symbols):
             if self._stop_flag.is_set():
                 break
@@ -204,7 +218,7 @@ class ScannerState:
                     if result is None:
                         continue
                     matched_any = True
-                    self._process_signal(settings, symbol, strategy_key, result, k4h, k1h, k5m)
+                    self._process_signal(settings, symbol, strategy_key, result, k4h, k1h, k5m, btc_trend)
 
                 if not matched_any:
                     db.add_log(f"▫️ {symbol}: ليس له اتجاه كافٍ حالياً.")
@@ -226,7 +240,7 @@ class ScannerState:
                 f"أو حصل خطأ أثناء التحليل:\n\n{body}",
             )
 
-    def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k5m):
+    def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k5m, btc_trend=None):
         # 🔴 تحقق مركزي حرج (يحمي كل الاستراتيجيات دفعة وحدة، حالياً ومستقبلاً):
         # لصفقة Long، نقطة الدخول يجب تكون **أقل من أو تساوي** السعر الحالي (ننتظر
         # السعر ينزل لها = أمر Limit شراء منطقي). لو طلعت أعلى من السعر الحالي، يعني
@@ -242,6 +256,27 @@ class ScannerState:
                 return
             if result.side == "Short" and result.entry_price < current_live_price - tolerance:
                 db.add_log(f"❌ [{symbol}/{strategy_key}] رُفضت الإشارة: نقطة الدخول ({result.entry_price:.6g}) أقل من السعر الحالي ({current_live_price:.6g}) بصفقة بيع — خطأ منطقي بحساب الاستراتيجية يمنع التفعيل الصحيح.")
+                return
+
+        # 🆕 فلتر 1: العملة ما تتحرك عشوائياً — نسبة الكفاءة الاتجاهية (Efficiency Ratio)
+        # على فريم 15 دقيقة. مبني على طلب صريح ودليل حقيقي: نسبة كبيرة من الخسائر كانت
+        # "انعكاس" (تربح شوي ثم ترجع تخسر) — نمط كلاسيكي لحركة عشوائية/جانبية بلا اتجاه
+        # حقيقي، حتى لو الإعداد الفني نفسه بدا صحيحاً لحظياً.
+        if settings.get("is_efficiency_filter_enabled", True):
+            from .analyzer import efficiency_ratio
+            er = efficiency_ratio(k1h, period=20)
+            min_er = settings.get("min_efficiency_ratio", 0.28)
+            if er < min_er:
+                db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: العملة تتحرك بشكل عشوائي/جانبي (كفاءة اتجاهية {er:.2f} أقل من {min_er}) — لا اتجاه حقيقي واضح.")
+                return
+
+        # 🆕 فلتر 2: توافق مع اتجاه السوق العام (البيتكوين) — إلزامي لكل استراتيجية.
+        # نرفض أي صفقة تعاكس اتجاه البيتكوين العام، لأن أغلب العملات مرتبطة بحركته
+        # بقوة، وصفقة معاكسة معرّضة لانعكاس مفاجئ بغض النظر عن قوة الإعداد المحلي.
+        if settings.get("is_market_alignment_filter_enabled", True) and btc_trend and not symbol.startswith("BTC"):
+            side_trend = "صاعد" if result.side == "Long" else "هابط"
+            if side_trend != btc_trend:
+                db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: الصفقة ({result.side}) تعاكس اتجاه السوق العام (البيتكوين: {btc_trend}) — رفض وقائي.")
                 return
 
         req_prob, learning_msg = learning.effective_threshold(result.symbol, result.side, settings, strategy_key=strategy_key)

@@ -91,7 +91,8 @@ async def settings_save(request: Request):
     form = await request.form()
     checkboxes = ["is_auto_scanning", "is_single_coin_mode_enabled", "is_telegram_enabled",
                   "is_volume_filter_enabled", "is_vwap_filter_enabled", "is_4h_buyers_filter_enabled",
-                  "is_cancel_if_exceeds_target_enabled", "ict_ignore_kill_zone"]
+                  "is_cancel_if_exceeds_target_enabled", "ict_ignore_kill_zone",
+                  "is_efficiency_filter_enabled", "is_market_alignment_filter_enabled"]
     updates = {}
     for key in db.DEFAULT_SETTINGS:
         if key in checkboxes:
@@ -581,6 +582,8 @@ def _drawdown_analysis(signals):
         # خسارة "انعكاس حقيقي": كانت بربح عائم واضح (>0.5%) قبل ما ترجع تضرب الوقف —
         # الاتجاه كان صحيحاً، المشكلة بإدارة الخروج مو باختيار نقطة الدخول
         reversed_losses = sum(1 for x in losses_mfe if x > 0.5)
+        strat_signals = [s for s in signals if (s.get("strategy") or "غير محدد") == strat]
+        breakeven_count = sum(1 for s in strat_signals if s.get("breakeven_activated"))
         result.append({
             "strategy": strat,
             "avg_drawdown_on_wins_pct": round(sum(wins_dd) / len(wins_dd), 3) if wins_dd else None,
@@ -591,6 +594,7 @@ def _drawdown_analysis(signals):
             "reversed_losses_note": ("صعدت للربح (>0.5%) ثم رجعت وضربت الوقف — الاتجاه كان صح، "
                                       "المشكلة بالهدف/الخروج مو بالدخول") if reversed_losses else None,
             "avg_mfe_before_loss_pct": round(sum(losses_mfe) / len(losses_mfe), 3) if losses_mfe else None,
+            "breakeven_activated_count": breakeven_count,
         })
     return result
 
