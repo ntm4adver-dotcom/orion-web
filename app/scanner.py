@@ -255,9 +255,11 @@ class ScannerState:
             tolerance = current_live_price * 0.0005  # هامش تقريب بسيط (0.05%) لتفادي رفض حالات حدّية طبيعية
             if result.side == "Long" and result.entry_price > current_live_price + tolerance:
                 db.add_log(f"❌ [{symbol}/{strategy_key}] رُفضت الإشارة: نقطة الدخول ({result.entry_price:.6g}) أعلى من السعر الحالي ({current_live_price:.6g}) بصفقة شراء — خطأ منطقي بحساب الاستراتيجية يمنع التفعيل الصحيح.")
+                db.increment_rejection_counter("entry_direction_check")
                 return
             if result.side == "Short" and result.entry_price < current_live_price - tolerance:
                 db.add_log(f"❌ [{symbol}/{strategy_key}] رُفضت الإشارة: نقطة الدخول ({result.entry_price:.6g}) أقل من السعر الحالي ({current_live_price:.6g}) بصفقة بيع — خطأ منطقي بحساب الاستراتيجية يمنع التفعيل الصحيح.")
+                db.increment_rejection_counter("entry_direction_check")
                 return
 
         # 🆕 فلتر 1: العملة ما تتحرك عشوائياً — نسبة الكفاءة الاتجاهية (Efficiency Ratio)
@@ -270,6 +272,7 @@ class ScannerState:
             min_er = settings.get("min_efficiency_ratio", 0.28)
             if er < min_er:
                 db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: العملة تتحرك بشكل عشوائي/جانبي (كفاءة اتجاهية {er:.2f} أقل من {min_er}) — لا اتجاه حقيقي واضح.")
+                db.increment_rejection_counter("efficiency_ratio_filter")
                 return
 
         # 🆕 فلتر 2: توافق مع اتجاه السوق العام (البيتكوين) — إلزامي لكل استراتيجية،
@@ -294,10 +297,12 @@ class ScannerState:
                 coin_trend = _get_coin_bias(k4h)
                 if side_trend != coin_trend:
                     db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: العملة فكّت ارتباطها بالبيتكوين (ارتباط {correlation:.2f})، لكن الصفقة ({result.side}) تعاكس اتجاه العملة نفسها ({coin_trend}) — رفض.")
+                    db.increment_rejection_counter("market_alignment_filter_decoupled_own_trend")
                     return
                 db.add_log(f"ℹ️ [{symbol}/{strategy_key}] العملة فكّت ارتباطها بالبيتكوين (ارتباط {correlation:.2f}) — تم تجاوز فلتر السوق العام، والاعتماد على اتجاه العملة نفسها ({coin_trend}) بدلاً منه.")
             elif btc_trend and side_trend != btc_trend:
                 db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: الصفقة ({result.side}) تعاكس اتجاه السوق العام (البيتكوين: {btc_trend}) — رفض وقائي.")
+                db.increment_rejection_counter("market_alignment_filter_btc")
                 return
 
         req_prob, learning_msg = learning.effective_threshold(result.symbol, result.side, settings, strategy_key=strategy_key)
@@ -306,6 +311,7 @@ class ScannerState:
 
         if result.prob < req_prob:
             db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: نسبة النجاح ({result.prob}%) أقل من الحد المطلوب ({req_prob}%).")
+            db.increment_rejection_counter("min_probability_filter")
             return
 
         if settings["is_volume_filter_enabled"]:
@@ -314,6 +320,7 @@ class ScannerState:
             vol_ratio = (v1h[-1] / vol_avg) if vol_avg > 0 else 1.0
             if vol_ratio < settings["min_volume_ratio"]:
                 db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: معدل الحجم ({vol_ratio:.2f}x) أقل من الحد الأدنى.")
+                db.increment_rejection_counter("volume_filter")
                 return
 
         if settings["is_vwap_filter_enabled"]:
@@ -324,9 +331,11 @@ class ScannerState:
             last_price = k5m[-1].close
             if result.side == "Long" and last_price <= vwap4h:
                 db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي إشارة صعود: السعر تحت خط VWAP.")
+                db.increment_rejection_counter("vwap_filter")
                 return
             if result.side == "Short" and last_price >= vwap4h:
                 db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي إشارة هبوط: السعر فوق خط VWAP.")
+                db.increment_rejection_counter("vwap_filter")
                 return
 
         if settings["is_4h_buyers_filter_enabled"]:
@@ -337,9 +346,11 @@ class ScannerState:
             buy_pct = int(green / total * 100) if total > 0 else 50
             if result.side == "Long" and buy_pct < settings["min_4h_buyers_percentage"]:
                 db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي إشارة صعود: نسبة المشتريات ({buy_pct}%) غير كافية.")
+                db.increment_rejection_counter("4h_buyers_filter")
                 return
             if result.side == "Short" and (100 - buy_pct) < settings["min_4h_buyers_percentage"]:
                 db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي إشارة هبوط: نسبة المبيعات غير كافية.")
+                db.increment_rejection_counter("4h_buyers_filter")
                 return
 
         # منع التكرار: تجاهل الإشارة الجديدة إذا فيه صفقة (معلقة أو نشطة) بالفعل لنفس
@@ -349,6 +360,7 @@ class ScannerState:
         if existing:
             status_ar = "نشطة" if existing["status"] == "ACTIVE" else "معلقة"
             db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تجاهل الإشارة الجديدة ({result.side}) لوجود صفقة {status_ar} بنفس الاستراتيجية بالفعل من نفس الاتجاه (بروبابيليتي {existing['probability']}%).")
+            db.increment_rejection_counter("duplicate_active_signal")
             return
 
         # منع إعادة اكتشاف نفس النمط اللي أُغلق (رابحاً أو خاسراً) خلال آخر ساعات قليلة —
@@ -356,6 +368,7 @@ class ScannerState:
         recent_dup = db.get_recent_similar_signal(result.symbol, result.side, strategy_key, result.entry_price)
         if recent_dup:
             db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تجاهل إشارة مكررة — نفس النمط تقريباً ظهر بآخر ساعات (سعر دخول قريب من صفقة سابقة برقم #{recent_dup['id']}).")
+            db.increment_rejection_counter("recent_duplicate_pattern")
             return
 
         strategy_display = strategy_label(strategy_key)

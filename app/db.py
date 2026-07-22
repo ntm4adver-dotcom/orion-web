@@ -145,6 +145,12 @@ def init_db():
                 message TEXT
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS filter_rejections (
+                filter_name TEXT PRIMARY KEY,
+                count INTEGER DEFAULT 0
+            )
+        """)
         conn.commit()
         # seed defaults if missing
         cur = conn.execute("SELECT key FROM app_settings")
@@ -219,6 +225,24 @@ def add_signal(signal: Dict[str, Any]) -> int:
         ))
         conn.commit()
         return cur.lastrowid
+
+
+def increment_rejection_counter(filter_name: str):
+    """يزيد عدّاد رفض فلتر معيّن — يبقى متراكم دائم (مو محدود بعدد صفوف زي سجل
+    الفحص)، عشان نقدر نقيس فعلياً كم مرة رفض كل فلتر إشارة، ونعرف هل الحدود
+    الحالية متشددة أو متساهلة بناءً على بيانات حقيقية."""
+    with _lock, _connect() as conn:
+        conn.execute("""
+            INSERT INTO filter_rejections (filter_name, count) VALUES (?, 1)
+            ON CONFLICT(filter_name) DO UPDATE SET count = count + 1
+        """, (filter_name,))
+        conn.commit()
+
+
+def get_rejection_counts() -> Dict[str, int]:
+    with _lock, _connect() as conn:
+        cur = conn.execute("SELECT filter_name, count FROM filter_rejections ORDER BY count DESC")
+        return {row["filter_name"]: row["count"] for row in cur.fetchall()}
 
 
 def get_signal_stats() -> Dict[str, Any]:

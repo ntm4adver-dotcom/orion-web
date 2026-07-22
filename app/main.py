@@ -624,6 +624,7 @@ def api_signals_export(request: Request):
         "summary": {
             "wins": sum(1 for s in signals if s["status"] == "HIT_TP"),
             "losses": sum(1 for s in signals if s["status"] == "HIT_SL"),
+            "breakeven": sum(1 for s in signals if s["status"] == "BREAKEVEN"),
             "active": sum(1 for s in signals if s["status"] == "ACTIVE"),
             "pending": sum(1 for s in signals if s["status"] == "PENDING"),
             "cancelled": sum(1 for s in signals if s["status"] in ("CANCELLED", "REPLACED")),
@@ -631,6 +632,8 @@ def api_signals_export(request: Request):
         "strategy_performance": strategy_perf,
         "coin_performance": coin_perf,
         "drawdown_analysis": _drawdown_analysis(signals),
+        "filter_rejection_counts": db.get_rejection_counts(),
+        "filter_rejection_note": "عدد مرات رفض كل فلتر لإشارة منذ آخر تصفير — يفيد لتقييم هل حدود الفلاتر الحالية متشددة أو متساهلة فعلياً",
         "active_settings_snapshot": safe_settings,
         "signals": signals,
     }
