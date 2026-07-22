@@ -220,7 +220,7 @@ class ScannerState:
                     if result is None:
                         continue
                     matched_any = True
-                    self._process_signal(settings, symbol, strategy_key, result, k4h, k1h, k5m, btc_trend, btc_klines)
+                    self._process_signal(settings, symbol, strategy_key, result, k4h, k1h, k15m, k5m, btc_trend, btc_klines)
 
                 if not matched_any:
                     db.add_log(f"▫️ {symbol}: ليس له اتجاه كافٍ حالياً.")
@@ -242,7 +242,7 @@ class ScannerState:
                 f"أو حصل خطأ أثناء التحليل:\n\n{body}",
             )
 
-    def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k5m, btc_trend=None, btc_klines=None):
+    def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k15m, k5m, btc_trend=None, btc_klines=None):
         # 🔴 تحقق مركزي حرج (يحمي كل الاستراتيجيات دفعة وحدة، حالياً ومستقبلاً):
         # لصفقة Long، نقطة الدخول يجب تكون **أقل من أو تساوي** السعر الحالي (ننتظر
         # السعر ينزل لها = أمر Limit شراء منطقي). لو طلعت أعلى من السعر الحالي، يعني
