@@ -306,10 +306,36 @@ def place_order(symbol: str, side: str, quantity_usdt: float, leverage: int, mar
     # صيغة نص دقيقة بدون أصفار عشرية زايدة أو تمثيل عائم غير دقيق (زي 0.30000000004)
     sz = f"{final_sz:.8f}".rstrip("0").rstrip(".") or "0"
 
+    # 🔴 إصلاح إضافي مكتشف بمقارنة الكود الأصلي بالكوتلن حرفياً: كان حقل "posSide"
+    # (اتجاه المركز: long/short/net) مفقود تماماً من النسخة البايثون! لو حساب
+    # المستخدم بوضع Hedge Mode (يسمح بمراكز Long وShort مفتوحة بنفس الوقت لنفس
+    # العملة)، OKX تحتاج هذا الحقل لتحديد هل الأمر يفتح مركز جديد أو يغلق موجود —
+    # بدونه، الأمر ممكن يُرفض أو يُفهم غلط. نطبّق نفس منطق الأصلي بالضبط: نستعلم
+    # وضع الحساب أولاً، ولو Hedge Mode نحدد الاتجاه بناءً على المراكز المفتوحة فعلياً.
+    pos_side = "net"
+    try:
+        config_resp = _request("GET", "/api/v5/account/config", None, api_key, api_secret, passphrase, is_testnet)
+        is_hedge_mode = True
+        if config_resp and config_resp.get("code") == "0" and config_resp.get("data"):
+            if config_resp["data"][0].get("posMode") == "net_mode":
+                is_hedge_mode = False
+        if is_hedge_mode:
+            active_positions = fetch_positions(api_key, api_secret, passphrase, is_testnet)
+            coin_positions = [p for p in active_positions if p.get("inst_id") == inst_id]
+            if side == "buy":
+                has_short = any(p.get("pos_side") == "short" for p in coin_positions)
+                pos_side = "short" if has_short else "long"  # شراء يغلق Short موجود، أو يفتح Long جديد
+            else:
+                has_long = any(p.get("pos_side") == "long" for p in coin_positions)
+                pos_side = "long" if has_long else "short"  # بيع يغلق Long موجود، أو يفتح Short جديد
+    except Exception:
+        pos_side = "net"  # لو فشل الاستعلام، نرجع للوضع الافتراضي الآمن (net_mode)
+
     body = {
         "instId": inst_id,
         "tdMode": margin_mode,
         "side": side,
+        "posSide": pos_side,
         "ordType": "market" if is_market_order else "limit",
         "sz": sz,
     }
@@ -322,12 +348,18 @@ def place_order(symbol: str, side: str, quantity_usdt: float, leverage: int, mar
             return False, "أمر Limit يتطلب سعر دخول صالح، لكن لم يُستلَم أي سعر — تأكد من تفعيل الدخول الفوري أو إرسال سعر دخول صحيح"
         body["px"] = str(entry_price)
 
+    # 🔴 إصلاح حرج: OKX ألغت دعم إرسال وقف الخسارة/الهدف كحقول مباشرة (slTriggerPx/
+    # tpTriggerPx) بأعلى جسم الطلب — ترفضه برسالة "attachAlgoOrds array". الصيغة
+    # الصحيحة الآن: تُرسَل ضمن مصفوفة attachAlgoOrds (عنصر واحد يحمل الاثنين معاً).
+    attach_algo = {}
     if stop_loss and stop_loss > 0:
-        body["slTriggerPx"] = str(stop_loss)
-        body["slOrdPx"] = "-1"
+        attach_algo["slTriggerPx"] = str(stop_loss)
+        attach_algo["slOrdPx"] = "-1"
     if take_profit and take_profit > 0:
-        body["tpTriggerPx"] = str(take_profit)
-        body["tpOrdPx"] = "-1"
+        attach_algo["tpTriggerPx"] = str(take_profit)
+        attach_algo["tpOrdPx"] = "-1"
+    if attach_algo:
+        body["attachAlgoOrds"] = [attach_algo]
 
     resp = _request("POST", "/api/v5/trade/order", body, api_key, api_secret, passphrase, is_testnet)
     if not resp:
