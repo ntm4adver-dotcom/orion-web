@@ -725,6 +725,23 @@ def api_scan_trigger(request: Request):
     return {"ok": True}
 
 
+@app.post("/api/trading/cancel-order")
+async def api_trading_cancel_order(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    body = await request.json()
+    inst_id = body.get("inst_id", "")
+    ord_id = body.get("ord_id", "")
+    if not inst_id or not ord_id:
+        return {"success": False, "message": "بيانات الأمر ناقصة"}
+    s = db.get_settings()
+    success, message = okx_client.cancel_pending_order(
+        inst_id, ord_id, s["okx_api_key"], s["okx_api_secret"], s["okx_passphrase"], s["okx_is_testnet"],
+    )
+    db.add_log(f"{'✅' if success else '❌'} [إلغاء أمر معلّق] {inst_id} - {message}")
+    return {"success": success, "message": message}
+
+
 @app.post("/api/trading/test")
 def api_trading_test(request: Request):
     if not is_logged_in(request):
@@ -735,9 +752,11 @@ def api_trading_test(request: Request):
         return {"message": msg}
     info = okx_client.fetch_account_info(s["okx_api_key"], s["okx_api_secret"], s["okx_passphrase"], s["okx_is_testnet"])
     positions = okx_client.fetch_positions(s["okx_api_key"], s["okx_api_secret"], s["okx_passphrase"], s["okx_is_testnet"])
+    pending_orders = okx_client.fetch_pending_orders(s["okx_api_key"], s["okx_api_secret"], s["okx_passphrase"], s["okx_is_testnet"])
     return {
         "message": msg,
         "equity": info["total_equity"],
         "available": info["available_balance"],
         "positions": positions,
+        "pending_orders": pending_orders,
     }

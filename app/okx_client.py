@@ -145,6 +145,37 @@ def fetch_positions(api_key: str, api_secret: str, passphrase: str, is_testnet: 
     return out
 
 
+def fetch_pending_orders(api_key: str, api_secret: str, passphrase: str, is_testnet: bool) -> List[dict]:
+    """يجيب الأوامر المعلّقة (Pending) اللي أرسلناها لـOKX كأوامر Limit عند نقطة
+    دخول محددة، لكن السعر لسا ما وصلها فتتفعّل — بعكس fetch_positions اللي يجيب
+    بس المراكز اللي **اتفعّلت** فعلياً بالسوق."""
+    resp = _request("GET", "/api/v5/trade/orders-pending", None, api_key, api_secret, passphrase, is_testnet)
+    if not resp or resp.get("code") != "0":
+        return []
+    out = []
+    for o in resp.get("data", []):
+        out.append({
+            "inst_id": o.get("instId", ""),
+            "side": o.get("side", ""),
+            "ord_type": o.get("ordType", ""),
+            "sz": o.get("sz", ""),
+            "px": o.get("px", ""),
+            "state": o.get("state", ""),
+            "ord_id": o.get("ordId", ""),
+            "c_time": o.get("cTime", ""),
+        })
+    return out
+
+
+def cancel_pending_order(inst_id: str, ord_id: str, api_key: str, api_secret: str,
+                          passphrase: str, is_testnet: bool) -> Tuple[bool, str]:
+    body = {"instId": inst_id, "ordId": ord_id}
+    resp = _request("POST", "/api/v5/trade/cancel-order", body, api_key, api_secret, passphrase, is_testnet)
+    if resp and resp.get("code") == "0":
+        return True, "تم إلغاء الأمر المعلّق"
+    return False, (resp or {}).get("msg", "فشل إلغاء الأمر")
+
+
 def _to_inst_id(symbol: str) -> str:
     base = symbol.replace("USDT", "").replace("USDC", "").replace("/", "").replace("-", "").upper()
     return f"{base}-USDT-SWAP"
@@ -173,24 +204,47 @@ def fetch_max_leverage(inst_id: str, margin_mode: str, api_key: str, api_secret:
     return default_fallback
 
 
-_ctval_cache: Dict[str, float] = {}
+_instrument_specs_cache: Dict[str, dict] = {}
+
+
+def fetch_instrument_specs(inst_id: str) -> dict:
+    """يجيب مواصفات العقد الكاملة من OKX ويخزّنها مؤقتاً: قيمة العقد (ctVal)، حجم
+    اللوت (lotSz — أي أمر لازم يكون مضاعف له بالضبط، وإلا ترفضه OKX بخطأ 'Order
+    quantity must be a multiple of the lot size')، والحد الأدنى للأمر (minSz)."""
+    if inst_id in _instrument_specs_cache:
+        return _instrument_specs_cache[inst_id]
+    specs = {"ct_val": 1.0, "lot_sz": 1.0, "min_sz": 1.0}
+    resp = _public_get(f"/api/v5/public/instruments?instType=SWAP&instId={inst_id}")
+    if resp and resp.get("code") == "0" and resp.get("data"):
+        try:
+            item = resp["data"][0]
+            specs["ct_val"] = float(item.get("ctVal", 1.0) or 1.0)
+            specs["lot_sz"] = float(item.get("lotSz", 1.0) or 1.0)
+            specs["min_sz"] = float(item.get("minSz", specs["lot_sz"]) or specs["lot_sz"])
+        except Exception:
+            pass
+    _instrument_specs_cache[inst_id] = specs
+    return specs
 
 
 def fetch_contract_value(inst_id: str) -> float:
     """يعادل fetchInstrumentContractValue الأصلي — قيمة العقد الواحد (ctVal) لكل رمز.
     ضروري لحساب حجم الصفقة (sz) بدقة، لأن عقود OKX Swap ليست دائماً 1 وحدة = 1 عقد."""
-    if inst_id in _ctval_cache:
-        return _ctval_cache[inst_id]
-    resp = _public_get(f"/api/v5/public/instruments?instType=SWAP&instId={inst_id}")
-    if resp and resp.get("code") == "0" and resp.get("data"):
-        try:
-            ct_val = float(resp["data"][0].get("ctVal", 1.0) or 1.0)
-            _ctval_cache[inst_id] = ct_val
-            return ct_val
-        except Exception:
-            pass
-    _ctval_cache[inst_id] = 1.0
-    return 1.0
+    return fetch_instrument_specs(inst_id)["ct_val"]
+
+
+def round_to_lot_size(raw_sz: float, lot_sz: float, min_sz: float) -> float:
+    """يقرّب حجم الأمر لأقرب مضاعف صحيح لحجم اللوت المطلوب من OKX — بدون هذا التقريب،
+    OKX ترفض أي أمر حجمه مو مضاعف تام للوت برسالة 'Order quantity must be a
+    multiple of the lot size' (بالضبط الخطأ اللي واجهته). نقرّب لأسفل (نحو الصفر)
+    لضمان عدم تجاوز الحجم المستهدف أصلاً، ثم نتأكد إنه ما ينزل تحت الحد الأدنى المسموح."""
+    if lot_sz <= 0:
+        return raw_sz
+    steps = int(raw_sz / lot_sz)  # تقريب لأسفل نحو الصفر (قطع الكسور الزايدة عن اللوت)
+    rounded = steps * lot_sz
+    if rounded < min_sz:
+        rounded = min_sz
+    return rounded
 
 
 def calculate_order_quantity_usdt(settings: dict, entry_price: float, stop_loss: float,
@@ -239,9 +293,18 @@ def place_order(symbol: str, side: str, quantity_usdt: float, leverage: int, mar
     if last_price <= 0:
         return False, "سعر غير صالح"
 
-    ct_val = fetch_contract_value(inst_id)
+    specs = fetch_instrument_specs(inst_id)
+    ct_val = specs["ct_val"]
     leverage = final_leverage
-    sz = str(round((quantity_usdt * leverage) / (last_price * ct_val), 6))
+    raw_sz = (quantity_usdt * leverage) / (last_price * ct_val)
+    # 🔴 إصلاح: OKX ترفض أي أمر حجمه مو مضاعف تام لـ"حجم اللوت" (lotSz) الخاص بكل
+    # رمز — كان الكود يقرّب لـ6 خانات عشرية بشكل عام بدون مراعاة هذا الشرط، فترفضه
+    # OKX برسالة "Order quantity must be a multiple of the lot size".
+    final_sz = round_to_lot_size(raw_sz, specs["lot_sz"], specs["min_sz"])
+    if final_sz <= 0:
+        return False, "حجم الصفقة المحسوب أقل من الحد الأدنى المسموح لهذا الرمز على OKX"
+    # صيغة نص دقيقة بدون أصفار عشرية زايدة أو تمثيل عائم غير دقيق (زي 0.30000000004)
+    sz = f"{final_sz:.8f}".rstrip("0").rstrip(".") or "0"
 
     body = {
         "instId": inst_id,

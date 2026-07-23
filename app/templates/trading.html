@@ -39,6 +39,14 @@
   </table>
 </div>
 
+<div class="card">
+  <h3>⏳ الأوامر المعلّقة (بانتظار وصول السعر لنقطة الدخول)</h3>
+  <table id="pending-orders-table">
+    <thead><tr><th>الرمز</th><th>الاتجاه</th><th>النوع</th><th>الحجم</th><th>سعر الدخول المحدد</th><th></th></tr></thead>
+    <tbody><tr><td colspan="6" class="muted">جاري تحميل الأوامر المعلّقة...</td></tr></tbody>
+  </table>
+</div>
+
 <form method="post" action="/trading/execution">
   <div class="card">
     <h3>إعدادات التنفيذ الآلي</h3>
@@ -142,6 +150,21 @@ document.addEventListener('DOMContentLoaded', () => setVolType('{{ s.okx_volume_
 <script>
 let liveErrorStreak = 0;
 
+async function cancelPendingOrder(instId, ordId){
+  if (!confirm('تأكيد إلغاء هذا الأمر المعلّق؟')) return;
+  try {
+    const r = await fetch('/api/trading/cancel-order', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({inst_id: instId, ord_id: ordId}),
+    });
+    const data = await r.json();
+    alert(data.message || (data.success ? 'تم الإلغاء' : 'فشل الإلغاء'));
+    refreshOkxLive();
+  } catch(e) {
+    alert('خطأ بالاتصال: ' + e);
+  }
+}
+
 async function refreshOkxLive(){
   const dot = document.getElementById('live-dot');
   try{
@@ -165,6 +188,20 @@ async function refreshOkxLive(){
       tbody.innerHTML = data.positions.map(p => `<tr><td>${p.inst_id}</td><td>${p.pos_side}</td><td>${p.pos}</td><td>${p.avg_px}</td><td>${p.leverage}</td><td style="color:${p.upl>=0?'var(--green)':'var(--red)'};">${p.upl}</td></tr>`).join('');
     } else {
       tbody.innerHTML = '<tr><td colspan="6" class="muted">لا توجد مراكز مفتوحة حالياً</td></tr>';
+    }
+
+    const pendingTbody = document.querySelector('#pending-orders-table tbody');
+    if(data.pending_orders && data.pending_orders.length){
+      pendingTbody.innerHTML = data.pending_orders.map(o => `<tr>
+        <td>${o.inst_id}</td>
+        <td style="color:${o.side==='buy'?'var(--green)':'var(--red)'};">${o.side==='buy'?'شراء':'بيع'}</td>
+        <td>${o.ord_type==='limit'?'Limit':o.ord_type}</td>
+        <td>${o.sz}</td>
+        <td>${o.px || '—'}</td>
+        <td><button class="btn danger" style="font-size:11px; padding:5px 10px;" onclick="cancelPendingOrder('${o.inst_id}','${o.ord_id}')">إلغاء</button></td>
+      </tr>`).join('');
+    } else {
+      pendingTbody.innerHTML = '<tr><td colspan="6" class="muted">لا توجد أوامر معلّقة حالياً</td></tr>';
     }
   }catch(e){
     liveErrorStreak++;
