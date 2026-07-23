@@ -220,8 +220,8 @@ def calculate_order_quantity_usdt(settings: dict, entry_price: float, stop_loss:
 def place_order(symbol: str, side: str, quantity_usdt: float, leverage: int, margin_mode: str,
                  stop_loss: float, take_profit: float, api_key: str, api_secret: str,
                  passphrase: str, is_testnet: bool, is_market_order: bool = True,
-                 is_max_leverage_enabled: bool = False) -> Tuple[bool, str]:
-    """side: 'buy' أو 'sell'. ينفذ أمر سوق فوري بحجم quantity_usdt دولار مع ربط SL/TP اختيارياً."""
+                 is_max_leverage_enabled: bool = False, entry_price: float = 0.0) -> Tuple[bool, str]:
+    """side: 'buy' أو 'sell'. ينفذ أمر سوق فوري أو محدد بحجم quantity_usdt دولار مع ربط SL/TP اختيارياً."""
     inst_id = _to_inst_id(symbol)
 
     final_leverage = leverage
@@ -250,6 +250,15 @@ def place_order(symbol: str, side: str, quantity_usdt: float, leverage: int, mar
         "ordType": "market" if is_market_order else "limit",
         "sz": sz,
     }
+    # 🔴 إصلاح حرج: أي أمر Limit عند OKX يتطلب إلزامياً معامل السعر "px" — كان
+    # مفقود تماماً بالكود القديم، فيرفضه OKX دائماً برسالة "Parameter px error"
+    # بمجرد ما يكون "الدخول الفوري" مُلغى بالإعدادات (يعني المستخدم يريد Limit
+    # عند نقطة الدخول المحسوبة من الاستراتيجية بالضبط، مو سعر السوق اللحظي).
+    if not is_market_order:
+        if not entry_price or entry_price <= 0:
+            return False, "أمر Limit يتطلب سعر دخول صالح، لكن لم يُستلَم أي سعر — تأكد من تفعيل الدخول الفوري أو إرسال سعر دخول صحيح"
+        body["px"] = str(entry_price)
+
     if stop_loss and stop_loss > 0:
         body["slTriggerPx"] = str(stop_loss)
         body["slOrdPx"] = "-1"
@@ -261,7 +270,8 @@ def place_order(symbol: str, side: str, quantity_usdt: float, leverage: int, mar
     if not resp:
         return False, "فشل الاتصال بمنصة OKX"
     if resp.get("code") == "0":
-        return True, f"تم تنفيذ الأمر بنجاح ({sz} عقد) برافعة x{leverage} ({margin_mode})"
+        order_type_txt = "بسعر السوق" if is_market_order else f"Limit عند {entry_price}"
+        return True, f"تم تنفيذ الأمر بنجاح ({sz} عقد {order_type_txt}) برافعة x{leverage} ({margin_mode})"
     detail = resp.get("data", [{}])
     msg = detail[0].get("sMsg") if detail else resp.get("msg", "خطأ غير معروف")
     return False, msg or resp.get("msg", "خطأ غير معروف")

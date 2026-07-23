@@ -46,10 +46,25 @@
   .status-CANCELLED{background:rgba(148,163,184,.15); color:var(--text-sec);}
   .terminal{background:#030508; border-radius:12px; border:1px solid var(--dark-accent); padding:10px; height:340px; overflow-y:auto; font-family:monospace; font-size:12px;}
   .terminal div{padding:2px 4px;}
-  .flex-between{display:flex; justify-content:space-between; align-items:center;}
+  .flex-between{display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;}
   .muted{color:var(--text-sec); font-size:12px;}
   .switch{display:flex; align-items:center; gap:8px;}
   .warn{background:rgba(239,68,68,.08); border:1px solid rgba(239,68,68,.3); color:#fca5a5; padding:10px 14px; border-radius:10px; font-size:13px; margin-bottom:14px;}
+
+  /* 📱 نقطة توقف الشاشات الصغيرة (جوال) — أول تكيّف شامل بالتصميم */
+  @media (max-width: 640px) {
+    .container{padding:12px;}
+    .topbar{padding:10px 12px; flex-wrap:wrap; gap:8px;}
+    .topbar .brand{font-size:14px;}
+    nav{width:100%; overflow-x:auto; white-space:nowrap; -webkit-overflow-scrolling:touch;}
+    nav a{margin-inline-start:0; margin-inline-end:14px; font-size:13px;}
+    .card{padding:14px; border-radius:12px;}
+    h1{font-size:20px;} h2{font-size:17px;} h3{font-size:15px;}
+    button, .btn{padding:9px 14px; font-size:13px;}
+    table{font-size:12px; display:block; overflow-x:auto; white-space:nowrap;}
+    th,td{padding:6px 5px;}
+    .row > div{min-width:100%;}
+  }
 </style>
 </head>
 <body>

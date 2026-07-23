@@ -693,6 +693,7 @@ async def api_signals_execute(request: Request):
         api_key=s["okx_api_key"], api_secret=s["okx_api_secret"], passphrase=s["okx_passphrase"],
         is_testnet=s["okx_is_testnet"], is_market_order=s.get("is_instant_entry_enabled", True),
         is_max_leverage_enabled=s.get("okx_is_max_leverage_enabled", False),
+        entry_price=entry_price,
     )
     db.add_log(f"{'✅' if success else '❌'} [أمر يدوي] إرسال صفقة {symbol} ({side}) - {message}")
     return {"success": success, "message": message}

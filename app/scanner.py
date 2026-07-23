@@ -426,6 +426,7 @@ class ScannerState:
                 passphrase=settings["okx_passphrase"], is_testnet=settings["okx_is_testnet"],
                 is_market_order=settings.get("is_instant_entry_enabled", True),
                 is_max_leverage_enabled=settings.get("okx_is_max_leverage_enabled", False),
+                entry_price=result.entry_price,
             )
             if success:
                 db.add_log(f"✅ [التداول الآلي] تم تنفيذ الصفقة بنجاح: {message}")

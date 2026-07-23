@@ -4,11 +4,17 @@
 
 <div class="flex-between" style="margin-bottom:10px;">
   <h2 style="margin:0;">📋 سجل الفرص والإشارات <span id="total-count" class="muted"></span></h2>
-  <div style="display:flex; gap:8px;">
+  <div class="header-actions" style="display:flex; gap:8px;">
     <button class="btn secondary" onclick="exportSignals()">📥 تصدير كل الصفقات (ملف)</button>
     <button class="btn danger" onclick="clearAllSignals()">🗑️ مسح السجل</button>
   </div>
 </div>
+<style>
+@media (max-width: 640px) {
+  .header-actions{ width:100%; }
+  .header-actions button{ flex:1; font-size:12px; padding:9px 8px; }
+}
+</style>
 
 <div class="card">
   <div class="flex-between">
@@ -66,7 +72,7 @@
 }
 .filter-chip.active{ border-color:var(--cyan); color:var(--cyan); background:rgba(34,211,238,.08); }
 .sig-card{ background:var(--card); border:1px solid var(--dark-accent); border-radius:14px; padding:16px; margin-bottom:14px; }
-.sig-top{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+.sig-top{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px; }
 .sig-symbol{ font-weight:800; font-size:16px; }
 .side-pill{ padding:4px 10px; border-radius:8px; font-size:12px; font-weight:800; border:1px solid; margin-inline-end:6px; }
 .side-pill.long{ color:var(--green); border-color:rgba(34,197,94,.35); background:rgba(34,197,94,.12); }
