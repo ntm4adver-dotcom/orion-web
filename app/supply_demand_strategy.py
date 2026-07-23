@@ -24,7 +24,7 @@
 """
 from typing import List, Optional, Dict
 
-from .analyzer import analyze, atr, AnalysisResult, MarketMicrostructure, Kline
+from .analyzer import analyze, atr, AnalysisResult, MarketMicrostructure, Kline, build_score_breakdown
 
 
 def _detect_zones(klines: List[Kline], lookback: int = 80) -> List[Dict]:
@@ -155,10 +155,18 @@ def analyze_supply_demand_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     )
     volume_analysis = f"دخول عكسي من {zone_desc} بعد فخ سيولة محتمل من الانفجار السعري"
 
+    score_factors = [
+        ("الانفجار السعري كمُطلِق أولي (فخ سيولة محتمل)", True),
+        ("مسافة منطقة العرض/الطلب منطقية (0.2x–9x ATR)", True),
+        ("قوة احتمالية الانفجار الأولي عالية (≥80%)", breakout_result.prob >= 80),
+    ]
+    score_breakdown, signal_score = build_score_breakdown(score_factors)
+
     return AnalysisResult(
         symbol=symbol, trend=breakout_result.trend, dt="", prob=probability, price=current_price,
         atr=atr_val, side=side, entry_price=entry_price, stop_loss=sl, take_profit=tp,
         rr=rr, quality="A" if probability >= 88 else "B", conf=probability,
         behavior=behavior, volume_analysis=volume_analysis,
         low_vol=False, kill_zone_ok=True, news_time=False, ranging=False,
+        score_breakdown=score_breakdown, signal_score=signal_score,
     )

@@ -28,7 +28,7 @@
 """
 from typing import Optional, List
 
-from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr
+from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, build_score_breakdown
 
 
 def analyze_crowd_trap(symbol: str, k4h, k1h, k15m, k5m, k_daily,
@@ -145,10 +145,20 @@ def analyze_crowd_trap(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     behavior = f"🎭 مصيدة الحشد: {crowd_desc}. دخول {side} عند {entry_price:.6g} بناءً على التناقض، بدون الاعتماد على أي نمط سعري."
     volume_analysis = "تناقض Long/Short Ratio + Funding مقابل CVD + Taker Pressure — استراتيجية أصيلة بدون نمط سعري"
 
+    score_factors = [
+        ("تناقض واضح بين وضعية الحشد والتدفق الحقيقي", True),
+        ("نسبة تمركز الحسابات متطرفة جداً (>2.5x)", extreme_ratio > 2.5),
+        ("CVD تراكمي حاسم جداً بعكس الحشد", (side == "Short" and cvd_pct < 35) or (side == "Long" and cvd_pct > 65)),
+        ("ضغط المتداولين الفعلي متوافق مع التدفق الحقيقي", (side == "Short" and taker_pressure < -0.15) or (side == "Long" and taker_pressure > 0.15)),
+        ("الفائدة المفتوحة (OI) تؤكد الفرضية", oi_change_pct is not None and ((side == "Short" and oi_change_pct > 1.5) or (side == "Long" and oi_change_pct < -1.5))),
+    ]
+    score_breakdown, signal_score = build_score_breakdown(score_factors)
+
     return AnalysisResult(
         symbol=symbol, trend=("صاعد" if side == "Long" else "هابط"), dt="", prob=probability,
         price=current_price, atr=atr_val, side=side, entry_price=entry_price, stop_loss=stop_loss,
         take_profit=take_profit, rr=rr, quality="A" if probability >= 88 else "B", conf=probability,
         behavior=behavior, volume_analysis=volume_analysis,
         low_vol=False, kill_zone_ok=True, news_time=False, ranging=False,
+        score_breakdown=score_breakdown, signal_score=signal_score,
     )

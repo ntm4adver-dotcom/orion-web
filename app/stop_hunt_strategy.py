@@ -29,7 +29,7 @@
 """
 from typing import List, Optional
 
-from .analyzer import Kline, AnalysisResult, MarketMicrostructure
+from .analyzer import Kline, AnalysisResult, MarketMicrostructure, build_score_breakdown
 
 
 def _detect_stop_hunt(klines: List[Kline], lookback: int = 50, vol_period: int = 20,
@@ -173,10 +173,21 @@ def analyze_stop_hunt(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     )
     volume_analysis = f"صيد استوبات مؤكَّد بفوليوم {signal['volume_ratio']:.2f}× — عائد/مخاطرة ثابت لا يقل عن 1:3"
 
+    score_factors = [
+        ("كسر مستوى تاريخي بفتيلة (Wick) ورفض واضح", True),
+        ("تأكيد متابعة (شمعة تالية صامدة، مو فشل النمط)", True),
+        ("فوليوم مؤكَّد وقت السحب", signal["volume_ratio"] > 1.2),
+        ("الفائدة المفتوحة (OI) داعمة أو محايدة", oi_change_pct is None or oi_change_pct >= -1.5),
+        ("ضغط المتداولين الفعليين (Taker Pressure)", taker_pressure is not None and ((side == "Long" and taker_pressure > 0.15) or (side == "Short" and taker_pressure < -0.15))),
+        ("CVD تراكمي متوافق", cvd_pct is not None and ((side == "Long" and cvd_pct > 60) or (side == "Short" and cvd_pct < 40))),
+    ]
+    score_breakdown, signal_score = build_score_breakdown(score_factors)
+
     return AnalysisResult(
         symbol=symbol, trend="صاعد" if side == "Long" else "هابط", dt="", prob=probability,
         price=entry_price, atr=risk, side=side, entry_price=entry_price, stop_loss=sl, take_profit=tp,
         rr=rr, quality="A" if probability >= 88 else "B", conf=probability,
         behavior=behavior, volume_analysis=volume_analysis,
         low_vol=False, kill_zone_ok=True, news_time=False, ranging=False,
+        score_breakdown=score_breakdown, signal_score=signal_score,
     )

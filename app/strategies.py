@@ -12,9 +12,6 @@
 كلها تقرأ من هذا السجل تلقائياً).
 """
 from .analyzer import analyze
-from .ict_strategy import analyze_ict_smart_sweep
-from .hybrid_strategy import analyze_hybrid_confirmation
-from .ict_guided_strategy import analyze_ict_guided_entry
 from .supply_demand_strategy import analyze_supply_demand_reversal
 from .stop_hunt_strategy import analyze_stop_hunt
 from .scalp_strategy import analyze_scalp_precision
@@ -22,6 +19,17 @@ from .liquidation_strategy import analyze_liquidation_hunter
 from .fabio_scalper_strategy import analyze_fabio_scalper
 from .mtf_fib_strategy import analyze_mtf_fib_trend
 from .crowd_trap_strategy import analyze_crowd_trap
+from .confluence_strategy import analyze_confluence
+
+# ⚠️ استراتيجيات أُزيلت من السجل (لسا موجودة كملفات، بس مو مسجّلة/مفعّلة):
+#  - ict_smart_sweep: بيانات فعلية أظهرت صفر إشارة بأي وقت رغم أيام تشغيل — شروطها
+#    الخمسة الصارمة ما تحققت ولا مرة واحدة، فلا فائدة فعلية من إبقائها مفعّلة.
+#  - hybrid_confirmation: تعتمد كلياً على نجاح ict_smart_sweep — بما إنها ما تنجح
+#    أبداً، هذي الاستراتيجية ميتة تلقائياً بنفس السبب (لا يمكن تفعيلها منطقياً).
+#  - ict_guided_entry: مصمَّمة "بدون رفض" — تعتمد نقاط ICT لو توفرت، وإلا تعتمد نقاط
+#    الانفجار السعري كما هي بدون أي تعديل. بما إن ICT ما توفرت ولا مرة، فهذي
+#    الاستراتيجية أصبحت فعلياً **مطابقة تماماً** لاستراتيجية الانفجار السعري —
+#    تكرار حرفي بدون أي قيمة مضافة حقيقية.
 
 # كل استراتيجية: مفتاح فريد -> {label: الاسم المعروض, fn: دالة التحليل}
 # توقيع دالة التحليل الموحّد: fn(symbol, k4h, k1h, k15m, k5m, k_daily, micro=None) -> Optional[AnalysisResult]
@@ -29,18 +37,6 @@ STRATEGY_REGISTRY = {
     "explosive_breakout": {
         "label": "⚡ الانفجار السعري (Explosive Breakout Hunter) — الأصلية",
         "fn": analyze,
-    },
-    "ict_smart_sweep": {
-        "label": "🧠 النمط الذكي لسحب السيولة (ICT / Smart Money Concepts)",
-        "fn": analyze_ict_smart_sweep,
-    },
-    "hybrid_confirmation": {
-        "label": "🔗 التأكيد المزدوج (يشترط تأكيد ICT، وإلا تُرفض الصفقة)",
-        "fn": analyze_hybrid_confirmation,
-    },
-    "ict_guided_entry": {
-        "label": "🎯 الانفجار الموجّه بـICT (بدون رفض — ICT يحسّن الدخول إن توفر فقط)",
-        "fn": analyze_ict_guided_entry,
     },
     "supply_demand_reversal": {
         "label": "🔄 انعكاس عرض/طلب (يعكس اتجاه الانفجار السعري من أقرب منطقة Supply/Demand)",
@@ -69,6 +65,10 @@ STRATEGY_REGISTRY = {
     "crowd_trap": {
         "label": "🎭 مصيدة الحشد (Crowd Trap Divergence) — تصميم أصيل، بدون نمط سعري",
         "fn": analyze_crowd_trap,
+    },
+    "confluence": {
+        "label": "🤝 استراتيجية التوافق (تحتاج اتفاق استراتيجيتين أو أكثر، R:R≥5)",
+        "fn": analyze_confluence,
     },
 }
 

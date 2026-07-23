@@ -24,7 +24,7 @@
 """
 from typing import Optional, List
 
-from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, ema, _get_bias
+from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, ema, _get_bias, build_score_breakdown
 
 
 def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15m: List[Kline],
@@ -164,10 +164,21 @@ def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
                 f"عائد/مخاطرة محقَّق فعلياً: 1:{rr}.")
     volume_analysis = f"سكالب سريع — ارتداد EMA9 مؤكَّد بالحجم والفوليوم الفعلي، R:R≥5 مفروض حقيقياً"
 
+    score_factors = [
+        ("اتفاق فريم 15د والساعة على نفس الاتجاه", True),
+        ("ارتداد صحي من EMA9", True),
+        ("شمعة ارتداد قوية تؤكد الاتجاه", True),
+        ("فوليوم مؤكَّد فوق المتوسط", vol_ratio > 1.2),
+        ("ضغط المتداولين الفعليين (Taker Pressure)", taker_pressure is not None and ((side == "Long" and taker_pressure > 0.2) or (side == "Short" and taker_pressure < -0.2))),
+        ("عائد/مخاطرة يحقق 1:5 حقيقياً (بدون تحايل)", True),
+    ]
+    score_breakdown, signal_score = build_score_breakdown(score_factors)
+
     return AnalysisResult(
         symbol=symbol, trend=trend, dt="", prob=probability, price=entry_price, atr=atr5m,
         side=side, entry_price=entry_price, stop_loss=stop_loss, take_profit=take_profit,
         rr=rr, quality="A" if probability >= 88 else "B", conf=probability,
         behavior=behavior, volume_analysis=volume_analysis,
         low_vol=False, kill_zone_ok=True, news_time=False, ranging=False,
+        score_breakdown=score_breakdown, signal_score=signal_score,
     )

@@ -23,7 +23,7 @@
 """
 from typing import Optional, List
 
-from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, _get_bias
+from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, _get_bias, build_score_breakdown
 
 
 def _find_swing_extremes(window: List[Kline]):
@@ -177,10 +177,21 @@ def analyze_mtf_fib_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     )
     volume_analysis = "فيبوناتشي 0.72 على تراجع 5 دقائق منكسر + تأكيد اتجاه 15 دقيقة"
 
+    score_factors = [
+        ("اتجاه رئيسي واضح على 15 دقيقة", True),
+        ("تراجع معاكس بشكل صحيح على 5 دقائق", True),
+        ("كسر حقيقي (CHoCH) يؤكد انتهاء التراجع", True),
+        ("منطقة فيبوناتشي 0.72 بمسافة منطقية عن السعر", True),
+        ("اتجاه منطقة الدخول صحيح (لا مطاردة)", True),
+        ("CVD أو ضغط متداولين متوافق", (cvd_pct is not None and ((side == "Long" and cvd_pct > 58) or (side == "Short" and cvd_pct < 42))) or (taker_pressure is not None and ((side == "Long" and taker_pressure > 0.1) or (side == "Short" and taker_pressure < -0.1)))),
+    ]
+    score_breakdown, signal_score = build_score_breakdown(score_factors)
+
     return AnalysisResult(
         symbol=symbol, trend=main_trend, dt="", prob=probability, price=last_close,
         atr=atr(k5m, 14), side=side, entry_price=entry_price, stop_loss=stop_loss,
         take_profit=take_profit, rr=rr, quality="A" if probability >= 88 else "B", conf=probability,
         behavior=behavior, volume_analysis=volume_analysis,
         low_vol=False, kill_zone_ok=True, news_time=False, ranging=False,
+        score_breakdown=score_breakdown, signal_score=signal_score,
     )

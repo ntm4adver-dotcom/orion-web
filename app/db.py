@@ -57,6 +57,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "is_market_alignment_filter_enabled": 1,  # رفض أي صفقة تعاكس اتجاه السوق العام (البيتكوين)
     "min_btc_correlation": 0.35,  # الحد الأدنى لمعامل الارتباط بالبيتكوين قبل اعتبار العملة "فكّت الارتباط"
     "is_breakeven_stop_enabled": 1,  # نقل الوقف لنقطة الدخول تلقائياً عند تحقيق ربح 1R
+    "min_signal_score": 0,  # الحد الأدنى لنقاط قوة الإشارة (0-100) — 0 يعني بدون فلترة إضافية
     "combined_enabled_strategies": "",  # قائمة مفاتيح استراتيجيات مفصولة بفاصلة تعمل داخل وضع "الكل معاً" — فاضي = الكل مفعّل
     # OKX trading connection
     "okx_api_key": "",
@@ -120,7 +121,9 @@ def init_db():
                 max_drawdown_pct REAL DEFAULT 0,
                 max_favorable_pct REAL DEFAULT 0,
                 initial_risk_pct REAL DEFAULT 0,
-                breakeven_activated INTEGER DEFAULT 0
+                breakeven_activated INTEGER DEFAULT 0,
+                signal_score REAL DEFAULT 100,
+                score_breakdown TEXT DEFAULT '[]'
             )
         """)
         # هجرة آمنة: إضافة عمود strategy لو قاعدة البيانات كانت موجودة قبل هذا التحديث
@@ -136,6 +139,10 @@ def init_db():
                 conn.execute("ALTER TABLE trade_signals ADD COLUMN initial_risk_pct REAL DEFAULT 0")
             if "breakeven_activated" not in existing_cols:
                 conn.execute("ALTER TABLE trade_signals ADD COLUMN breakeven_activated INTEGER DEFAULT 0")
+            if "signal_score" not in existing_cols:
+                conn.execute("ALTER TABLE trade_signals ADD COLUMN signal_score REAL DEFAULT 100")
+            if "score_breakdown" not in existing_cols:
+                conn.execute("ALTER TABLE trade_signals ADD COLUMN score_breakdown TEXT DEFAULT '[]'")
         except Exception:
             pass
         conn.execute("""
@@ -207,21 +214,25 @@ def update_settings(updates: Dict[str, Any]):
 
 
 def add_signal(signal: Dict[str, Any]) -> int:
+    import json
     entry_price = signal["entry_price"]
     stop_loss = signal["stop_loss"]
     initial_risk_pct = abs(entry_price - stop_loss) / entry_price * 100.0 if entry_price else 0.0
+    signal_score = signal.get("signal_score", 100.0)
+    score_breakdown_json = json.dumps(signal.get("score_breakdown") or [], ensure_ascii=False)
     with _lock, _connect() as conn:
         cur = conn.execute("""
             INSERT INTO trade_signals
             (timestamp, symbol, side, entry_price, stop_loss, take_profit, rr, probability,
              quality, behavior, volume_analysis, status, update_timestamp, current_price,
-             last_notified_status, strategy, initial_risk_pct)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             last_notified_status, strategy, initial_risk_pct, signal_score, score_breakdown)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             int(time.time() * 1000), signal["symbol"], signal["side"], entry_price,
             stop_loss, signal["take_profit"], signal["rr"], signal["probability"],
             signal["quality"], signal["behavior"], signal["volume_analysis"], "PENDING",
             int(time.time() * 1000), entry_price, "", signal.get("strategy", ""), initial_risk_pct,
+            signal_score, score_breakdown_json,
         ))
         conn.commit()
         return cur.lastrowid
@@ -304,15 +315,16 @@ def get_signals(limit: int = 300) -> List[Dict[str, Any]]:
 
 
 def get_strategy_performance() -> List[Dict[str, Any]]:
-    """يقارن أداء كل استراتيجية على حدة (رابحة/خاسرة/تعادل/نسبة نجاح) من الصفقات
-    المغلقة الحقيقية فقط. صفقات التعادل (BREAKEVEN) مستبعدة من حساب نسبة النجاح
-    لأنها مو فوز ولا خسارة حقيقية بالتحليل — بس وقاية حمت رأس المال."""
+    """يقارن أداء كل استراتيجية على حدة (رابحة/خاسرة/تعادل/نسبة نجاح + عائد R) من
+    الصفقات المغلقة الحقيقية فقط. صفقات التعادل (BREAKEVEN) مستبعدة من حساب نسبة
+    النجاح لأنها مو فوز ولا خسارة حقيقية بالتحليل — بس وقاية حمت رأس المال."""
     with _lock, _connect() as conn:
         cur = conn.execute("""
             SELECT COALESCE(NULLIF(strategy,''), 'غير محدد') AS strategy,
                    SUM(CASE WHEN status='HIT_TP' THEN 1 ELSE 0 END) AS wins,
                    SUM(CASE WHEN status='HIT_SL' THEN 1 ELSE 0 END) AS losses,
                    SUM(CASE WHEN status='BREAKEVEN' THEN 1 ELSE 0 END) AS breakeven,
+                   SUM(CASE WHEN status='HIT_TP' THEN rr ELSE 0 END) AS total_win_r,
                    COUNT(*) AS total_all_statuses
             FROM trade_signals
             GROUP BY strategy
@@ -323,6 +335,14 @@ def get_strategy_performance() -> List[Dict[str, Any]]:
         closed = r["wins"] + r["losses"]
         r["closed_total"] = closed
         r["win_rate"] = round((r["wins"] / closed) * 100.0, 1) if closed > 0 else 0.0
+        # عائد R: كل خسارة = -1R بالتعريف (مقدار مخاطرتها بالضبط)، وكل ربح = عائد/مخاطرة
+        # (rr) المخطط له فعلياً — معيار احترافي يقيس الأداء نسبة لحجم المخاطرة
+        total_win_r = round(r["total_win_r"] or 0.0, 2)
+        total_loss_r = r["losses"] * 1.0
+        r["total_win_r"] = total_win_r
+        r["total_loss_r"] = round(-total_loss_r, 2)
+        r["net_r"] = round(total_win_r - total_loss_r, 2)
+        r["loss_to_win_ratio"] = (round(total_loss_r / total_win_r, 2) if total_win_r > 0 else None)
     return rows
 
 

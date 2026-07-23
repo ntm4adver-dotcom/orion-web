@@ -317,6 +317,13 @@ class ScannerState:
             db.increment_rejection_counter("min_probability_filter")
             return
 
+        min_score = settings.get("min_signal_score", 0)
+        signal_score = getattr(result, "signal_score", 100.0)
+        if min_score and signal_score < min_score:
+            db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: نقاط القوة ({signal_score:.1f}/100) أقل من الحد المطلوب ({min_score}).")
+            db.increment_rejection_counter("min_signal_score_filter")
+            return
+
         if settings["is_volume_filter_enabled"]:
             v1h = [k.volume for k in k1h[-50:]]
             vol_avg = sum(v1h) / len(v1h) if v1h else 1.0
@@ -381,6 +388,8 @@ class ScannerState:
             "stop_loss": result.stop_loss, "take_profit": result.take_profit, "rr": result.rr,
             "probability": result.prob, "quality": result.quality, "behavior": result.behavior,
             "volume_analysis": result.volume_analysis, "strategy": strategy_key,
+            "signal_score": getattr(result, "signal_score", 100.0),
+            "score_breakdown": getattr(result, "score_breakdown", None),
         })
 
         if settings["is_telegram_enabled"]:

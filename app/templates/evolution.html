@@ -8,7 +8,7 @@
   <h3>⚖️ مقارنة أداء الاستراتيجيات</h3>
   <p class="muted" style="margin-bottom:12px;">مقارنة حقيقية من نتائج الصفقات المغلقة فعلياً — أي استراتيجية جديدة تُضاف تلقائياً بهذا الجدول بدون أي إعداد إضافي.</p>
   <table id="strategy-table">
-    <thead><tr><th>الاستراتيجية</th><th>إجمالي الصفقات</th><th>مغلقة</th><th>رابحة</th><th>خاسرة</th><th>نسبة النجاح</th><th>الحد الأدنى الفعّال حالياً</th></tr></thead>
+    <thead><tr><th>الاستراتيجية</th><th>إجمالي الصفقات</th><th>مغلقة</th><th>رابحة</th><th>خاسرة</th><th>نسبة النجاح</th><th>صافي العائد (R)</th><th>نسبة خسارة/ربح</th><th>الحد الأدنى الفعّال حالياً</th></tr></thead>
     <tbody><tr><td colspan="7" class="muted">جاري التحميل...</td></tr></tbody>
   </table>
 </div>
@@ -104,10 +104,13 @@ async function loadStrategyPerformance(){
   const data = await r.json();
   const tbody = document.querySelector('#strategy-table tbody');
   if (!data.length){
-    tbody.innerHTML = '<tr><td colspan="7" class="muted">ما فيه صفقات مسجّلة بعد.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="muted">ما فيه صفقات مسجّلة بعد.</td></tr>';
     return;
   }
-  tbody.innerHTML = data.map(p => `
+  tbody.innerHTML = data.map(p => {
+    const netR = p.net_r || 0;
+    const ratio = p.loss_to_win_ratio;
+    return `
     <tr>
       <td><b>${p.label}</b></td>
       <td>${p.total_all_statuses}</td>
@@ -115,8 +118,11 @@ async function loadStrategyPerformance(){
       <td style="color:var(--green);">${p.wins}</td>
       <td style="color:var(--red);">${p.losses}</td>
       <td><b>${p.closed_total > 0 ? p.win_rate + '%' : '—'}</b></td>
+      <td style="color:${netR>=0?'var(--green)':'var(--red)'}; font-weight:800;">${p.closed_total > 0 ? (netR>=0?'+':'')+netR.toFixed(2)+'R' : '—'}</td>
+      <td>${ratio !== null && ratio !== undefined ? '1 : ' + ratio.toFixed(2) : (p.wins===0 && p.losses>0 ? 'خسارة فقط' : '—')}</td>
       <td>${p.effective_threshold}%</td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 }
 
 loadLearning();

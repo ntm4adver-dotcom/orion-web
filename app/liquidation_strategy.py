@@ -21,7 +21,7 @@
 """
 from typing import Optional
 
-from .analyzer import analyze, AnalysisResult, MarketMicrostructure
+from .analyzer import analyze, AnalysisResult, MarketMicrostructure, build_score_breakdown
 from .liquidation_heatmap import estimate_liquidation_heatmap
 
 
@@ -147,10 +147,21 @@ def analyze_liquidation_hunter(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     )
     volume_analysis = f"تقدير خارطة تصفية تقريبي (Liquidation Heatmap) + مُطلِق انفجار سعري"
 
+    score_factors = [
+        ("الانفجار السعري كمُطلِق زخم", True),
+        ("بوابة تأكيد الزخم الإلزامية (Taker Pressure)", True),
+        ("منطقة تصفية بمسافة منطقية (0.3%–8%)", distance_pct <= 2.0),
+        ("الفائدة المفتوحة (OI) داعمة", oi_change_pct is not None and oi_change_pct > 1.0),
+        ("ضغط المتداولين قوي جداً (تأكيد إضافي)", taker_pressure is not None and ((side == "Long" and taker_pressure > 0.15) or (side == "Short" and taker_pressure < -0.15))),
+        ("CVD تراكمي متوافق", cvd_pct is not None and ((side == "Long" and cvd_pct > 60) or (side == "Short" and cvd_pct < 40))),
+    ]
+    score_breakdown, signal_score = build_score_breakdown(score_factors)
+
     return AnalysisResult(
         symbol=symbol, trend=breakout_result.trend, dt="", prob=probability, price=current_price,
         atr=breakout_result.atr, side=side, entry_price=entry_price, stop_loss=stop_loss,
         take_profit=take_profit, rr=rr, quality="A" if probability >= 88 else "B", conf=probability,
         behavior=behavior, volume_analysis=volume_analysis,
         low_vol=False, kill_zone_ok=True, news_time=False, ranging=False,
+        score_breakdown=score_breakdown, signal_score=signal_score,
     )

@@ -55,6 +55,25 @@ class AnalysisResult:
     news_time: bool
     ranging: bool
     tp1: float = 0.0
+    score_breakdown: list = None  # قائمة {factor, points, confirmed, earned} — تُضبط لكل استراتيجية
+    signal_score: float = 100.0   # مجموع النقاط المكتسبة فعلياً من أصل 100
+
+
+def build_score_breakdown(factors: list) -> tuple:
+    """يوزّع 100 نقطة بالتساوي على قائمة عوامل تحليلية [(اسم العامل, تحقق؟), ...]،
+    ويرجع (قائمة التفصيل، مجموع النقاط المكتسبة). كل استراتيجية تحدد عواملها الخاصة
+    بناءً على شروطها التحليلية الفعلية (فيبوناتشي=عامل، فوليوم=عامل، وهكذا)."""
+    n = len(factors)
+    if n == 0:
+        return [], 100.0
+    points_each = round(100.0 / n, 2)
+    breakdown = []
+    total = 0.0
+    for name, confirmed in factors:
+        earned = points_each if confirmed else 0.0
+        breakdown.append({"factor": name, "points": points_each, "confirmed": bool(confirmed), "earned": earned})
+        total += earned
+    return breakdown, round(total, 1)
 
 
 # ---------------------------------------------------------------------------
@@ -593,6 +612,17 @@ def analyze_explosive_breakout(
     parts.append(f"🛡️ الستوب لوز (SL): {sl}")
     parts.append(f"⚖️ نسبة العائد للمخاطرة: 1:{rr:.1f}")
 
+    score_factors = [
+        ("اختراق/انضغاط نطاق البولينجر", True),  # بوابة إلزامية أصلاً وصلنا لهنا
+        ("زخم الفوليوم المؤكَّد", True),
+        ("اتجاه RSI متوافق", True),
+        ("شكل الشمعة (جسم قوي + إغلاق حاسم)", True),
+        ("تأكيد الفائدة المفتوحة (OI)", oi_change_pct is not None and oi_change_pct > 1.0),
+        ("ضغط المتداولين الفعليين (Taker Pressure)", taker_pressure is not None and ((side == "Long" and taker_pressure > 0.1) or (side == "Short" and taker_pressure < -0.1))),
+        ("CVD تراكمي متوافق", cvd_pct is not None and ((side == "Long" and cvd_pct > 55) or (side == "Short" and cvd_pct < 45))),
+    ]
+    score_breakdown, signal_score = build_score_breakdown(score_factors)
+
     return AnalysisResult(
         symbol=symbol,
         trend=h1_trend,
@@ -614,6 +644,8 @@ def analyze_explosive_breakout(
         kill_zone_ok=in_kill_zone(),
         news_time=check_irrational_market(k5m, k15m, k1h),
         ranging=is_compressed,
+        score_breakdown=score_breakdown,
+        signal_score=signal_score,
     )
 
 

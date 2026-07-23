@@ -102,9 +102,6 @@ function setFilter(f){
 
 const STRATEGY_LABELS = {
   'explosive_breakout': '⚡ الانفجار السعري',
-  'ict_smart_sweep': '🧠 النمط الذكي (ICT)',
-  'hybrid_confirmation': '🔗 التأكيد المزدوج',
-  'ict_guided_entry': '🎯 الانفجار الموجّه بـICT',
   'supply_demand_reversal': '🔄 انعكاس عرض/طلب',
   'stop_hunt': '🎣 صيد الاستوبات',
   'scalp_precision': '🎯 السكالب السريع الدقيق',
@@ -112,6 +109,7 @@ const STRATEGY_LABELS = {
   'fabio_scalper': '📊 سكالب فابيو فالنتيني',
   'mtf_fib_trend': '📐 فيبوناتشي الترند المتعدد الفريمات',
   'crowd_trap': '🎭 مصيدة الحشد',
+  'confluence': '🤝 استراتيجية التوافق',
 };
 function strategyLabel(key){
   return STRATEGY_LABELS[key] || key;
@@ -279,6 +277,7 @@ function renderSignals(){
       <div class="sig-top">
         <div>
           <span class="prob-pill">احتمال: ${sig.probability}%</span>
+          ${sig.signal_score !== undefined && sig.signal_score !== null ? `<span class="prob-pill" style="background:rgba(168,85,247,.15); color:#a855f7;" title="نقاط قوة الإشارة">💯 ${sig.signal_score}/100</span>` : ''}
           <span class="side-pill ${isLong ? 'long' : 'short'}">${isLong ? '▲ شراء (LONG)' : '▼ بيع (SHORT)'}</span>
         </div>
         <div class="sig-symbol">${sig.symbol}</div>
@@ -321,10 +320,28 @@ function renderSignals(){
         <b>الجودة:</b> ${sig.quality || '—'}<br>
         <b>السلوك السعري:</b> ${sig.behavior || '—'}<br>
         <b>تحليل الحجم:</b> ${sig.volume_analysis || '—'}<br>
-        <b>عائد/مخاطرة R:R:</b> ${sig.rr ? '1:' + sig.rr : 'غير محدد'}
+        <b>عائد/مخاطرة R:R:</b> ${sig.rr ? '1:' + sig.rr : 'غير محدد'}<br>
+        <b>💯 نقاط قوة الإشارة:</b> ${sig.signal_score !== undefined && sig.signal_score !== null ? sig.signal_score + ' / 100' : '—'}
+        ${renderScoreBreakdown(sig.score_breakdown)}
       </div>
     </div>`;
   }).join('');
+}
+
+function renderScoreBreakdown(raw){
+  if (!raw) return '';
+  let items;
+  try { items = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch(e) { return ''; }
+  if (!items || !items.length) return '';
+  const rows = items.map(f => `
+    <div style="display:flex; justify-content:space-between; padding:3px 0; font-size:11px; ${f.confirmed ? 'color:var(--green);' : 'color:var(--text-sec); opacity:.6;'}">
+      <span>${f.confirmed ? '✅' : '▫️'} ${f.factor}</span>
+      <span>${f.confirmed ? '+' : ''}${f.earned}/${f.points}</span>
+    </div>`).join('');
+  return `<div style="margin-top:8px; padding-top:8px; border-top:1px dashed var(--dark-accent);">
+    <b style="font-size:11px;">تفصيل النقاط (من وين جت):</b>
+    ${rows}
+  </div>`;
 }
 
 function toggleDetails(el, sigId){

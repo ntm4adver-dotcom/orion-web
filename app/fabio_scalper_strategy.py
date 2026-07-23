@@ -26,7 +26,7 @@ Direction – Location – Aggression:
 """
 from typing import Optional
 
-from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr
+from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, build_score_breakdown
 from .volume_profile import compute_volume_profile
 
 
@@ -215,10 +215,21 @@ def analyze_fabio_scalper(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     )
     volume_analysis = f"بروفايل فوليوم (POC/VAH/VAL/LVN) + CVD + ضغط متداولين فعلي — منهج Direction-Location-Aggression"
 
+    score_factors = [
+        ("الاتجاه (Direction) محدد بوضوح عبر CVD/ضغط المتداولين", True),
+        ("الموقع (Location) قريب من مستوى مهم (POC/VAH/VAL)", True),
+        ("العدوانية (Aggression) لا تعاكس الصفقة", True),
+        ("عائد/مخاطرة 2:1 كحد أدنى محقَّق (قاعدة فابيو المعلنة)", True),
+        ("CVD أو ضغط متداولين قوي جداً (تأكيد إضافي)", (cvd_pct is not None and ((side == "Long" and cvd_pct > 62) or (side == "Short" and cvd_pct < 38))) or (taker_pressure is not None and ((side == "Long" and taker_pressure > 0.2) or (side == "Short" and taker_pressure < -0.2)))),
+        ("الفائدة المفتوحة (OI) لا تعاكس الصفقة", oi_change_pct is None or oi_change_pct >= -1.5),
+    ]
+    score_breakdown, signal_score = build_score_breakdown(score_factors)
+
     return AnalysisResult(
         symbol=symbol, trend=direction, dt="", prob=probability, price=current_price,
         atr=atr_val, side=side, entry_price=entry_price, stop_loss=stop_loss, take_profit=take_profit,
         rr=rr, quality="A" if probability >= 88 else "B", conf=probability,
         behavior=behavior, volume_analysis=volume_analysis,
         low_vol=False, kill_zone_ok=True, news_time=False, ranging=False,
+        score_breakdown=score_breakdown, signal_score=signal_score,
     )
