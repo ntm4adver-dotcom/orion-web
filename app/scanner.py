@@ -148,6 +148,22 @@ class ScannerState:
             if btc_klines and len(btc_klines) >= 20:
                 from .analyzer import _get_bias as _get_market_bias
                 btc_trend = _get_market_bias(btc_klines)
+
+                # 📊 تحسين مبني على بيانات فعلية: يوم هبوط حقيقي بالسوق (23-24 يوليو
+                # 2026، البيتكوين -1.17% وكل العملات الكبرى حمراء) كشف إن اتجاه EMA
+                # على فريم 4 ساعات بطيء نسبياً ويتأخر بالتقاط انعكاسات حقيقية سريعة.
+                # نضيف تأكيد زخم أسرع: صافي تغيّر البيتكوين آخر ~8 ساعات (فريم ساعة) —
+                # لو عارض بوضوح اتجاه الـEMA البطيء، نثق بالزخم الأحدث بدلاً منه.
+                btc_1h = exchange.fetch_klines("BTCUSDT", "1h", 10)
+                if btc_1h and len(btc_1h) >= 8:
+                    recent_change_pct = (btc_1h[-1].close - btc_1h[-8].close) / btc_1h[-8].close * 100
+                    if recent_change_pct < -1.2 and btc_trend == "صاعد":
+                        btc_trend = "هابط"
+                        db.add_log(f"⚠️ تصحيح اتجاه البيتكوين: EMA البطيء يقول صاعد، لكن آخر 8 ساعات فعلياً {recent_change_pct:.2f}% — نعتمد الزخم الأحدث (هابط)")
+                    elif recent_change_pct > 1.2 and btc_trend == "هابط":
+                        btc_trend = "صاعد"
+                        db.add_log(f"⚠️ تصحيح اتجاه البيتكوين: EMA البطيء يقول هابط، لكن آخر 8 ساعات فعلياً +{recent_change_pct:.2f}% — نعتمد الزخم الأحدث (صاعد)")
+
                 db.add_log(f"📊 اتجاه السوق العام (البيتكوين، 4 ساعات): {btc_trend}")
         except Exception:
             btc_trend = None
