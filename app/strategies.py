@@ -19,6 +19,7 @@ from .fabio_scalper_strategy import analyze_fabio_scalper
 from .mtf_fib_strategy import analyze_mtf_fib_trend
 from .crowd_trap_strategy import analyze_crowd_trap
 from .confluence_strategy import analyze_confluence
+from .climactic_reversal_strategy import analyze_climactic_reversal
 
 # ⚠️ استراتيجيات أُزيلت من السجل (لسا موجودة كملفات، بس مو مسجّلة/مفعّلة):
 #  - ict_smart_sweep: بيانات فعلية أظهرت صفر إشارة بأي وقت رغم أيام تشغيل — شروطها
@@ -65,6 +66,10 @@ STRATEGY_REGISTRY = {
     "confluence": {
         "label": "🤝 استراتيجية التوافق (تحتاج اتفاق استراتيجيتين أو أكثر، R:R≥5)",
         "fn": analyze_confluence,
+    },
+    "climactic_reversal": {
+        "label": "🌊 الارتداد بعد فوليوم التصريف/الاستنزاف (Selling/Buying Climax)",
+        "fn": analyze_climactic_reversal,
     },
 }
 

@@ -278,6 +278,11 @@ class ScannerState:
                 db.increment_rejection_counter("entry_direction_check")
                 return
 
+        # 🔴 استراتيجيات "الانعكاس" (زي الارتداد بعد فوليوم التصريف) مصممة **عمداً**
+        # تتاجر عكس الترند الحالي — هذا جوهر فرضيتها بالضبط، مو خطأ. فرض فلاتر
+        # التوافق مع الاتجاه/الكفاءة الاتجاهية عليها يلغي الاستراتيجية من الأساس.
+        _reversal_strategies = {"climactic_reversal"}
+
         # 🆕 فلتر 1: العملة ما تتحرك عشوائياً — نسبة الكفاءة الاتجاهية (Efficiency Ratio).
         # 📊 إصلاح مبني على بيانات فعلية: كان الفلتر يفحص k1h (20 ساعة كاملة!) رغم إن
         # أغلب استراتيجياتنا سكالب سريع يتداول على فريم 5-15 دقيقة — مقياس بطيء جداً
@@ -285,7 +290,7 @@ class ScannerState:
         # الرفض (365 من 421)، بدون دليل تحسّن جودة يوازي هالانخفاض الهائل بالكمية.
         # الآن يفحص فريم 15 دقيقة (مطابق فعلياً لطبيعة الاستراتيجيات)، والحد خُفّف
         # بشكل كبير (0.28 → 0.15) — يرفض بس الحركة العشوائية المتطرفة جداً.
-        if settings.get("is_efficiency_filter_enabled", True):
+        if settings.get("is_efficiency_filter_enabled", True) and strategy_key not in _reversal_strategies:
             from .analyzer import efficiency_ratio
             er = efficiency_ratio(k15m, period=16)
             min_er = settings.get("min_efficiency_ratio", 0.15)
@@ -300,7 +305,8 @@ class ScannerState:
         # ضعيف (العملة تتحرك بمنطقها الخاص، مو تابعة للبيتكوين)، نتجاهل شرط توافق
         # البيتكوين، لكن **نشترط بدلاً منه توافق اتجاه العملة نفسها العام (4 ساعات)**
         # — لأن فك الارتباط بالسوق العام ما يعني عدم أهمية اتجاه العملة نفسها.
-        if settings.get("is_market_alignment_filter_enabled", True) and not symbol.startswith("BTC"):
+        if (settings.get("is_market_alignment_filter_enabled", True) and not symbol.startswith("BTC")
+                and strategy_key not in _reversal_strategies):
             side_trend = "صاعد" if result.side == "Long" else "هابط"
             is_decoupled = False
             correlation = None

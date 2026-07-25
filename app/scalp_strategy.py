@@ -94,6 +94,20 @@ def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
         _log("❌ فلتر تأكيد الحجم", f"{vol_ratio:.2f}x أقل من الحد الأدنى (1.2x) — رفض", False)
         return None
 
+    # 🔴 إصلاح مبني على مراجعة حقيقية لصفقة فعلية: فوليوم متطرف جداً (>8x) على شمعة
+    # "تأكيد الاستمرار"، خصوصاً بعد حركة ممتدة أصلاً، غالباً يعني تصريف/استنزاف
+    # (Climactic Volume) — علامة انعكاس محتملة، مو تأكيد استمرار حقيقي. كان الكود
+    # يعتبر أي فوليوم عالٍ "تأكيد إيجابي" بلا سقف، فنشترط الآن تأكيد إضافي حقيقي
+    # (ضغط متداولين فعلي متوافق) قبل قبول فوليوم متطرف كذا، بدل قبوله أعمى.
+    if vol_ratio > 8.0:
+        taker_ok = micro is not None and micro.taker_pressure is not None and (
+            (side == "Long" and micro.taker_pressure > 0.15) or (side == "Short" and micro.taker_pressure < -0.15)
+        )
+        _log("⚠️ فوليوم متطرف جداً (>8x) — قد يكون استنزاف/انعكاس، يحتاج تأكيد ضغط متداولين إضافي", taker_ok, taker_ok)
+        if not taker_ok:
+            _log("❌ فلتر الفوليوم المتطرف", f"{vol_ratio:.2f}x عالٍ جداً بدون تأكيد ضغط متداولين حقيقي — رفض احترازي (احتمال استنزاف لا استمرار)", False)
+            return None
+
     taker_pressure = micro.taker_pressure if micro else None
     order_flow_ok = True
     if taker_pressure is not None:

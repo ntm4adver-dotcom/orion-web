@@ -526,6 +526,20 @@ def analyze_explosive_breakout(
         return None
     _log("✅ كل الشروط تحققت — تم توليد إشارة", side, True)
 
+    # 🔴 إصلاح مبني على مراجعة صفقات حقيقية فشلت (نفس النمط المكتشف بالسكالب
+    # الدقيق): فوليوم متطرف جداً (>10x) حتى على شمعة اختراق قد يعني تصريف/استنزاف
+    # (Climactic Volume) بدل تأكيد اختراق حقيقي صحي، خصوصاً لو الاختراق نفسه يأتي
+    # بعد حركة ممتدة أصلاً. نشترط تأكيد ضغط متداولين حقيقي قبل قبول فوليوم متطرف
+    # كذا كـ"تأكيد إيجابي"، بدل قبوله أعمى.
+    if vol_ratio > 10.0:
+        taker_confirms_extreme = taker_pressure is not None and (
+            (side == "Long" and taker_pressure > 0.15) or (side == "Short" and taker_pressure < -0.15)
+        )
+        _log("⚠️ فوليوم متطرف جداً (>10x) على شمعة الاختراق — يحتاج تأكيد ضغط متداولين إضافي", taker_confirms_extreme, taker_confirms_extreme)
+        if not taker_confirms_extreme:
+            _log("❌ فلتر الفوليوم المتطرف", f"{vol_ratio:.2f}x عالٍ جداً بدون تأكيد ضغط متداولين حقيقي — رفض احترازي (احتمال استنزاف لا اختراق حقيقي)", False)
+            return None
+
     measured_move = max_high_c - min_low_c
     tp1 = entry_price + max(effective_atr * 2.5, measured_move) if side == "Long" else entry_price - max(effective_atr * 2.5, measured_move)
     tp2 = entry_price + max(effective_atr * 5.0, measured_move * 2.0) if side == "Long" else entry_price - max(effective_atr * 5.0, measured_move * 2.0)

@@ -134,14 +134,30 @@ def analyze_fabio_scalper(symbol: str, k4h, k1h, k15m, k5m, k_daily,
             _log("❌ القرار النهائي", "فيه اختلال لكن الاتجاه المرصود يعاكس جهة الكسر — رفض", False)
             return None
     else:
-        # نموذج التوازن (Mean Reversion): لمس حافة منطقة القيمة والعدوانية ترفض تجاوزها
+        # 🔴 إصلاح مبني على مراجعة صفقة حقيقية فشلت (CAPUSDT): بروفايل الفوليوم
+        # (POC/VAH/VAL) يُحسب من نفس الفترة الحديثة، وممكن يكون كامل هذي الفترة
+        # نفسها جزء من ترند حقيقي ممتد (هبوط أو صعود قوي)، لا سوق "متوازن" فعلياً —
+        # فيصنّفها الكود غلط "توازن" ويقترح ارتداد يعاكس الترند الحقيقي بالكامل.
+        # نتحقق الآن: هل فيه ترند حقيقي قوي على فريم 4 ساعات (نافذة أوسع من نفس
+        # فترة البروفايل) يعاكس اتجاه الارتداد المقترح؟ لو نعم، نرفض — هذا مو
+        # توازن حقيقي، هذا جزء من ترند مستمر.
+        broader_window = k4h[-20:] if len(k4h) >= 20 else k4h
+        broader_change_pct = ((broader_window[-1].close - broader_window[0].close) / broader_window[0].close * 100) if broader_window else 0
+        _log("فحص الترند الأوسع (4 ساعات) قبل قبول نموذج التوازن", f"{broader_change_pct:.2f}%")
+
         if nearest_name == "VAH" and direction == "Short":
+            if broader_change_pct > 8.0:
+                _log("❌ رفض: فيه ترند صاعد حقيقي وممتد (4 ساعات)، مو توازن فعلي — بيع الارتداد يعاكس ترند حقيقي", broader_change_pct, False)
+                return None
             side = "Short"
             entry_price = nearest_price
             stop_loss = nearest_price + _safe_buffer(1.0)
             take_profit = profile["poc"]
             model = "توازن/ارتداد (Mean Reversion)"
         elif nearest_name == "VAL" and direction == "Long":
+            if broader_change_pct < -8.0:
+                _log("❌ رفض: فيه ترند هابط حقيقي وممتد (4 ساعات)، مو توازن فعلي — شراء الارتداد يعاكس ترند حقيقي", broader_change_pct, False)
+                return None
             side = "Long"
             entry_price = nearest_price
             stop_loss = nearest_price - _safe_buffer(1.0)
