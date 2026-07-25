@@ -112,6 +112,22 @@ def fetch_top_symbols(limit_count: int = 10) -> List[str]:
     return fetch_screened_symbols("top_volume", limit_count)
 
 
+# 📊 نفس الإصلاح المطبَّق بعميل OKX — يضمن إدراج العملات الكبرى الأساسية دائماً
+_CORE_MAJOR_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"]
+
+
+def _ensure_major_coins(result: List[str], liquid_pool: List[dict], limit_count: int) -> List[str]:
+    liquid_symbols = {c["symbol"] for c in liquid_pool}
+    majors_available = [m for m in _CORE_MAJOR_SYMBOLS if m in liquid_symbols]
+    final = list(majors_available[:limit_count])
+    for s in result:
+        if len(final) >= limit_count:
+            break
+        if s not in final:
+            final.append(s)
+    return final
+
+
 def fetch_screened_symbols(mode: str, limit_count: int = 10) -> List[str]:
     """يجيب قائمة عملات مصنَّفة حسب معيار مختار:
     - top_volume: الأعلى سيولة وحجم تداول (السلوك الافتراضي، كما هو)
@@ -187,7 +203,7 @@ def fetch_screened_symbols(mode: str, limit_count: int = 10) -> List[str]:
 
         if result:
             last_error.pop("_top_symbols", None)
-            return result
+            return _ensure_major_coins(result, liquid_pool, limit_count)
         return _default_symbols()[:limit_count]
     except Exception as e:
         last_error["_top_symbols"] = str(e)

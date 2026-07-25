@@ -125,16 +125,6 @@
       </p>
 
       <div style="margin-top:14px;">
-        <label>نسبة المخاطرة (R) المطلوبة لتفعيل وقف التعادل</label>
-        <input type="number" step="0.1" min="0.1" max="2" name="breakeven_trigger_r_multiple" value="{{ s.breakeven_trigger_r_multiple }}">
-        <p class="muted" style="margin-top:6px; font-size:12px; line-height:1.8;">
-          القيمة 0.5 (الافتراضية) تعني: بمجرد الصفقة تحقق ربح عائم = نصف مخاطرتها الأصلية، ينتقل الوقف
-          لنقطة الدخول. كانت هذي القيمة 1.0 (مخاطرة كاملة) بالأول، لكن فحص سجل صفقات فعلي أظهر **صفر
-          تفعيل** أبداً — لأن أغلب الانعكاسات تصير قبل ما توصل لـ1R كامل. خفّضناها بناءً على هذا الدليل.
-        </p>
-      </div>
-
-      <div style="margin-top:14px;">
         <label>الحد الأدنى لنقاط قوة الإشارة (0 إلى 100)</label>
         <input type="number" step="1" min="0" max="100" name="min_signal_score" value="{{ s.min_signal_score }}">
         <p class="muted" style="margin-top:6px; font-size:12px; line-height:1.8;">

@@ -494,22 +494,14 @@ class ScannerState:
                     db.update_max_drawdown_if_worse(signal["id"], adverse_pct)
                     db.update_max_favorable_if_better(signal["id"], favorable_pct)
 
-                    # 🎯 وقف التعادل التلقائي (Breakeven Stop) — إصلاح مباشر مبني على
-                    # تحليل بيانات إنتاج فعلية: نسبة كبيرة من الخسائر (36-48% حسب
-                    # الاستراتيجية) كانت أصلاً صفقات رابحة قبل ما تنعكس وتضرب الوقف
-                    # الأصلي كاملاً. بمجرد ما الربح العائم يعادل نسبة من المخاطرة
-                    # الأصلية (0.5R افتراضياً)، ننقل الوقف لنقطة الدخول.
-                    # 🔴 تعديل مبني على دليل حقيقي: كان الحد "1R كامل" — فحص سجل 96
-                    # صفقة أظهر **صفر تفعيل** أبداً، لأن الانعكاسات تصير قبل ما توصل
-                    # لـ1R كامل بكثير. خفّضناه لـ0.5R (نصف المخاطرة) عشان يصير عملياً
-                    # قابل للتفعيل فعلاً، بدل ما يبقى شرط نظري ما يتحقق أبداً.
+                    # 🎯 وقف التعادل التلقائي (Breakeven Stop) — بمجرد ما الربح العائم
+                    # يعادل المخاطرة الأصلية كاملة (1R)، ننقل الوقف لنقطة الدخول.
                     initial_risk = signal.get("initial_risk_pct") or 0
-                    breakeven_trigger_ratio = settings.get("breakeven_trigger_r_multiple", 0.5)
                     if (settings.get("is_breakeven_stop_enabled", True) and not signal.get("breakeven_activated")
-                            and initial_risk > 0 and favorable_pct >= initial_risk * breakeven_trigger_ratio):
+                            and initial_risk > 0 and favorable_pct >= initial_risk):
                         db.activate_breakeven(signal["id"], entry_price)
                         signal["stop_loss"] = entry_price  # نحدّث النسخة المحلية بنفس هذي الدورة أيضاً
-                        db.add_log(f"🎯 [{signal['symbol']}] تفعيل وقف التعادل تلقائياً — الصفقة حققت ربح {breakeven_trigger_ratio}R، الوقف انتقل لنقطة الدخول لحماية الأرباح.")
+                        db.add_log(f"🎯 [{signal['symbol']}] تفعيل وقف التعادل تلقائياً — الصفقة حققت ربح 1R، الوقف انتقل لنقطة الدخول لحماية الأرباح.")
 
                 if signal["side"] == "Long":
                     if live_price <= signal["stop_loss"]:

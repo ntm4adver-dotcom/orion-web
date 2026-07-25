@@ -418,6 +418,28 @@ def fetch_top_symbols(limit_count: int = 10) -> List[str]:
     return fetch_screened_symbols("top_volume", limit_count)
 
 
+# 📊 إصلاح مبني على بيانات فعلية: فحص حقيقي لـ4 أيام متتالية (35 عملة مختلفة تداول
+# عليها البوت) أظهر **صفر عملة كبرى واحدة** — لأن الترتيب بالفوليوم الخام بس يخلي
+# عملات الميم أثناء موجات المضاربة (حجم تداول مؤقت ضخم) تتصدر على حساب BTC/ETH/SOL
+# رغم إن سيولتها الحقيقية (عمق دفتر الأوامر) وموثوقية أنماطها الفنية أضعف بكثير.
+_CORE_MAJOR_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"]
+
+
+def _ensure_major_coins(result: List[str], liquid_pool: List[dict], limit_count: int) -> List[str]:
+    """يضمن إدراج العملات الكبرى الأساسية (لو حققت شرط السيولة الأدنى أصلاً) بأول
+    قائمة الفحص دائماً، ثم يكمل الباقي بترتيب المعيار المختار (حجم/تحرك/تمويل/OI)
+    — بدون ما يغيّر إجمالي عدد العملات المفحوصة (limit_count) عن المعتاد."""
+    liquid_symbols = {c["symbol"] for c in liquid_pool}
+    majors_available = [m for m in _CORE_MAJOR_SYMBOLS if m in liquid_symbols]
+    final = list(majors_available[:limit_count])
+    for s in result:
+        if len(final) >= limit_count:
+            break
+        if s not in final:
+            final.append(s)
+    return final
+
+
 def fetch_screened_symbols(mode: str, limit_count: int = 10) -> List[str]:
     """يجيب قائمة عملات مصنَّفة حسب معيار مختار — انظر التوثيق بعميل Binance لشرح كل وضع.
     ملاحظة: وضع oi_spike بـ OKX أدق من Binance لأنه يستخدم نداء واحد مجمّع لكل العملات
@@ -500,7 +522,7 @@ def fetch_screened_symbols(mode: str, limit_count: int = 10) -> List[str]:
 
         if result:
             last_error.pop("_top_symbols", None)
-            return result
+            return _ensure_major_coins(result, liquid_pool, limit_count)
         last_error["_top_symbols"] = "لم يتم إيجاد عملات مطابقة لشروط السيولة على OKX"
         return _default_symbols()[:limit_count]
     except Exception as e:

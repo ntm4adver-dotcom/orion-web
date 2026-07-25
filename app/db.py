@@ -58,7 +58,6 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "min_btc_correlation": 0.35,  # الحد الأدنى لمعامل الارتباط بالبيتكوين قبل اعتبار العملة "فكّت الارتباط"
     "is_breakeven_stop_enabled": 1,  # نقل الوقف لنقطة الدخول تلقائياً عند تحقيق ربح 1R
     "min_signal_score": 0,  # الحد الأدنى لنقاط قوة الإشارة (0-100) — 0 يعني بدون فلترة إضافية
-    "breakeven_trigger_r_multiple": 0.5,  # نسبة المخاطرة (R) المطلوبة لتفعيل وقف التعادل (0.5 = نصف المخاطرة)
     "combined_enabled_strategies": "",  # قائمة مفاتيح استراتيجيات مفصولة بفاصلة تعمل داخل وضع "الكل معاً" — فاضي = الكل مفعّل
     # OKX trading connection
     "okx_api_key": "",
