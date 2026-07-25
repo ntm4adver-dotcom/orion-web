@@ -50,14 +50,14 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "gdrive_refresh_token": "",
     "gdrive_folder_id": "",
     "is_gdrive_backup_enabled": 0,
-    "active_strategy": "explosive_breakout",  # 'explosive_breakout' أو 'ict_smart_sweep'
-    "ict_ignore_kill_zone": 0,  # تجاهل قيد جلسة التداول (Kill Zone) لاستراتيجية ICT — تشغيلها بأي وقت
+    "active_strategy": "explosive_breakout",
     "is_efficiency_filter_enabled": 1,  # رفض العملات اللي تتحرك عشوائياً/جانبياً (نسبة الكفاءة الاتجاهية)
     "min_efficiency_ratio": 0.15,  # الحد الأدنى لنسبة الكفاءة الاتجاهية (0-1، كل ما زاد كل ما كان الاتجاه أنظف) — خُفّض من 0.28 بناءً على دليل رفض مفرط فعلي
     "is_market_alignment_filter_enabled": 1,  # رفض أي صفقة تعاكس اتجاه السوق العام (البيتكوين)
     "min_btc_correlation": 0.35,  # الحد الأدنى لمعامل الارتباط بالبيتكوين قبل اعتبار العملة "فكّت الارتباط"
     "is_breakeven_stop_enabled": 1,  # نقل الوقف لنقطة الدخول تلقائياً عند تحقيق ربح 1R
     "min_signal_score": 0,  # الحد الأدنى لنقاط قوة الإشارة (0-100) — 0 يعني بدون فلترة إضافية
+    "breakeven_trigger_r_multiple": 1.0,  # نسبة المخاطرة (R) المطلوبة لتفعيل وقف التعادل — يتحكم فيها المستخدم يدوياً
     "combined_enabled_strategies": "",  # قائمة مفاتيح استراتيجيات مفصولة بفاصلة تعمل داخل وضع "الكل معاً" — فاضي = الكل مفعّل
     # OKX trading connection
     "okx_api_key": "",
@@ -194,7 +194,7 @@ def get_settings() -> Dict[str, Any]:
                  "is_cancel_if_exceeds_target_enabled", "okx_is_testnet", "okx_is_auto_trading_enabled",
                  "okx_is_max_leverage_enabled", "is_adaptive_stop_loss_enabled", "is_instant_entry_enabled",
                  "is_coin_learning_enabled", "is_auto_backup_enabled", "is_gdrive_backup_enabled",
-                 "ict_ignore_kill_zone", "is_efficiency_filter_enabled", "is_market_alignment_filter_enabled",
+                 "is_efficiency_filter_enabled", "is_market_alignment_filter_enabled",
                  "is_breakeven_stop_enabled"):
         settings[bkey] = bool(int(settings.get(bkey, 0)))
     return settings

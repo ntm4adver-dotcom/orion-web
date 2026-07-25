@@ -12,7 +12,6 @@
 كلها تقرأ من هذا السجل تلقائياً).
 """
 from .analyzer import analyze
-from .supply_demand_strategy import analyze_supply_demand_reversal
 from .stop_hunt_strategy import analyze_stop_hunt
 from .scalp_strategy import analyze_scalp_precision
 from .liquidation_strategy import analyze_liquidation_hunter
@@ -30,6 +29,7 @@ from .confluence_strategy import analyze_confluence
 #    الانفجار السعري كما هي بدون أي تعديل. بما إن ICT ما توفرت ولا مرة، فهذي
 #    الاستراتيجية أصبحت فعلياً **مطابقة تماماً** لاستراتيجية الانفجار السعري —
 #    تكرار حرفي بدون أي قيمة مضافة حقيقية.
+#  - supply_demand_reversal: أُزيلت بطلب صريح بعد مراجعة الأداء الحقيقي.
 
 # كل استراتيجية: مفتاح فريد -> {label: الاسم المعروض, fn: دالة التحليل}
 # توقيع دالة التحليل الموحّد: fn(symbol, k4h, k1h, k15m, k5m, k_daily, micro=None) -> Optional[AnalysisResult]
@@ -37,10 +37,6 @@ STRATEGY_REGISTRY = {
     "explosive_breakout": {
         "label": "⚡ الانفجار السعري (Explosive Breakout Hunter) — الأصلية",
         "fn": analyze,
-    },
-    "supply_demand_reversal": {
-        "label": "🔄 انعكاس عرض/طلب (يعكس اتجاه الانفجار السعري من أقرب منطقة Supply/Demand)",
-        "fn": analyze_supply_demand_reversal,
     },
     "stop_hunt": {
         "label": "🎣 صيد الاستوبات والمؤسسات (Stop-Loss Hunting)",

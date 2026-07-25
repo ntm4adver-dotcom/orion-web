@@ -495,13 +495,14 @@ class ScannerState:
                     db.update_max_favorable_if_better(signal["id"], favorable_pct)
 
                     # 🎯 وقف التعادل التلقائي (Breakeven Stop) — بمجرد ما الربح العائم
-                    # يعادل المخاطرة الأصلية كاملة (1R)، ننقل الوقف لنقطة الدخول.
+                    # يعادل نسبة R اللي تحددها أنت يدوياً بالإعدادات (افتراضياً 1.0 = مخاطرة كاملة)
                     initial_risk = signal.get("initial_risk_pct") or 0
+                    breakeven_r = settings.get("breakeven_trigger_r_multiple", 1.0)
                     if (settings.get("is_breakeven_stop_enabled", True) and not signal.get("breakeven_activated")
-                            and initial_risk > 0 and favorable_pct >= initial_risk):
+                            and initial_risk > 0 and favorable_pct >= initial_risk * breakeven_r):
                         db.activate_breakeven(signal["id"], entry_price)
                         signal["stop_loss"] = entry_price  # نحدّث النسخة المحلية بنفس هذي الدورة أيضاً
-                        db.add_log(f"🎯 [{signal['symbol']}] تفعيل وقف التعادل تلقائياً — الصفقة حققت ربح 1R، الوقف انتقل لنقطة الدخول لحماية الأرباح.")
+                        db.add_log(f"🎯 [{signal['symbol']}] تفعيل وقف التعادل تلقائياً — الصفقة حققت ربح {breakeven_r}R، الوقف انتقل لنقطة الدخول لحماية الأرباح.")
 
                 if signal["side"] == "Long":
                     if live_price <= signal["stop_loss"]:
