@@ -127,7 +127,47 @@ async function loadStrategyPerformance(){
 
 loadLearning();
 loadStrategyPerformance();
+loadCalibration();
 setInterval(loadLearning, 10000);
 setInterval(loadStrategyPerformance, 10000);
+</script>
+
+<div class="card">
+  <h3>🎯 معايرة الاحتمالية (هل رقم الثقة له معنى حقيقي؟)</h3>
+  <p class="muted" style="font-size:12px; line-height:1.8;">
+    يقارن "الاحتمالية المعلنة" وقت إنشاء كل صفقة بنسبة النجاح <b>الحقيقية</b> الفعلية لكل فئة. لو معايرة
+    الاستراتيجية سليمة، المفروض الفئات الأعلى (86-90%، 91%+) تعطي نسبة نجاح فعلية أعلى من الفئات الأدنى.
+    لو النمط معكوس أو عشوائي، هذا دليل إن رقم الثقة بهذي الاستراتيجية غير موثوق ويحتاج مراجعة جذرية.
+  </p>
+  <div id="calibration-container"></div>
+</div>
+
+<script>
+async function loadCalibration(){
+  try {
+    const r = await fetch('/api/probability-calibration');
+    const data = await r.json();
+    const container = document.getElementById('calibration-container');
+    if (!data.length){
+      container.innerHTML = '<p class="muted">ما فيه بيانات كافية بعد.</p>';
+      return;
+    }
+    container.innerHTML = data.map(strat => {
+      const rows = strat.buckets.map(b => {
+        if (b.actual_win_rate === null) return '';
+        const color = b.actual_win_rate >= 50 ? 'var(--green)' : (b.actual_win_rate >= 25 ? 'var(--gold)' : 'var(--red)');
+        return `<div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--dark-accent); font-size:13px;">
+          <span>الفئة المعلنة: <b>${b.declared_range}</b> (${b.total_trades} صفقة)</span>
+          <span style="color:${color}; font-weight:800;">نجاح فعلي: ${b.actual_win_rate}%</span>
+        </div>`;
+      }).join('');
+      return `<div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--dark-accent);">
+        <b>${strat.label}</b>
+        ${rows || '<p class="muted" style="font-size:12px;">ما فيه صفقات مغلقة كافية.</p>'}
+      </div>`;
+    }).join('');
+  } catch(e) {}
+}
+setInterval(loadCalibration, 15000);
 </script>
 {% endblock %}

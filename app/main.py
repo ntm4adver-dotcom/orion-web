@@ -543,6 +543,16 @@ def api_strategy_performance(request: Request):
     return perf
 
 
+@app.get("/api/probability-calibration")
+def api_probability_calibration(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    calibration = db.get_probability_calibration()
+    for c in calibration:
+        c["label"] = strategy_label(c["strategy"]) if c["strategy"] != "غير محدد" else "غير محدد"
+    return calibration
+
+
 @app.get("/api/learning")
 def api_learning(request: Request):
     if not is_logged_in(request):
@@ -632,6 +642,8 @@ def api_signals_export(request: Request):
         "strategy_performance": strategy_perf,
         "coin_performance": coin_perf,
         "drawdown_analysis": _drawdown_analysis(signals),
+        "probability_calibration": db.get_probability_calibration(),
+        "probability_calibration_note": "يقارن الاحتمالية المعلنة وقت إنشاء كل صفقة بنسبة النجاح الحقيقية الفعلية لكل فئة — يكشف هل رقم الثقة له معنى حقيقي أو لأ",
         "filter_rejection_counts": db.get_rejection_counts(),
         "filter_rejection_note": "عدد مرات رفض كل فلتر لإشارة منذ آخر تصفير — يفيد لتقييم هل حدود الفلاتر الحالية متشددة أو متساهلة فعلياً",
         "active_settings_snapshot": safe_settings,

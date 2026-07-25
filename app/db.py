@@ -308,6 +308,53 @@ def get_signal_stats() -> Dict[str, Any]:
     }
 
 
+def get_probability_calibration() -> List[Dict[str, Any]]:
+    """يقارن 'الاحتمالية المعلنة' وقت إنشاء كل صفقة بنسبة النجاح **الحقيقية** الفعلية
+    لكل فئة (70-75%، 76-80%...) ولكل استراتيجية — يكشف هل رقم الثقة المعروض له
+    معنى حقيقي، أو مجرد نقاط نظرية بدون علاقة فعلية بالنتيجة. لو نسبة النجاح
+    الحقيقية أقل بكثير من الفئة المعلنة (أو ما تتزايد مع زيادة الفئة)، هذا دليل
+    إن صيغة حساب الاحتمالية بهذي الاستراتيجية تحتاج مراجعة جذرية، مو بس تعديل رقم."""
+    with _lock, _connect() as conn:
+        rows = conn.execute("""
+            SELECT strategy, probability, status FROM trade_signals
+            WHERE status IN ('HIT_TP','HIT_SL')
+        """).fetchall()
+
+    buckets_def = [(70, 75), (76, 80), (81, 85), (86, 90), (91, 100)]
+    by_strategy: Dict[str, Dict] = {}
+    for row in rows:
+        strat = row["strategy"] or "غير محدد"
+        prob = row["probability"] or 0
+        bucket_label = None
+        for lo, hi in buckets_def:
+            if lo <= prob <= hi:
+                bucket_label = f"{lo}-{hi}%"
+                break
+        if bucket_label is None:
+            continue
+        by_strategy.setdefault(strat, {})
+        by_strategy[strat].setdefault(bucket_label, {"total": 0, "wins": 0})
+        by_strategy[strat][bucket_label]["total"] += 1
+        if row["status"] == "HIT_TP":
+            by_strategy[strat][bucket_label]["wins"] += 1
+
+    result = []
+    for strat, buckets in by_strategy.items():
+        bucket_list = []
+        for lo, hi in buckets_def:
+            label = f"{lo}-{hi}%"
+            if label in buckets:
+                total = buckets[label]["total"]
+                wins = buckets[label]["wins"]
+                bucket_list.append({
+                    "declared_range": label,
+                    "total_trades": total,
+                    "actual_win_rate": round((wins / total) * 100.0, 1) if total > 0 else None,
+                })
+        result.append({"strategy": strat, "buckets": bucket_list})
+    return result
+
+
 def get_signals(limit: int = 300) -> List[Dict[str, Any]]:
     with _lock, _connect() as conn:
         cur = conn.execute("SELECT * FROM trade_signals ORDER BY id DESC LIMIT ?", (limit,))
