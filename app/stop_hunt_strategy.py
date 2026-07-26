@@ -69,11 +69,22 @@ def _detect_stop_hunt(klines: List[Kline], lookback: int = 50, vol_period: int =
                 continue  # لسا ما فيه شمعة تأكيد بعد شمعة السحب — مبكر جداً، ننتظر
             if any(k.low < lowest_low for k in follow_through):
                 continue  # رجع السعر وكسر القاع مرة ثانية = فشل النمط، مو ارتداد حقيقي
+            # 🔴 تقوية إضافية: نشترط استعادة حقيقية واضحة (مو مجرد صمود بالكاد فوق
+            # القاع بهامش ضئيل) — آخر إغلاق لازم يكون أعلى من القاع بمسافة معقولة
+            # (15% من مدى الشمعة على الأقل)، دليل قناعة سوقية حقيقية بالارتداد
+            if klines[-1].close < lowest_low + candle_range * 0.15:
+                continue
 
-            # نقطة الدخول: المستوى الهيكلي نفسه (القاع المكسور) بدل إغلاق الشمعة الحالي —
-            # نتوقع إعادة اختبار (Retest) لهذا المستوى قبل الاستمرار صعوداً، فندخل هناك
-            # بدل مطاردة السعر بعد الارتداد. هامش صغير فوق القاع مباشرة لضمان واقعية التنفيذ.
-            entry_price = lowest_low + candle_range * 0.05
+            # 🔴 إصلاح جذري لنقطة الدخول (بطلب صريح بعد مراجعة صفقات حقيقية فشلت):
+            # كان الدخول قريب جداً من القاع المسحوب نفسه (5% بس من مدى الشمعة فوقه)
+            # بينما الوقف تحته مباشرة — أي إعادة اختبار طبيعية لنفس المستوى (شائعة
+            # جداً بعد صيد استوبات، السعر غالباً يرجع يفحص نفس النقطة قبل ما يكمل)
+            # تضرب الدخول والوقف مع بعض قبل ما تبدأ الحركة الحقيقية. بما إننا الآن
+            # نشترط استعادة قوية وواضحة فعلاً (15% من مدى الشمعة) قبل حتى ما نصل
+            # هنا، ندخل عند سعر الاستعادة **المؤكَّد** نفسه (إغلاق آخر شمعة) بدل
+            # الرجوع للقاع القديم — هذا يوسّع مسافة الوقف طبيعياً بحركة سعرية حقيقية
+            # فعلاً حصلت، بدل هامش تعسفي ضيق، ويعطي مساحة حقيقية تنجو من الاختبار.
+            entry_price = klines[-1].close
             stop_loss = current.low - buffer
             risk = entry_price - stop_loss
             if risk <= 0:
@@ -92,8 +103,10 @@ def _detect_stop_hunt(klines: List[Kline], lookback: int = 50, vol_period: int =
                 continue
             if any(k.high > highest_high for k in follow_through):
                 continue  # رجع السعر وكسر القمة مرة ثانية = فشل النمط
+            if klines[-1].close > highest_high - candle_range * 0.15:
+                continue  # استعادة بالكاد، مو رفض حقيقي واضح
 
-            entry_price = highest_high - candle_range * 0.05
+            entry_price = klines[-1].close
             stop_loss = current.high + buffer
             risk = stop_loss - entry_price
             if risk <= 0:
@@ -141,6 +154,18 @@ def analyze_stop_hunt(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         _log("❌ فلتر الفائدة المفتوحة (OI)", f"تغيّر OI={oi_change_pct:.2f}% (أقل من -1.5%) — رفض", False)
         return None
     _log("الفائدة المفتوحة (OI) تغيّر", f"{oi_change_pct:.2f}%" if oi_change_pct is not None else "غير متوفرة")
+
+    # 🔴 إصلاح مبني على مراجعة أداء حقيقي (0% نجاح من 5 صفقات متتالية): ضغط
+    # المتداولين الفعليين كان مجرد مكافأة اختيارية بالاحتمالية، بدون أي دور حقيقي
+    # برفض الصفقة. نصف الخسائر أظهرت انعكاس حقيقي (تحرك لصالحنا ثم رجع) — دليل إن
+    # الاتجاه كان صح أحياناً لكن بدون قناعة سوقية فعلية كافية وقت الدخول. نجعله
+    # الآن بوابة إلزامية: نرفض لو ضغط المتداولين يعاكس اتجاه الصفقة بوضوح.
+    taker_pressure_gate = micro.taker_pressure if micro else None
+    if taker_pressure_gate is not None:
+        opposed = (side == "Long" and taker_pressure_gate < -0.1) or (side == "Short" and taker_pressure_gate > 0.1)
+        if opposed:
+            _log("❌ بوابة ضغط المتداولين الإلزامية", f"{taker_pressure_gate:.2f} يعاكس اتجاه الصفقة بوضوح — رفض", False)
+            return None
 
     probability = 78
     if signal["volume_ratio"] >= 2.0:
