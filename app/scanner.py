@@ -574,14 +574,41 @@ class ScannerState:
                     tp1_reached = ((signal["side"] == "Long" and live_price >= signal["tp1_price"]) or
                                     (signal["side"] == "Short" and live_price <= signal["tp1_price"]))
                     if tp1_reached:
-                        db.mark_tp1_hit(signal["id"])
+                        # 📊 نحسب مساهمة الهدف الأول فوراً (نصف الكمية × نصف عائد/مخاطرة
+                        # الصفقة) ونضيفها **فوراً** لعدّادات الأداء العامة — بدون ما ننتظر
+                        # إغلاق الصفقة نهائياً، لأن هذا الجزء ربح مؤكَّد ومحقَّق فعلياً.
+                        rr_full = signal.get("rr") or 0.0
+                        tp1_contribution = round(0.5 * (rr_full / 2.0), 3)
+                        db.mark_tp1_hit(signal["id"], tp1_contribution)
                         signal["tp1_hit"] = 1
-                        db.add_log(f"🎯 [{signal['symbol']}] تحقق الهدف الأول! خرجت نصف الكمية بربح — بقية الكمية مستمرة نحو الهدف النهائي.")
+                        db.add_log(f"🎯 [{signal['symbol']}] تحقق الهدف الأول! خرجت نصف الكمية بربح ({tp1_contribution}R محقَّق فوراً) — بقية الكمية مستمرة نحو الهدف النهائي.")
                         if settings["is_telegram_enabled"]:
                             telegram_alert.send_text_alert(
                                 settings["telegram_token"], settings["telegram_chat_ids"],
-                                f"🎯 {signal['symbol']}: تحقق الهدف الأول — خرجت نصف الكمية بربح، والباقي مستمر نحو الهدف النهائي.",
+                                f"🎯 {signal['symbol']}: تحقق الهدف الأول (+{tp1_contribution}R محقَّق) — خرجت نصف الكمية بربح، والباقي مستمر نحو الهدف النهائي.",
                             )
+
+                        # 🔴 بمجرد ما نصف الكمية تخرج بربح مؤكَّد، النصف الباقي يصير
+                        # منطقياً ينتقل لوقف تعادل فوري (حماية رأس المال) — بدل ما ننتظر
+                        # شرط الـR العام المنفصل، اللي ممكن ما يتزامن بالضبط مع الهدف الأول.
+                        if settings.get("is_breakeven_stop_enabled", True) and not signal.get("breakeven_activated"):
+                            db.activate_breakeven(signal["id"], entry_price)
+                            signal["breakeven_activated"] = 1
+                            signal["stop_loss"] = entry_price
+                            db.add_log(f"🎯 [{signal['symbol']}] انتقل وقف النصف الباقي لنقطة الدخول تلقائياً (مرتبط بتحقق الهدف الأول).")
+                            if settings.get("exchange") == "okx" and settings.get("okx_api_key"):
+                                try:
+                                    ok, msg = okx_client.amend_position_stop_loss(
+                                        signal["symbol"], entry_price,
+                                        settings["okx_api_key"], settings["okx_api_secret"], settings["okx_passphrase"],
+                                        settings["okx_is_testnet"],
+                                    )
+                                    if ok:
+                                        db.add_log(f"✅ [{signal['symbol']}] تم تعديل وقف النصف الباقي فعلياً على OKX لنقطة التعادل.")
+                                    elif "لا يوجد مركز" not in msg:
+                                        db.add_log(f"⚠️ [{signal['symbol']}] فشل تعديل وقف النصف الباقي على OKX: {msg}")
+                                except Exception as e:
+                                    db.add_log(f"⚠️ [{signal['symbol']}] خطأ أثناء تعديل وقف النصف الباقي على OKX: {e}")
 
                 if signal["side"] == "Long":
                     if live_price <= signal["stop_loss"]:

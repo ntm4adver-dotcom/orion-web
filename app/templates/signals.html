@@ -186,26 +186,44 @@ function buildBar(sig){
       <div class="bar-line" style="left:${entryPct}%; background:rgba(255,255,255,.5); width:2px;"></div>`;
   }
 
-  // 🎯 علامة الهدف الأول (تقسيم الأهداف) — تظهر بس لو مفعّلة لهذي الصفقة بالذات
-  let tp1Marker = '';
-  let tp1Label = '';
+  // 🎨 تصميم موحّد: كل رقم (سعر) يتوضع فوق نقطته بالضبط على الشريط — بدل صناديق
+  // منفصلة. ألوان متناسقة ومريحة للعين: أحمر=وقف، ذهبي=دخول، أخضر فاتح=هدف أول،
+  // أخضر غامق=هدف نهائي — بدون تعارض ألوان صاخب.
+  const TP1_COLOR = '#6ee7b7';   // أخضر فاتح (Mint) — الهدف الأول
+  const TP2_COLOR = '#16a34a';   // أخضر غامق — الهدف النهائي
+  const STOP_COLOR = '#f87171';  // أحمر هادئ
+  const ENTRY_COLOR = '#fbbf24'; // ذهبي
+
+  function markerHtml(pct, color, label, value, align){
+    const clampedPct = Math.min(99, Math.max(1, pct));
+    const transform = align === 'left' ? '' : (align === 'right' ? 'translateX(-100%)' : 'translateX(-50%)');
+    const leftStyle = align === 'left' ? '0%' : (align === 'right' ? '100%' : `${clampedPct}%`);
+    return `<div style="position:absolute; left:${leftStyle}; transform:${transform}; text-align:center; white-space:nowrap;">
+      <div style="font-size:9px; color:${color}; font-weight:700; opacity:.85;">${label}</div>
+      <div style="font-size:11px; color:${color}; font-weight:800;">${value}</div>
+    </div>`;
+  }
+
+  let tp1MarkerLine = '';
+  let tp1TopLabel = '';
   if (sig.split_targets_used && sig.tp1_price > 0 && denom !== 0) {
     const tp1Pct = Math.min(100, Math.max(0, (sig.tp1_price - sig.stop_loss) / denom * 100));
-    const tp1Color = sig.tp1_hit ? 'var(--green)' : '#a855f7';
-    tp1Marker = `<div class="bar-line" style="left:${tp1Pct}%; background:${tp1Color}; width:3px; box-shadow:0 0 4px ${tp1Color};"></div>`;
-    tp1Label = `<span style="position:absolute; left:${tp1Pct}%; transform:translateX(-50%); top:-16px; color:${tp1Color}; font-size:10px; font-weight:800; white-space:nowrap;">${sig.tp1_hit ? '✅ TP1' : '🎯 TP1'}</span>`;
+    const tp1LineColor = sig.tp1_hit ? TP2_COLOR : TP1_COLOR;
+    tp1MarkerLine = `<div class="bar-line" style="left:${tp1Pct}%; background:${tp1LineColor}; width:3px; box-shadow:0 0 4px ${tp1LineColor};"></div>`;
+    tp1TopLabel = markerHtml(tp1Pct, sig.tp1_hit ? TP2_COLOR : TP1_COLOR, sig.tp1_hit ? '✅ الهدف الأول' : '🎯 الهدف الأول', fmt(sig.tp1_price), 'center');
   }
+
+  const topLabels = `
+    ${markerHtml(0, STOP_COLOR, 'وقف الخسارة', sig.stop_loss > 0 ? fmt(sig.stop_loss) : '—', 'left')}
+    ${markerHtml(entryPct, ENTRY_COLOR, 'الدخول', fmt(sig.entry_price), 'center')}
+    ${tp1TopLabel}
+    ${markerHtml(100, TP2_COLOR, sig.split_targets_used ? 'الهدف النهائي' : 'الهدف', fmt(sig.take_profit), 'right')}`;
 
   return `
     <div class="bar-ltr-wrap" style="direction:ltr;">
-      <div class="bar-labels" style="position:relative; height:${sig.split_targets_used ? '30px' : '16px'};">
-        <span style="position:absolute; left:0;">Stop</span>
-        <span style="position:absolute; left:${entryPct}%; transform:translateX(-50%); color:var(--gold);">Entry</span>
-        <span style="position:absolute; right:0; color:var(--green);">${sig.split_targets_used ? 'TP2 (نهائي)' : 'Target (TP)'}</span>
-        ${tp1Label}
-      </div>
-      <div class="bar-track">${segments}${tp1Marker}</div>
-      ${sig.split_targets_used ? `<div class="muted" style="text-align:center; font-size:10px; margin-top:4px;">🎯 صفقة مقسّمة الأهداف — نصف الكمية عند TP1، والنصف الثاني عند TP2</div>` : ''}
+      <div style="position:relative; height:${sig.split_targets_used ? '34px' : '30px'}; margin-bottom:6px;">${topLabels}</div>
+      <div class="bar-track">${segments}${tp1MarkerLine}</div>
+      ${sig.split_targets_used ? `<div class="muted" style="text-align:center; font-size:10px; margin-top:4px;">🎯 صفقة مقسّمة — نصف الكمية بالهدف الأول، والنصف الثاني بالهدف النهائي</div>` : ''}
     </div>`;
 }
 
@@ -317,23 +335,10 @@ function renderSignals(){
       </div>` : ''}
       ${sig.split_targets_used ? `
       <div style="text-align:center; margin-bottom:6px;">
-        <span style="display:inline-block; background:rgba(168,85,247,.15); color:#a855f7; border:1px solid rgba(168,85,247,.35); padding:3px 10px; border-radius:8px; font-size:11px; font-weight:800;">
+        <span style="display:inline-block; background:rgba(110,231,183,.12); color:#0f9d6c; border:1px solid rgba(110,231,183,.35); padding:3px 10px; border-radius:8px; font-size:11px; font-weight:800;">
           🎯 صفقة مقسّمة الأهداف (Split Targets)
         </span>
       </div>` : ''}
-      <div class="levels-row">
-        <div class="level-box"><div class="lbl">سعر الدخول</div><div class="val">${fmt(sig.entry_price)}</div></div>
-        ${sig.split_targets_used ? `
-        <div class="level-box" style="border:1px solid ${sig.tp1_hit ? 'rgba(34,197,94,.4)' : 'rgba(168,85,247,.4)'};">
-          <div class="lbl">${sig.tp1_hit ? '✅ الهدف الأول (تحقق)' : '🎯 الهدف الأول (نصف الكمية)'}</div>
-          <div class="val" style="color:${sig.tp1_hit ? 'var(--green)' : '#a855f7'};">${fmt(sig.tp1_price)}</div>
-        </div>
-        <div class="level-box"><div class="lbl">الهدف الثاني (نهائي)</div><div class="val" style="color:var(--green);">${fmt(sig.take_profit)}</div></div>
-        ` : `
-        <div class="level-box"><div class="lbl">الهدف (TP)</div><div class="val" style="color:var(--green);">${fmt(sig.take_profit)}</div></div>
-        `}
-        <div class="level-box"><div class="lbl">وقف الخسارة (SL)</div><div class="val" style="color:var(--red);">${sig.stop_loss > 0 ? fmt(sig.stop_loss) : '—'}</div></div>
-      </div>
       <div class="bar-wrap">${buildBar(sig)}</div>
       ${sig.split_targets_used && sig.actual_r_achieved !== null && sig.actual_r_achieved !== undefined ? `
       <div class="muted" style="text-align:center; font-size:11px; margin-top:6px;">

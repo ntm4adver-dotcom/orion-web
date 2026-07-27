@@ -129,7 +129,8 @@ def init_db():
                 tp1_price REAL DEFAULT 0,
                 tp1_hit INTEGER DEFAULT 0,
                 split_targets_used INTEGER DEFAULT 0,
-                actual_r_achieved REAL DEFAULT NULL
+                actual_r_achieved REAL DEFAULT NULL,
+                partial_r_banked REAL DEFAULT 0
             )
         """)
         # هجرة آمنة: إضافة عمود strategy لو قاعدة البيانات كانت موجودة قبل هذا التحديث
@@ -157,6 +158,8 @@ def init_db():
                 conn.execute("ALTER TABLE trade_signals ADD COLUMN split_targets_used INTEGER DEFAULT 0")
             if "actual_r_achieved" not in existing_cols:
                 conn.execute("ALTER TABLE trade_signals ADD COLUMN actual_r_achieved REAL DEFAULT NULL")
+            if "partial_r_banked" not in existing_cols:
+                conn.execute("ALTER TABLE trade_signals ADD COLUMN partial_r_banked REAL DEFAULT 0")
         except Exception:
             pass
         conn.execute("""
@@ -259,11 +262,14 @@ def add_signal(signal: Dict[str, Any]) -> int:
         return cur.lastrowid
 
 
-def mark_tp1_hit(signal_id: int):
+def mark_tp1_hit(signal_id: int, partial_r: float = 0.0):
     """يسجّل إن الهدف الأول تحقق (نصف الكمية خرجت بربح) — الصفقة تبقى نشطة
-    وتُتابَع لبقية الكمية نحو الهدف الثاني أو وقف الخسارة."""
+    وتُتابَع لبقية الكمية نحو الهدف الثاني أو وقف الخسارة. يخزّن مقدار العائد
+    الجزئي المكتسب فوراً (partial_r) عشان يظهر بالإحصائيات العامة **مباشرة**،
+    بدون انتظار إغلاق الصفقة نهائياً — هذا الجزء ربح محقَّق فعلاً."""
     with _lock, _connect() as conn:
-        conn.execute("UPDATE trade_signals SET tp1_hit=1 WHERE id=?", (signal_id,))
+        conn.execute("UPDATE trade_signals SET tp1_hit=1, partial_r_banked=? WHERE id=?",
+                     (partial_r, signal_id))
         conn.commit()
 
 
@@ -321,6 +327,13 @@ def get_signal_stats() -> Dict[str, Any]:
             SELECT status, rr, actual_r_achieved FROM trade_signals
             WHERE status IN ('HIT_TP','HIT_SL')
         """).fetchall()
+        # 📊 صفقات لسا نشطة لكن تحقق لها الهدف الأول (تقسيم الأهداف) — نضيف
+        # مساهمتها الجزئية المكتسبة فوراً للعدادات العامة، بدون انتظار الإغلاق
+        # النهائي، لأن هذا الجزء ربح محقَّق فعلاً (نصف الكمية خرجت بالفعل)
+        active_partial_rows = conn.execute("""
+            SELECT partial_r_banked FROM trade_signals
+            WHERE status = 'ACTIVE' AND tp1_hit = 1
+        """).fetchall()
 
     total_win_r = 0.0
     total_loss_r = 0.0
@@ -336,6 +349,9 @@ def get_signal_stats() -> Dict[str, Any]:
             total_win_r += (row["rr"] or 0.0)
         else:
             total_loss_r += 1.0  # كل خسارة = 1R بالتعريف، نجمعها موجبة ونعرضها سالبة لاحقاً
+
+    for row in active_partial_rows:
+        total_win_r += (row["partial_r_banked"] or 0.0)
 
     wins = counts.get("HIT_TP", 0)
     losses = counts.get("HIT_SL", 0)  # خسائر حقيقية فقط — التعادل ما يُحسب هنا
@@ -431,6 +447,10 @@ def get_strategy_performance() -> List[Dict[str, Any]]:
                    status, rr, actual_r_achieved
             FROM trade_signals WHERE status IN ('HIT_TP','HIT_SL')
         """).fetchall()
+        active_partial_rows = conn.execute("""
+            SELECT COALESCE(NULLIF(strategy,''), 'غير محدد') AS strategy, partial_r_banked
+            FROM trade_signals WHERE status = 'ACTIVE' AND tp1_hit = 1
+        """).fetchall()
 
     # عائد R: كل خسارة = -1R بالتعريف (مقدار مخاطرتها بالضبط)، وكل ربح = عائد/مخاطرة
     # (rr) المخطط له فعلياً — إلا لو الصفقة مقسّمة الأهداف، فنستخدم العائد الفعلي
@@ -449,6 +469,11 @@ def get_strategy_performance() -> List[Dict[str, Any]]:
             r_by_strategy[strat]["win_r"] += (row["rr"] or 0.0)
         else:
             r_by_strategy[strat]["loss_r"] += 1.0
+
+    for row in active_partial_rows:
+        strat = row["strategy"]
+        r_by_strategy.setdefault(strat, {"win_r": 0.0, "loss_r": 0.0})
+        r_by_strategy[strat]["win_r"] += (row["partial_r_banked"] or 0.0)
 
     for r in rows:
         closed = r["wins"] + r["losses"]

@@ -150,7 +150,10 @@ def amend_position_stop_loss(symbol: str, new_stop_price: float, api_key: str, a
     """يعدّل وقف الخسارة **فعلياً على منصة OKX** لمركز مفتوح حقيقي (وقف التعادل
     التلقائي مثلاً). يتحقق أولاً من وجود مركز فعلي لهذي العملة بالذات — لو ما فيه
     مركز مفتوح (المستخدم ما نفّذ الإشارة فعلياً)، يرجع برسالة واضحة بدون أي محاولة
-    إرسال أمر عبثاً."""
+    إرسال أمر عبثاً.
+    🔴 يعدّل **كل** أوامر الوقف المعلّقة لهذي العملة (مو أول وحدة بس) — ضروري
+    لصفقات تقسيم الأهداف اللي فيها أمرين منفصلين (نصف الكمية لكل وحدة)، كل واحد
+    له أمر وقف/هدف خاص فيه، ولازم الاثنين ينتقلوا لنقطة الدخول مع بعض."""
     inst_id = _to_inst_id(symbol)
 
     positions = fetch_positions(api_key, api_secret, passphrase, is_testnet)
@@ -163,17 +166,27 @@ def amend_position_stop_loss(symbol: str, new_stop_price: float, api_key: str, a
     if not resp or resp.get("code") != "0" or not resp.get("data"):
         return False, "لم يتم إيجاد أمر وقف خسارة/هدف مرتبط بهذا المركز على OKX"
 
-    algo_id = resp["data"][0].get("algoId")
-    if not algo_id:
+    algo_ids = [item.get("algoId") for item in resp["data"] if item.get("algoId")]
+    if not algo_ids:
         return False, "تعذر تحديد رقم أمر الوقف/الهدف المرتبط"
 
-    body = {"instId": inst_id, "algoId": algo_id, "newSlTriggerPx": str(new_stop_price), "newSlOrdPx": "-1"}
-    amend_resp = _request("POST", "/api/v5/trade/amend-algo-order", body, api_key, api_secret, passphrase, is_testnet)
-    if amend_resp and amend_resp.get("code") == "0":
-        return True, "تم تعديل وقف الخسارة بنجاح على OKX"
-    detail = (amend_resp or {}).get("data", [{}])
-    msg = detail[0].get("sMsg") if detail else (amend_resp or {}).get("msg", "خطأ غير معروف")
-    return False, msg or "فشل تعديل الوقف"
+    successes, failures = 0, []
+    for algo_id in algo_ids:
+        body = {"instId": inst_id, "algoId": algo_id, "newSlTriggerPx": str(new_stop_price), "newSlOrdPx": "-1"}
+        amend_resp = _request("POST", "/api/v5/trade/amend-algo-order", body, api_key, api_secret, passphrase, is_testnet)
+        if amend_resp and amend_resp.get("code") == "0":
+            successes += 1
+        else:
+            detail = (amend_resp or {}).get("data", [{}])
+            msg = detail[0].get("sMsg") if detail else (amend_resp or {}).get("msg", "خطأ غير معروف")
+            failures.append(msg or "خطأ غير معروف")
+
+    if successes and not failures:
+        suffix = f" ({successes} أمر معدَّل)" if successes > 1 else ""
+        return True, f"تم تعديل وقف الخسارة بنجاح على OKX{suffix}"
+    if successes and failures:
+        return True, f"تم تعديل {successes} من {len(algo_ids)} أوامر بنجاح، وفشل الباقي: {'; '.join(failures)}"
+    return False, "; ".join(failures) or "فشل تعديل الوقف"
 
 
 def fetch_pending_orders(api_key: str, api_secret: str, passphrase: str, is_testnet: bool) -> List[dict]:
@@ -509,11 +522,43 @@ def fetch_screened_symbols(mode: str, limit_count: int = 10) -> List[str]:
     if not resp or resp.get("code") != "0":
         last_error["_top_symbols"] = (resp or {}).get("msg", "تعذر الاتصال بـ OKX لجلب قائمة العملات") if resp else "تعذر الاتصال بـ OKX لجلب قائمة العملات"
         return _default_symbols()[:limit_count]
+
+    # 🔴 إصلاح جذري (بطلب صريح): عملات مدرجة حديثاً جداً (يوم واحد أو أقل من تاريخ
+    # تداول حقيقي) ممكن تدخل قائمة الفحص لو فوليومها ضخم مؤقتاً (ضجة إدراج جديد)،
+    # رغم إنها ما عندها تاريخ سعري كافٍ لأي تحليل فني حقيقي — وهذا بالضبط سبب تنبيهات
+    # "نقص الشموع" اللي تظهر لاحقاً. نجيب تاريخ إدراج كل عملة دفعة وحدة (نداء واحد
+    # مجمّع لكل العملات) ونستبعد أي عملة أُدرجت قبل أقل من 7 أيام — من الجذر، قبل ما
+    # توصل لمرحلة التحليل أصلاً، لا بس نكتشف النقص بعد فوات الأوان.
+    listing_ages_ok = set()
+    try:
+        inst_resp = _public_get("/api/v5/public/instruments?instType=SWAP")
+        if inst_resp and inst_resp.get("code") == "0":
+            now_ms = int(time.time() * 1000)
+            min_age_ms = 7 * 24 * 60 * 60 * 1000  # 7 أيام كحد أدنى لتاريخ تداول حقيقي
+            for item in inst_resp.get("data", []):
+                list_time = item.get("listTime")
+                inst_id_check = item.get("instId", "")
+                if not list_time:
+                    listing_ages_ok.add(inst_id_check)  # لو ما توفر تاريخ إدراج، ما نستبعدها احترازياً
+                    continue
+                try:
+                    age_ms = now_ms - int(list_time)
+                    if age_ms >= min_age_ms:
+                        listing_ages_ok.add(inst_id_check)
+                except (ValueError, TypeError):
+                    listing_ages_ok.add(inst_id_check)
+    except Exception:
+        listing_ages_ok = None  # فشل الجلب — نتجاهل هذا الفلتر احترازياً بدل ما نمنع كل العملات
+
     try:
         liquid_pool = []
+        excluded_new_listings = 0
         for obj in resp.get("data", []):
             inst_id = obj.get("instId", "")
             if not inst_id.endswith("-USDT-SWAP"):
+                continue
+            if listing_ages_ok is not None and inst_id not in listing_ages_ok:
+                excluded_new_listings += 1
                 continue
             quote_volume = float(obj.get("volCcy24h", 0) or 0)
             last_price = float(obj.get("last", 0) or 0)
@@ -523,6 +568,9 @@ def fetch_screened_symbols(mode: str, limit_count: int = 10) -> List[str]:
             change_pct = ((last_price - open24h) / open24h * 100.0) if open24h > 0 else 0.0
             symbol = inst_id.replace("-USDT-SWAP", "") + "USDT"
             liquid_pool.append({"symbol": symbol, "inst_id": inst_id, "volume": quote_volume, "change_pct": change_pct})
+
+        if excluded_new_listings > 0:
+            last_error["_new_listings_excluded"] = f"استُبعدت {excluded_new_listings} عملة مدرجة حديثاً (أقل من 7 أيام تداول) من قائمة الفحص تلقائياً"
 
         if not liquid_pool:
             last_error["_top_symbols"] = "لم يتم إيجاد عملات مطابقة لشروط السيولة على OKX"
