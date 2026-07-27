@@ -412,6 +412,7 @@ class ScannerState:
             "volume_analysis": result.volume_analysis, "strategy": strategy_key,
             "signal_score": getattr(result, "signal_score", 100.0),
             "score_breakdown": getattr(result, "score_breakdown", None),
+            "split_targets_used": settings.get("is_split_targets_enabled", False),
         })
 
         if settings["is_telegram_enabled"]:
@@ -440,16 +441,32 @@ class ScannerState:
                 settings, result.entry_price, result.stop_loss, available_balance,
             )
 
-            success, message = okx_client.place_order(
-                symbol=result.symbol, side=side_text, quantity_usdt=quantity_usdt,
-                leverage=settings["okx_leverage"], margin_mode=settings["okx_margin_mode"],
-                stop_loss=result.stop_loss, take_profit=result.take_profit,
-                api_key=settings["okx_api_key"], api_secret=settings["okx_api_secret"],
-                passphrase=settings["okx_passphrase"], is_testnet=settings["okx_is_testnet"],
-                is_market_order=settings.get("is_instant_entry_enabled", True),
-                is_max_leverage_enabled=settings.get("okx_is_max_leverage_enabled", False),
-                entry_price=result.entry_price,
-            )
+            # 🎯 تقسيم الأهداف (بطلب صريح) — لو مفعّل، ننفّذ أمرين منفصلين بنصف
+            # الكمية لكل وحدة (نفس منطق التنفيذ اليدوي بالضبط)، بدل أمر واحد بالهدف
+            # الكامل — يطابق التقسيم الداخلي المُتتبَّع بقاعدة البيانات تماماً.
+            if settings.get("is_split_targets_enabled", False):
+                tp1_price = result.entry_price + (result.take_profit - result.entry_price) * 0.5
+                success, message = okx_client.place_split_orders(
+                    symbol=result.symbol, side=side_text, quantity_usdt=quantity_usdt,
+                    leverage=settings["okx_leverage"], margin_mode=settings["okx_margin_mode"],
+                    stop_loss=result.stop_loss, tp1=tp1_price, tp2=result.take_profit,
+                    api_key=settings["okx_api_key"], api_secret=settings["okx_api_secret"],
+                    passphrase=settings["okx_passphrase"], is_testnet=settings["okx_is_testnet"],
+                    is_market_order=settings.get("is_instant_entry_enabled", True),
+                    is_max_leverage_enabled=settings.get("okx_is_max_leverage_enabled", False),
+                    entry_price=result.entry_price,
+                )
+            else:
+                success, message = okx_client.place_order(
+                    symbol=result.symbol, side=side_text, quantity_usdt=quantity_usdt,
+                    leverage=settings["okx_leverage"], margin_mode=settings["okx_margin_mode"],
+                    stop_loss=result.stop_loss, take_profit=result.take_profit,
+                    api_key=settings["okx_api_key"], api_secret=settings["okx_api_secret"],
+                    passphrase=settings["okx_passphrase"], is_testnet=settings["okx_is_testnet"],
+                    is_market_order=settings.get("is_instant_entry_enabled", True),
+                    is_max_leverage_enabled=settings.get("okx_is_max_leverage_enabled", False),
+                    entry_price=result.entry_price,
+                )
             if success:
                 db.add_log(f"✅ [التداول الآلي] تم تنفيذ الصفقة بنجاح: {message}")
             else:
@@ -501,14 +518,56 @@ class ScannerState:
                     db.update_max_favorable_if_better(signal["id"], favorable_pct)
 
                     # 🎯 وقف التعادل التلقائي (Breakeven Stop) — بمجرد ما الربح العائم
-                    # يعادل نسبة R اللي تحددها أنت يدوياً بالإعدادات (افتراضياً 1.0 = مخاطرة كاملة)
+                    # يعادل نسبة R محددة، ننقل الوقف لنقطة الدخول (داخلياً + على OKX
+                    # فعلياً لو فيه مركز مفتوح حقيقي). فيه وضعين:
+                    #  - يدوي: نسبة R ثابتة تحددها بالإعدادات (breakeven_trigger_r_multiple)
+                    #  - تلقائي (بطلب صريح): نصف عائد/مخاطرة **الصفقة نفسها** — صفقة
+                    #    هدفها 6R تتفعّل عند 3R، وصفقة هدفها 4R تتفعّل عند 2R، وهكذا.
                     initial_risk = signal.get("initial_risk_pct") or 0
-                    breakeven_r = settings.get("breakeven_trigger_r_multiple", 1.0)
+                    if settings.get("is_auto_breakeven_half_target_enabled", False):
+                        breakeven_r = (signal.get("rr") or 2.0) / 2.0
+                    else:
+                        breakeven_r = settings.get("breakeven_trigger_r_multiple", 1.0)
                     if (settings.get("is_breakeven_stop_enabled", True) and not signal.get("breakeven_activated")
                             and initial_risk > 0 and favorable_pct >= initial_risk * breakeven_r):
                         db.activate_breakeven(signal["id"], entry_price)
                         signal["stop_loss"] = entry_price  # نحدّث النسخة المحلية بنفس هذي الدورة أيضاً
-                        db.add_log(f"🎯 [{signal['symbol']}] تفعيل وقف التعادل تلقائياً — الصفقة حققت ربح {breakeven_r}R، الوقف انتقل لنقطة الدخول لحماية الأرباح.")
+                        db.add_log(f"🎯 [{signal['symbol']}] تفعيل وقف التعادل تلقائياً — الصفقة حققت ربح {round(breakeven_r,2)}R، الوقف انتقل لنقطة الدخول لحماية الأرباح.")
+
+                        # 🔴 إرسال أمر حقيقي لتعديل وقف الخسارة على منصة OKX — فقط لو
+                        # فيه مركز مفتوح فعلياً لهذي العملة بالذات (ما نرسل أمر عبثاً
+                        # لو المستخدم ما نفّذ هذي الإشارة فعلياً على المنصة). الدالة
+                        # نفسها تتحقق من وجود المركز أولاً قبل أي محاولة تعديل.
+                        if settings.get("exchange") == "okx" and settings.get("okx_api_key"):
+                            try:
+                                ok, msg = okx_client.amend_position_stop_loss(
+                                    signal["symbol"], entry_price,
+                                    settings["okx_api_key"], settings["okx_api_secret"], settings["okx_passphrase"],
+                                    settings["okx_is_testnet"],
+                                )
+                                if ok:
+                                    db.add_log(f"✅ [{signal['symbol']}] تم تعديل وقف الخسارة فعلياً على OKX لنقطة التعادل.")
+                                elif "لا يوجد مركز" not in msg:
+                                    db.add_log(f"⚠️ [{signal['symbol']}] تفعّل التعادل داخلياً، لكن فشل تعديله على OKX: {msg}")
+                            except Exception as e:
+                                db.add_log(f"⚠️ [{signal['symbol']}] خطأ أثناء محاولة تعديل الوقف على OKX: {e}")
+
+                # 🎯 تقسيم الأهداف (بطلب صريح): لو مفعّل وما تحقق الهدف الأول بعد،
+                # نتحقق هل وصل السعر له — لو نعم، نسجّل "نصف الكمية" وتستمر الصفقة
+                # نشطة لبقية الكمية نحو الهدف الثاني أو وقف الخسارة، بدون ما نغلقها.
+                if (signal.get("split_targets_used") and not signal.get("tp1_hit")
+                        and signal.get("tp1_price")):
+                    tp1_reached = ((signal["side"] == "Long" and live_price >= signal["tp1_price"]) or
+                                    (signal["side"] == "Short" and live_price <= signal["tp1_price"]))
+                    if tp1_reached:
+                        db.mark_tp1_hit(signal["id"])
+                        signal["tp1_hit"] = 1
+                        db.add_log(f"🎯 [{signal['symbol']}] تحقق الهدف الأول! خرجت نصف الكمية بربح — بقية الكمية مستمرة نحو الهدف النهائي.")
+                        if settings["is_telegram_enabled"]:
+                            telegram_alert.send_text_alert(
+                                settings["telegram_token"], settings["telegram_chat_ids"],
+                                f"🎯 {signal['symbol']}: تحقق الهدف الأول — خرجت نصف الكمية بربح، والباقي مستمر نحو الهدف النهائي.",
+                            )
 
                 if signal["side"] == "Long":
                     if live_price <= signal["stop_loss"]:
@@ -529,8 +588,28 @@ class ScannerState:
             transition_key = f"{signal['id']}_{new_status}"
             should_notify = changed and not already_notified and transition_key not in self._notified_transitions
 
-            db.update_signal_status(signal["id"], new_status, live_price,
-                                     new_status if should_notify else signal["last_notified_status"])
+            # 🎯 حساب العائد الفعلي (R) للصفقات المقسّمة اللي تحقق فيها الهدف الأول
+            # فعلاً قبل الإغلاق النهائي — يجمع مساهمة كل نصف من الصفقة بدقة، بدل
+            # الافتراض العام (رابح=RR كامل / خاسر=-1R) اللي ما يراعي التقسيم
+            if changed and signal.get("split_targets_used") and signal.get("tp1_hit"):
+                rr_full = signal.get("rr") or 0.0
+                tp1_contribution = 0.5 * (rr_full / 2.0)  # نصف الكمية بنصف الـR
+                if new_status == "HIT_TP":
+                    actual_r = tp1_contribution + 0.5 * rr_full  # النصف الثاني وصل الهدف الكامل
+                elif new_status in ("HIT_SL", "BREAKEVEN"):
+                    actual_r = tp1_contribution - 0.5 * 1.0  # النصف الثاني ضرب وقف كامل (-1R على نصف الكمية)
+                else:
+                    actual_r = None
+                if actual_r is not None:
+                    db.close_signal_with_actual_r(signal["id"], new_status, live_price, actual_r,
+                                                   new_status if should_notify else signal["last_notified_status"])
+                    db.add_log(f"📊 [{signal['symbol']}] صفقة مقسّمة الأهداف أُغلقت — العائد الفعلي المجمّع: {actual_r:.2f}R")
+                else:
+                    db.update_signal_status(signal["id"], new_status, live_price,
+                                             new_status if should_notify else signal["last_notified_status"])
+            else:
+                db.update_signal_status(signal["id"], new_status, live_price,
+                                         new_status if should_notify else signal["last_notified_status"])
 
             if should_notify:
                 self._notified_transitions.add(transition_key)

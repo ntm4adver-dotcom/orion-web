@@ -145,6 +145,37 @@ def fetch_positions(api_key: str, api_secret: str, passphrase: str, is_testnet: 
     return out
 
 
+def amend_position_stop_loss(symbol: str, new_stop_price: float, api_key: str, api_secret: str,
+                              passphrase: str, is_testnet: bool) -> Tuple[bool, str]:
+    """يعدّل وقف الخسارة **فعلياً على منصة OKX** لمركز مفتوح حقيقي (وقف التعادل
+    التلقائي مثلاً). يتحقق أولاً من وجود مركز فعلي لهذي العملة بالذات — لو ما فيه
+    مركز مفتوح (المستخدم ما نفّذ الإشارة فعلياً)، يرجع برسالة واضحة بدون أي محاولة
+    إرسال أمر عبثاً."""
+    inst_id = _to_inst_id(symbol)
+
+    positions = fetch_positions(api_key, api_secret, passphrase, is_testnet)
+    has_position = any(p["inst_id"] == inst_id and p["pos"] != 0 for p in positions)
+    if not has_position:
+        return False, "لا يوجد مركز مفتوح فعلياً على المنصة لهذي العملة"
+
+    resp = _request("GET", f"/api/v5/trade/orders-algo-pending?instId={inst_id}&ordType=oco",
+                     None, api_key, api_secret, passphrase, is_testnet)
+    if not resp or resp.get("code") != "0" or not resp.get("data"):
+        return False, "لم يتم إيجاد أمر وقف خسارة/هدف مرتبط بهذا المركز على OKX"
+
+    algo_id = resp["data"][0].get("algoId")
+    if not algo_id:
+        return False, "تعذر تحديد رقم أمر الوقف/الهدف المرتبط"
+
+    body = {"instId": inst_id, "algoId": algo_id, "newSlTriggerPx": str(new_stop_price), "newSlOrdPx": "-1"}
+    amend_resp = _request("POST", "/api/v5/trade/amend-algo-order", body, api_key, api_secret, passphrase, is_testnet)
+    if amend_resp and amend_resp.get("code") == "0":
+        return True, "تم تعديل وقف الخسارة بنجاح على OKX"
+    detail = (amend_resp or {}).get("data", [{}])
+    msg = detail[0].get("sMsg") if detail else (amend_resp or {}).get("msg", "خطأ غير معروف")
+    return False, msg or "فشل تعديل الوقف"
+
+
 def fetch_pending_orders(api_key: str, api_secret: str, passphrase: str, is_testnet: bool) -> List[dict]:
     """يجيب الأوامر المعلّقة (Pending) اللي أرسلناها لـOKX كأوامر Limit عند نقطة
     دخول محددة، لكن السعر لسا ما وصلها فتتفعّل — بعكس fetch_positions اللي يجيب
@@ -269,6 +300,36 @@ def calculate_order_quantity_usdt(settings: dict, entry_price: float, stop_loss:
             quantity_usdt = pct_value
 
     return quantity_usdt if quantity_usdt > 0 else 10.0  # قيمة احتياطية آمنة
+
+
+def place_split_orders(symbol: str, side: str, quantity_usdt: float, leverage: int, margin_mode: str,
+                        stop_loss: float, tp1: float, tp2: float, api_key: str, api_secret: str,
+                        passphrase: str, is_testnet: bool, is_market_order: bool = True,
+                        is_max_leverage_enabled: bool = False, entry_price: float = 0.0) -> Tuple[bool, str]:
+    """ينفّذ صفقة مقسّمة الأهداف كأمرين منفصلين حقيقيين على OKX — كل وحدة بنصف
+    الكمية، بنفس الدخول والوقف، لكن بهدف مختلف (tp1 للأمر الأول، tp2 للثاني).
+    هذا يطابق تماماً منطق تقسيم الأهداف الداخلي (نصف الكمية عند كل هدف)."""
+    half_usdt = quantity_usdt / 2.0
+
+    ok1, msg1 = place_order(
+        symbol=symbol, side=side, quantity_usdt=half_usdt, leverage=leverage, margin_mode=margin_mode,
+        stop_loss=stop_loss, take_profit=tp1, api_key=api_key, api_secret=api_secret, passphrase=passphrase,
+        is_testnet=is_testnet, is_market_order=is_market_order, is_max_leverage_enabled=is_max_leverage_enabled,
+        entry_price=entry_price,
+    )
+    ok2, msg2 = place_order(
+        symbol=symbol, side=side, quantity_usdt=half_usdt, leverage=leverage, margin_mode=margin_mode,
+        stop_loss=stop_loss, take_profit=tp2, api_key=api_key, api_secret=api_secret, passphrase=passphrase,
+        is_testnet=is_testnet, is_market_order=is_market_order, is_max_leverage_enabled=is_max_leverage_enabled,
+        entry_price=entry_price,
+    )
+    if ok1 and ok2:
+        return True, f"تم تنفيذ الصفقة المقسّمة بنجاح — نصف الكمية بهدف {tp1:.6g}، والنصف الثاني بهدف {tp2:.6g}"
+    if ok1 and not ok2:
+        return False, f"تم تنفيذ نصف الصفقة الأول بنجاح، لكن فشل النصف الثاني: {msg2}"
+    if not ok1 and ok2:
+        return False, f"تم تنفيذ نصف الصفقة الثاني بنجاح، لكن فشل النصف الأول: {msg1}"
+    return False, f"فشل تنفيذ الصفقة المقسّمة بالكامل: {msg1} / {msg2}"
 
 
 def place_order(symbol: str, side: str, quantity_usdt: float, leverage: int, margin_mode: str,

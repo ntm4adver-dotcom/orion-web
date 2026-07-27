@@ -303,6 +303,11 @@ function renderSignals(){
         &nbsp;|&nbsp;
         📉 أقصى تراجع: <b style="color:var(--red);">${(sig.max_drawdown_pct||0).toFixed(2)}%</b>
       </div>` : ''}
+      ${sig.split_targets_used ? `
+      <div class="muted" style="text-align:center; font-size:11px; margin-bottom:8px;">
+        🎯 تقسيم الأهداف مفعّل — الهدف الأول: <b style="color:${sig.tp1_hit ? 'var(--green)' : 'var(--text-sec)'};">${fmt(sig.tp1_price)}</b>
+        ${sig.tp1_hit ? ' ✅ تحقق (خرجت نصف الكمية)' : ' (بانتظار الوصول)'}
+      </div>` : ''}
       <div class="levels-row">
         <div class="level-box"><div class="lbl">سعر الدخول</div><div class="val">${fmt(sig.entry_price)}</div></div>
         <div class="level-box"><div class="lbl">الهدف (TP)</div><div class="val" style="color:var(--green);">${fmt(sig.take_profit)}</div></div>
@@ -325,7 +330,8 @@ function renderSignals(){
         <b>الجودة:</b> ${sig.quality || '—'}<br>
         <b>السلوك السعري:</b> ${sig.behavior || '—'}<br>
         <b>تحليل الحجم:</b> ${sig.volume_analysis || '—'}<br>
-        <b>عائد/مخاطرة R:R:</b> ${sig.rr ? '1:' + sig.rr : 'غير محدد'}<br>
+        <b>عائد/مخاطرة R:R (المخطط):</b> ${sig.rr ? '1:' + sig.rr : 'غير محدد'}<br>
+        ${sig.actual_r_achieved !== null && sig.actual_r_achieved !== undefined ? `<b>العائد الفعلي المحقق (صفقة مقسّمة):</b> <span style="color:${sig.actual_r_achieved>=0?'var(--green)':'var(--red)'};">${sig.actual_r_achieved>=0?'+':''}${sig.actual_r_achieved.toFixed(2)}R</span><br>` : ''}
         <b>💯 نقاط قوة الإشارة:</b> ${sig.signal_score !== undefined && sig.signal_score !== null ? sig.signal_score + ' / 100' : '—'}
         ${renderScoreBreakdown(sig.score_breakdown)}
       </div>
@@ -360,7 +366,7 @@ async function executeSignal(sig){
   if (!confirm(`تأكيد تنفيذ صفقة ${sig.symbol} (${sig.side}) على OKX؟`)) return;
   const r = await fetch('/api/signals/execute', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({symbol: sig.symbol, side: sig.side, entry_price: sig.entry_price, stop_loss: sig.stop_loss, take_profit: sig.take_profit})
+    body: JSON.stringify({symbol: sig.symbol, side: sig.side, entry_price: sig.entry_price, stop_loss: sig.stop_loss, take_profit: sig.take_profit, tp1_price: sig.tp1_price, split_targets_used: sig.split_targets_used})
   });
   const data = await r.json();
   alert(data.message);
