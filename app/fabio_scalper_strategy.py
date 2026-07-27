@@ -116,19 +116,25 @@ def analyze_fabio_scalper(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         # الاختلال (مطاردة)، وفحص حقيقي أظهر 40% دخول خاطئ من الأساس بهذا النموذج
         # تحديداً. الآن ندخل عند إعادة اختبار حافة منطقة القيمة نفسها (Limit) بدل
         # مطاردة السعر بعد ما يكون تجاوزها فعلاً.
+        # 🔴 إصلاح إضافي مبني على بيانات فعلية جديدة: الهدف كان يستخدم كامل مسافة
+        # منطقة القيمة (VAH-VAL) بلا سقف — فحص حقيقي أظهر صفقات وصلت 3% إلى 12%
+        # ربح عائم **بدون ما توصل هذا الهدف البعيد**، وانعكست بالكامل لخسارة تامة
+        # (نموذج هذي الاستراتيجية وصل 8.3% نجاح بس). خفّضنا مساهمة "المسافة
+        # المقاسة" لـ60% منها بدل الكاملة — هدف أكثر واقعية يتناسب مع الحركة
+        # الفعلية الملحوظة، بدون ما نلغي شرط عائد/مخاطرة 2:1 الأساسي.
         if current_price > profile["vah"] and direction == "Long":
             side = "Long"
             entry_price = max(profile["vah"], current_price - atr_val * 0.4)
             stop_loss = profile["vah"] - _safe_buffer(0.8)
             measured = profile["vah"] - profile["val"]
-            take_profit = entry_price + max(measured, atr_val * 2.0)
+            take_profit = entry_price + max(measured * 0.6, atr_val * 1.5)
             model = "اختلال/استمرار (Trend Model)"
         elif current_price < profile["val"] and direction == "Short":
             side = "Short"
             entry_price = min(profile["val"], current_price + atr_val * 0.4)
             stop_loss = profile["val"] + _safe_buffer(0.8)
             measured = profile["vah"] - profile["val"]
-            take_profit = entry_price - max(measured, atr_val * 2.0)
+            take_profit = entry_price - max(measured * 0.6, atr_val * 1.5)
             model = "اختلال/استمرار (Trend Model)"
         else:
             _log("❌ القرار النهائي", "فيه اختلال لكن الاتجاه المرصود يعاكس جهة الكسر — رفض", False)

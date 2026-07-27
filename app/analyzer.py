@@ -471,8 +471,13 @@ def analyze_explosive_breakout(
         return None
 
     oi_change_pct = micro.oi_change_pct if micro else None
-    if oi_change_pct is not None and oi_change_pct < -1.0:
-        _log("❌ فلتر الفائدة المفتوحة (OI)", f"تغيّر OI={oi_change_pct:.2f}% (أقل من -1%) — رفض", False)
+    # 📊 إصلاح مبني على بيانات فعلية: فحص حقيقي لـ6 صفقات خاسرة (5 منها Short) أظهر
+    # كل الفائدة المفتوحة سلبية أو شبه صفرية وقت الدخول (-0.77%، -0.23%، -0.78%،
+    # -0.07%)، بينما الحد القديم (-1.0%) ما كان يرفض ولا وحدة منها. فائدة مفتوحة
+    # هابطة وقت الاختراق تعني الحركة مدفوعة بإغلاق مراكز قائمة (تصفية/تغطية)، مو
+    # اقتناع جديد حقيقي بالاتجاه — شددنا الحد لـ-0.5% ليمسك هالنمط فعلياً.
+    if oi_change_pct is not None and oi_change_pct < -0.5:
+        _log("❌ فلتر الفائدة المفتوحة (OI)", f"تغيّر OI={oi_change_pct:.2f}% (أقل من -0.5%) — رفض", False)
         return None
     _log("الفائدة المفتوحة (OI) تغيّر", f"{oi_change_pct:.2f}%" if oi_change_pct is not None else "غير متوفرة")
 

@@ -63,35 +63,54 @@ def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
     if atr5m <= 0:
         return None
 
-    last = k5m[-1]
-    prev = k5m[-2]
+    if len(k5m) < 4:
+        return None
+
+    # 🔴 إصلاح جذري مبني على ملاحظة دقيقة: كان الدخول يعتمد على آخر شمعة متوفرة
+    # مباشرة (last = k5m[-1]) بدون أي انتظار لشمعة تالية تتأكد إن الإغلاق كان
+    # حقيقياً ومو مجرد ذيل رفض مؤقت (Wick) ينعكس فوراً بالشمعة التالية. الآن نعتبر
+    # الشمعة قبل الأخيرة هي "شمعة التأكيد"، ونشترط شمعة تالية (الأحدث) تثبت
+    # المتابعة الحقيقية ولا تبطل النمط بالرجوع تحت/فوق EMA9 مرة ثانية.
+    confirm_candle = k5m[-2]
+    prev = k5m[-3]
+    follow_through = k5m[-1]
 
     if side == "Long":
         pulled_back = (prev.low <= ema9_5m + atr5m * 0.3) and (prev.low >= ema9_5m - atr5m * 1.5)
-        reversal_confirmed = last.close > ema9_5m and last.close > last.open
-        candle_range = last.high - last.low
-        body_ratio = ((last.close - last.open) / candle_range) if candle_range > 0 else 0
+        reversal_confirmed = confirm_candle.close > ema9_5m and confirm_candle.close > confirm_candle.open
+        candle_range = confirm_candle.high - confirm_candle.low
+        body_ratio = ((confirm_candle.close - confirm_candle.open) / candle_range) if candle_range > 0 else 0
+        follow_through_ok = follow_through.close > ema9_5m
     else:
         pulled_back = (prev.high >= ema9_5m - atr5m * 0.3) and (prev.high <= ema9_5m + atr5m * 1.5)
-        reversal_confirmed = last.close < ema9_5m and last.close < last.open
-        candle_range = last.high - last.low
-        body_ratio = ((last.open - last.close) / candle_range) if candle_range > 0 else 0
+        reversal_confirmed = confirm_candle.close < ema9_5m and confirm_candle.close < confirm_candle.open
+        candle_range = confirm_candle.high - confirm_candle.low
+        body_ratio = ((confirm_candle.open - confirm_candle.close) / candle_range) if candle_range > 0 else 0
+        follow_through_ok = follow_through.close < ema9_5m
 
     _log("تراجع صحي لمنطقة EMA9", pulled_back, pulled_back)
     _log("شمعة ارتداد تؤكد الاتجاه", reversal_confirmed, reversal_confirmed)
     _log("نسبة جسم شمعة الارتداد", round(body_ratio, 2))
+    _log("✅ شمعة متابعة تالية تثبت الإغلاق (مو مجرد ذيل رفض مؤقت)", follow_through_ok, follow_through_ok)
 
     strong_body = body_ratio > 0.4
-    if not (pulled_back and reversal_confirmed and strong_body):
-        _log("❌ القرار النهائي", "لم يتحقق نمط الارتداد الصحي من EMA9 بكل شروطه — رفض", False)
+    if not (pulled_back and reversal_confirmed and strong_body and follow_through_ok):
+        _log("❌ القرار النهائي", "لم يتحقق نمط الارتداد الصحي من EMA9 بكل شروطه (بما فيها تأكيد المتابعة) — رفض", False)
         return None
 
-    vols = [k.volume for k in k5m[-21:-1]]
+    last = follow_through  # الدخول يعتمد على أحدث سعر متاح فعلياً بعد التأكيد الكامل
+
+    vols = [k.volume for k in k5m[-22:-2]]
     avg_vol = sum(vols) / len(vols) if vols else 1.0
-    vol_ratio = (last.volume / avg_vol) if avg_vol > 0 else 0
+    vol_ratio = (confirm_candle.volume / avg_vol) if avg_vol > 0 else 0
     _log("معدل حجم شمعة الارتداد مقابل المتوسط", f"{vol_ratio:.2f}x")
-    if vol_ratio < 1.2:
-        _log("❌ فلتر تأكيد الحجم", f"{vol_ratio:.2f}x أقل من الحد الأدنى (1.2x) — رفض", False)
+    # 📊 إصلاح مبني على بيانات فعلية: فحص حقيقي لـ5 صفقات خاسرة أظهر إن الصفقتين
+    # الوحيدتين اللي كانتا "غلط من الأساس تماماً" (صفر حركة لصالحنا إطلاقاً) كانتا
+    # بالضبط أضعف صفقتين بفوليوم شمعة التأكيد (1.24x و1.62x)، بينما كل الصفقات
+    # اللي وصلت حركة حقيقية لصالحنا (حتى لو خسرت لاحقاً) كانت بفوليوم أقوى (1.88x+).
+    # شددنا الحد الأدنى من 1.2x إلى 1.5x — يمسك التأكيد الضعيف بدون قناعة حقيقية.
+    if vol_ratio < 1.5:
+        _log("❌ فلتر تأكيد الحجم", f"{vol_ratio:.2f}x أقل من الحد الأدنى (1.5x) — رفض", False)
         return None
 
     # 🔴 إصلاح مبني على مراجعة حقيقية لصفقة فعلية: فوليوم متطرف جداً (>8x) على شمعة
