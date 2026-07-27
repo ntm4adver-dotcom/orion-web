@@ -62,6 +62,17 @@ class ScannerState:
                     return
                 time.sleep(0.5)
 
+    def _seconds_until_next_boundary(self, interval_seconds: int) -> float:
+        """يحسب الثواني المتبقية لأقرب حد زمني متزامن مع الساعة الحقيقية (UTC) —
+        بالضبط زي إغلاق شموع الشارتات. لو الفاصل 60 ثانية (دقيقة)، يرجع الوقت لحد
+        ثانية 00 من أقرب دقيقة جاية. لو 900 ثانية (ربع ساعة)، يرجع الوقت لحد
+        00/15/30/45 دقيقة بالضبط. epoch الأساسي (time.time()) نفسه متزامن أصلاً مع
+        حدود الدقيقة/الساعة بتوقيت UTC، فالباقي (modulo) يعطي التزامن الصحيح مباشرة."""
+        now = time.time()
+        remainder = now % interval_seconds
+        wait_time = interval_seconds - remainder
+        return wait_time if wait_time > 0.5 else wait_time + interval_seconds
+
     def _run_loop(self):
         while not self._stop_flag.is_set():
             try:
@@ -79,9 +90,12 @@ class ScannerState:
             finally:
                 self.is_currently_working = False
 
-            self._wait(max(settings.get("scan_interval_seconds", 30), 5))
+            interval = max(settings.get("scan_interval_seconds", 300), 5)
+            wait_seconds = self._seconds_until_next_boundary(interval)
+            self._wait(wait_seconds)
 
-    def _wait(self, seconds: int):
+    def _wait(self, seconds):
+        seconds = max(1, int(seconds) + 1)  # نقرّب لأعلى لضمان تجاوز الحد الزمني المستهدف فعلياً
         self.countdown_seconds = seconds
         for _ in range(seconds * 2):
             if self._stop_flag.is_set() or self._trigger_immediate.is_set():

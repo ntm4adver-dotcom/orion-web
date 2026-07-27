@@ -6,8 +6,20 @@
     <h3>إعدادات الفحص العامة</h3>
     <div class="row">
       <div>
-        <label>الفاصل الزمني بين كل دورة فحص (ثانية)</label>
-        <input type="number" name="scan_interval_seconds" value="{{ s.scan_interval_seconds }}">
+        <label>الفاصل الزمني بين كل دورة فحص</label>
+        <select name="scan_interval_seconds">
+          <option value="60" {{ 'selected' if s.scan_interval_seconds|int == 60 }}>دقيقة واحدة</option>
+          <option value="300" {{ 'selected' if s.scan_interval_seconds|int == 300 }}>5 دقائق</option>
+          <option value="900" {{ 'selected' if s.scan_interval_seconds|int == 900 }}>ربع ساعة (15 دقيقة)</option>
+          <option value="1800" {{ 'selected' if s.scan_interval_seconds|int == 1800 }}>نصف ساعة (30 دقيقة)</option>
+          <option value="3600" {{ 'selected' if s.scan_interval_seconds|int == 3600 }}>ساعة كاملة</option>
+        </select>
+        <p class="muted" style="margin-top:6px; font-size:12px; line-height:1.8;">
+          الفحص يتزامن تلقائياً مع حدود الساعة الحقيقية (UTC) — بالضبط زي إغلاق الشموع بالشارتات. لو
+          اخترت "دقيقة واحدة"، يبدأ الفحص أول ما تقلب دقيقة جديدة بالساعة (مثلاً 10:05:00، 10:06:00...).
+          لو اخترت "ربع ساعة"، يبدأ عند 00/15/30/45 دقيقة بالضبط. هذا يضمن الفحص يشتغل بنفس منطق
+          إغلاق شموع الفريم المختار تماماً.
+        </p>
       </div>
       <div>
         <label>الحد الأدنى لنسبة النجاح (%)</label>
