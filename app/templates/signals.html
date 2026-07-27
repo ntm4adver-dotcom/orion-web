@@ -80,8 +80,8 @@
 .prob-pill{ padding:4px 10px; border-radius:8px; font-size:12px; font-weight:800; background:rgba(251,191,36,.12); color:var(--gold); margin-inline-end:6px; }
 .sig-mid{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; font-size:13px; }
 .pnl-box{ text-align:center; padding:10px; border-radius:10px; font-weight:800; font-size:15px; margin-bottom:12px; }
-.levels-row{ display:flex; gap:10px; margin-bottom:12px; }
-.level-box{ flex:1; text-align:center; background:#0f1320; border-radius:10px; padding:8px; }
+.levels-row{ display:flex; gap:10px; margin-bottom:12px; flex-wrap:wrap; }
+.level-box{ flex:1; min-width:80px; text-align:center; background:#0f1320; border-radius:10px; padding:8px; }
 .level-box .lbl{ font-size:11px; color:var(--text-sec); margin-bottom:4px; }
 .level-box .val{ font-weight:800; font-size:14px; }
 .bar-wrap{ margin:14px 0 8px; }
@@ -186,14 +186,26 @@ function buildBar(sig){
       <div class="bar-line" style="left:${entryPct}%; background:rgba(255,255,255,.5); width:2px;"></div>`;
   }
 
+  // 🎯 علامة الهدف الأول (تقسيم الأهداف) — تظهر بس لو مفعّلة لهذي الصفقة بالذات
+  let tp1Marker = '';
+  let tp1Label = '';
+  if (sig.split_targets_used && sig.tp1_price > 0 && denom !== 0) {
+    const tp1Pct = Math.min(100, Math.max(0, (sig.tp1_price - sig.stop_loss) / denom * 100));
+    const tp1Color = sig.tp1_hit ? 'var(--green)' : '#a855f7';
+    tp1Marker = `<div class="bar-line" style="left:${tp1Pct}%; background:${tp1Color}; width:3px; box-shadow:0 0 4px ${tp1Color};"></div>`;
+    tp1Label = `<span style="position:absolute; left:${tp1Pct}%; transform:translateX(-50%); top:-16px; color:${tp1Color}; font-size:10px; font-weight:800; white-space:nowrap;">${sig.tp1_hit ? '✅ TP1' : '🎯 TP1'}</span>`;
+  }
+
   return `
     <div class="bar-ltr-wrap" style="direction:ltr;">
-      <div class="bar-labels" style="position:relative; height:16px;">
+      <div class="bar-labels" style="position:relative; height:${sig.split_targets_used ? '30px' : '16px'};">
         <span style="position:absolute; left:0;">Stop</span>
         <span style="position:absolute; left:${entryPct}%; transform:translateX(-50%); color:var(--gold);">Entry</span>
-        <span style="position:absolute; right:0; color:var(--green);">Target (TP)</span>
+        <span style="position:absolute; right:0; color:var(--green);">${sig.split_targets_used ? 'TP2 (نهائي)' : 'Target (TP)'}</span>
+        ${tp1Label}
       </div>
-      <div class="bar-track">${segments}</div>
+      <div class="bar-track">${segments}${tp1Marker}</div>
+      ${sig.split_targets_used ? `<div class="muted" style="text-align:center; font-size:10px; margin-top:4px;">🎯 صفقة مقسّمة الأهداف — نصف الكمية عند TP1، والنصف الثاني عند TP2</div>` : ''}
     </div>`;
 }
 
@@ -304,16 +316,29 @@ function renderSignals(){
         📉 أقصى تراجع: <b style="color:var(--red);">${(sig.max_drawdown_pct||0).toFixed(2)}%</b>
       </div>` : ''}
       ${sig.split_targets_used ? `
-      <div class="muted" style="text-align:center; font-size:11px; margin-bottom:8px;">
-        🎯 تقسيم الأهداف مفعّل — الهدف الأول: <b style="color:${sig.tp1_hit ? 'var(--green)' : 'var(--text-sec)'};">${fmt(sig.tp1_price)}</b>
-        ${sig.tp1_hit ? ' ✅ تحقق (خرجت نصف الكمية)' : ' (بانتظار الوصول)'}
+      <div style="text-align:center; margin-bottom:6px;">
+        <span style="display:inline-block; background:rgba(168,85,247,.15); color:#a855f7; border:1px solid rgba(168,85,247,.35); padding:3px 10px; border-radius:8px; font-size:11px; font-weight:800;">
+          🎯 صفقة مقسّمة الأهداف (Split Targets)
+        </span>
       </div>` : ''}
       <div class="levels-row">
         <div class="level-box"><div class="lbl">سعر الدخول</div><div class="val">${fmt(sig.entry_price)}</div></div>
+        ${sig.split_targets_used ? `
+        <div class="level-box" style="border:1px solid ${sig.tp1_hit ? 'rgba(34,197,94,.4)' : 'rgba(168,85,247,.4)'};">
+          <div class="lbl">${sig.tp1_hit ? '✅ الهدف الأول (تحقق)' : '🎯 الهدف الأول (نصف الكمية)'}</div>
+          <div class="val" style="color:${sig.tp1_hit ? 'var(--green)' : '#a855f7'};">${fmt(sig.tp1_price)}</div>
+        </div>
+        <div class="level-box"><div class="lbl">الهدف الثاني (نهائي)</div><div class="val" style="color:var(--green);">${fmt(sig.take_profit)}</div></div>
+        ` : `
         <div class="level-box"><div class="lbl">الهدف (TP)</div><div class="val" style="color:var(--green);">${fmt(sig.take_profit)}</div></div>
+        `}
         <div class="level-box"><div class="lbl">وقف الخسارة (SL)</div><div class="val" style="color:var(--red);">${sig.stop_loss > 0 ? fmt(sig.stop_loss) : '—'}</div></div>
       </div>
       <div class="bar-wrap">${buildBar(sig)}</div>
+      ${sig.split_targets_used && sig.actual_r_achieved !== null && sig.actual_r_achieved !== undefined ? `
+      <div class="muted" style="text-align:center; font-size:11px; margin-top:6px;">
+        📊 العائد الفعلي المجمّع من كلا الجزئين: <b style="color:${sig.actual_r_achieved>=0?'var(--green)':'var(--red)'};">${sig.actual_r_achieved>=0?'+':''}${sig.actual_r_achieved.toFixed(2)}R</b>
+      </div>` : ''}
       <div class="sig-caption">${captionFor(sig.status)}</div>
       <div class="sig-actions">
         ${canExecute ? `<button class="btn" style="font-size:12px; padding:8px 14px;" onclick='executeSignal(${JSON.stringify(sig)})'>⚡ تنفيذ على OKX</button>` : '<span></span>'}
