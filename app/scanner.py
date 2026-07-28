@@ -183,6 +183,22 @@ class ScannerState:
             btc_trend = None
             btc_klines = None
 
+        # 🌊 مقياس "قوة نظام السوق" (Market Regime Strength) — بطلب صريح، مبني على
+        # اكتشاف حقيقي: فترة سوق بترند هابط واضح وقوي (27 يوليو، 20:00-22:00) أعطت
+        # 80% نجاح لكل الصفقات المتوافقة معه (4 من 4 Short نجحت، الوحيدة المعاكسة
+        # خسرت) — بينما فترات السوق المتذبذب أعطت نتائج ضعيفة جداً. نقيس "نظافة"
+        # الترند العام بنفس مفهوم الكفاءة الاتجاهية (Efficiency Ratio)، لكن على
+        # البيتكوين نفسه بدل عملة فردية — ونزيد الثقة بأي صفقة تتوافق مع ترند قوي.
+        market_regime_er = None
+        try:
+            if btc_klines and len(btc_klines) >= 21:
+                from .analyzer import efficiency_ratio
+                market_regime_er = efficiency_ratio(btc_klines, period=20)
+                regime_label = "قوي ونظيف 💪" if market_regime_er >= 0.4 else ("متوسط" if market_regime_er >= 0.2 else "متذبذب/عشوائي ⚠️")
+                db.add_log(f"🌊 قوة نظام السوق العام: {market_regime_er:.2f} ({regime_label})")
+        except Exception:
+            market_regime_er = None
+
         for idx, symbol in enumerate(symbols):
             if self._stop_flag.is_set():
                 break
@@ -250,7 +266,7 @@ class ScannerState:
                     if result is None:
                         continue
                     matched_any = True
-                    self._process_signal(settings, symbol, strategy_key, result, k4h, k1h, k15m, k5m, btc_trend, btc_klines)
+                    self._process_signal(settings, symbol, strategy_key, result, k4h, k1h, k15m, k5m, btc_trend, btc_klines, market_regime_er)
 
                 if not matched_any:
                     db.add_log(f"▫️ {symbol}: ليس له اتجاه كافٍ حالياً.")
@@ -272,7 +288,7 @@ class ScannerState:
                 f"أو حصل خطأ أثناء التحليل:\n\n{body}",
             )
 
-    def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k15m, k5m, btc_trend=None, btc_klines=None):
+    def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k15m, k5m, btc_trend=None, btc_klines=None, market_regime_er=None):
         # 🔴 تحقق مركزي حرج (يحمي كل الاستراتيجيات دفعة وحدة، حالياً ومستقبلاً):
         # لصفقة Long، نقطة الدخول يجب تكون **أقل من أو تساوي** السعر الحالي (ننتظر
         # السعر ينزل لها = أمر Limit شراء منطقي). لو طلعت أعلى من السعر الحالي، يعني
@@ -296,6 +312,18 @@ class ScannerState:
         # تتاجر عكس الترند الحالي — هذا جوهر فرضيتها بالضبط، مو خطأ. فرض فلاتر
         # التوافق مع الاتجاه/الكفاءة الاتجاهية عليها يلغي الاستراتيجية من الأساس.
         _reversal_strategies = {"climactic_reversal"}
+
+        # 🌊 فلتر اختياري حقيقي (بطلب صريح): يرفض أي صفقة لو نظام السوق العام كان
+        # ضعيف/متذبذب (كفاءة اتجاهية منخفضة على البيتكوين) — بعكس التعزيز اللي
+        # يزيد الثقة بس، هذا الفلتر يرفض فعلياً. مُلغى افتراضياً (0) — فعّله من
+        # الإعدادات لو تبي تمنع التداول تماماً وقت سوق متذبذب بلا اتجاه واضح.
+        if (settings.get("is_market_regime_filter_enabled", False) and market_regime_er is not None
+                and strategy_key not in _reversal_strategies):
+            min_regime = settings.get("min_market_regime_er", 0.3)
+            if market_regime_er < min_regime:
+                db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: نظام السوق العام ضعيف/متذبذب (كفاءة {market_regime_er:.2f} أقل من {min_regime}) — رفض احترازي.")
+                db.increment_rejection_counter("market_regime_filter")
+                return
 
         # 🆕 فلتر 1: العملة ما تتحرك عشوائياً — نسبة الكفاءة الاتجاهية (Efficiency Ratio).
         # 📊 إصلاح مبني على بيانات فعلية: كان الفلتر يفحص k1h (20 ساعة كاملة!) رغم إن
@@ -343,6 +371,18 @@ class ScannerState:
                 db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: الصفقة ({result.side}) تعاكس اتجاه السوق العام (البيتكوين: {btc_trend}) — رفض وقائي.")
                 db.increment_rejection_counter("market_alignment_filter_btc")
                 return
+
+            # 🌊 تعزيز الثقة عند التوافق مع نظام سوق عام قوي ونظيف (بطلب صريح، مبني
+            # على اكتشاف حقيقي: فترة ترند هابط واضح أعطت 80% نجاح). لو الصفقة تتوافق
+            # مع اتجاه البيتكوين **و** السوق العام بكفاءة اتجاهية عالية (ترند نظيف
+            # حقيقي، مو تذبذب)، نزيد الاحتمالية والنقاط قليلاً — تأكيد إضافي واقعي.
+            if (market_regime_er is not None and market_regime_er >= 0.4
+                    and btc_trend and side_trend == btc_trend):
+                boost = min(6, round(market_regime_er * 10))
+                result.prob = min(96, result.prob + boost)
+                result.signal_score = min(100.0, (getattr(result, "signal_score", 100.0) or 100.0) + boost)
+                result.behavior += f" 🌊 [تعزيز: توافق مع نظام سوق عام قوي ونظيف — كفاءة {market_regime_er:.2f}]"
+                db.add_log(f"🌊 [{symbol}/{strategy_key}] تعزيز الثقة +{boost} — الصفقة متوافقة مع نظام سوق عام قوي ونظيف (كفاءة {market_regime_er:.2f}).")
 
         req_prob, learning_msg = learning.effective_threshold(result.symbol, result.side, settings, strategy_key=strategy_key)
         if learning_msg:

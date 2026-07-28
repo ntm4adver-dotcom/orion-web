@@ -57,6 +57,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "min_btc_correlation": 0.35,  # الحد الأدنى لمعامل الارتباط بالبيتكوين قبل اعتبار العملة "فكّت الارتباط"
     "is_breakeven_stop_enabled": 1,  # نقل الوقف لنقطة الدخول تلقائياً عند تحقيق ربح 1R
     "min_signal_score": 0,  # الحد الأدنى لنقاط قوة الإشارة (0-100) — 0 يعني بدون فلترة إضافية
+    "is_market_regime_filter_enabled": 0,  # رفض الصفقات المعاكسة لترند سوق عام ضعيف/متذبذب (فلتر اختياري، مو بس تعزيز)
+    "min_market_regime_er": 0.3,  # الحد الأدنى لكفاءة نظام السوق العام قبل قبول أي صفقة (يُستخدم بس لو الفلتر أعلاه مفعّل)
     "breakeven_trigger_r_multiple": 1.0,  # نسبة المخاطرة (R) المطلوبة لتفعيل وقف التعادل — تُستخدم بس لو الوضع التلقائي أدناه مُلغى
     "is_auto_breakeven_half_target_enabled": 1,  # الافتراضي: تفعيل تلقائي لوقف التعادل عند نصف عائد/مخاطرة الصفقة نفسها
     "is_split_targets_enabled": 0,  # تقسيم الهدف لهدفين: نصف الكمية عند نصف المسافة، والنصف الثاني عند الهدف الكامل
@@ -213,7 +215,7 @@ def get_settings() -> Dict[str, Any]:
                  "is_coin_learning_enabled", "is_auto_backup_enabled", "is_gdrive_backup_enabled",
                  "is_efficiency_filter_enabled", "is_market_alignment_filter_enabled",
                  "is_breakeven_stop_enabled", "is_auto_breakeven_half_target_enabled",
-                 "is_split_targets_enabled"):
+                 "is_split_targets_enabled", "is_market_regime_filter_enabled"):
         settings[bkey] = bool(int(settings.get(bkey, 0)))
     return settings
 
