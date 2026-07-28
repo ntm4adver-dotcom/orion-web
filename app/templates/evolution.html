@@ -110,6 +110,11 @@ async function loadStrategyPerformance(){
   tbody.innerHTML = data.map(p => {
     const netR = p.net_r || 0;
     const ratio = p.loss_to_win_ratio;
+    const totalWinR = p.total_win_r || 0;
+    const totalLossR = p.total_loss_r || 0;
+    // 🔴 نفس إصلاح صفحة الإشارات: نعرض R لو فيه أي مساهمة حقيقية، مو بس لما توجد
+    // صفقة مغلقة كاملة (يشمل مساهمة هدف أول متحقق لصفقة تقسيم أهداف لسا نشطة)
+    const hasRData = p.closed_total > 0 || totalWinR !== 0 || totalLossR !== 0;
     return `
     <tr>
       <td><b>${p.label}</b></td>
@@ -118,7 +123,7 @@ async function loadStrategyPerformance(){
       <td style="color:var(--green);">${p.wins}</td>
       <td style="color:var(--red);">${p.losses}</td>
       <td><b>${p.closed_total > 0 ? p.win_rate + '%' : '—'}</b></td>
-      <td style="color:${netR>=0?'var(--green)':'var(--red)'}; font-weight:800;">${p.closed_total > 0 ? (netR>=0?'+':'')+netR.toFixed(2)+'R' : '—'}</td>
+      <td style="color:${netR>=0?'var(--green)':'var(--red)'}; font-weight:800;">${hasRData ? (netR>=0?'+':'')+netR.toFixed(2)+'R' : '—'}</td>
       <td>${ratio !== null && ratio !== undefined ? '1 : ' + ratio.toFixed(2) : (p.wins===0 && p.losses>0 ? 'خسارة فقط' : '—')}</td>
       <td>${p.effective_threshold}%</td>
     </tr>`;

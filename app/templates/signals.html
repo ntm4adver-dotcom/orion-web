@@ -288,10 +288,14 @@ function renderSignals(){
   const totalWinR = signalStats.total_win_r || 0;
   const totalLossR = signalStats.total_loss_r || 0;
   const netR = signalStats.net_r || 0;
-  document.getElementById('total-win-pct').innerText = signalStats.closed_total > 0 ? '+' + totalWinR.toFixed(2) + 'R' : '—';
-  document.getElementById('total-loss-pct').innerText = signalStats.closed_total > 0 ? totalLossR.toFixed(2) + 'R' : '—';
+  // 🔴 إصلاح: كان الشرط يعتمد على closed_total بس (صفقات مغلقة كاملة) — فيخفي
+  // العائد حتى لو كان محسوباً صح فعلياً من مساهمة جزئية (هدف أول تحقق لصفقة
+  // لسا نشطة/ما انغلقت بعد). الآن نعرض القيمة لو فيه أي مساهمة R حقيقية إطلاقاً.
+  const hasRData = signalStats.closed_total > 0 || totalWinR !== 0 || totalLossR !== 0;
+  document.getElementById('total-win-pct').innerText = hasRData ? '+' + totalWinR.toFixed(2) + 'R' : '—';
+  document.getElementById('total-loss-pct').innerText = hasRData ? totalLossR.toFixed(2) + 'R' : '—';
   const netEl = document.getElementById('net-pct');
-  netEl.innerText = signalStats.closed_total > 0 ? (netR >= 0 ? '+' : '') + netR.toFixed(2) + 'R' : '—';
+  netEl.innerText = hasRData ? (netR >= 0 ? '+' : '') + netR.toFixed(2) + 'R' : '—';
   netEl.style.color = netR >= 0 ? 'var(--green)' : 'var(--red)';
 
   if (currentFilter === 'ACTIVE') list = list.filter(s => s.status === 'ACTIVE');
