@@ -146,10 +146,16 @@ def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
 
     entry_price = last.close
     safe_buffer = max(atr5m * 0.6, entry_price * 0.004)  # الأكبر بين ATR موسَّع أو 0.4% من السعر
+    # 🔴 خلل حقيقي مكتشف بمراجعة عميقة للمنطق (بطلب صريح، مو ترقيع رقم): الوقف كان
+    # يعتمد بس على min/max(prev, last) — **يتجاهل شمعة التأكيد نفسها (confirm_candle)
+    # تماماً**! لو شمعة التأكيد نزلت بذيل تحت قاع شمعة التراجع قبل ما تغلق قوي فوق
+    # EMA9 (نمط شائع جداً — ارتداد حاد من نقطة أعمق)، الوقف المحسوب يطلع فوق مستوى
+    # اتلمس فعلياً أثناء تكوّن النمط، فيصير عرضة لانضراب فوري بأول تذبذب طبيعي —
+    # الآن نحسب الوقف من **الثلاث شموع كاملة** (التراجع + التأكيد + المتابعة).
     if side == "Long":
-        stop_loss = min(prev.low, last.low) - safe_buffer
+        stop_loss = min(prev.low, confirm_candle.low, last.low) - safe_buffer
     else:
-        stop_loss = max(prev.high, last.high) + safe_buffer
+        stop_loss = max(prev.high, confirm_candle.high, last.high) + safe_buffer
 
     risk = abs(entry_price - stop_loss)
     if risk <= 0:

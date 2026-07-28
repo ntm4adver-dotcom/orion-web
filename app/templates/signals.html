@@ -215,15 +215,21 @@ function buildBar(sig){
 
   const topLabels = `
     ${markerHtml(0, STOP_COLOR, 'وقف الخسارة', sig.stop_loss > 0 ? fmt(sig.stop_loss) : '—', 'left')}
-    ${markerHtml(entryPct, ENTRY_COLOR, 'الدخول', fmt(sig.entry_price), 'center')}
     ${tp1TopLabel}
     ${markerHtml(100, TP2_COLOR, sig.split_targets_used ? 'الهدف النهائي' : 'الهدف', fmt(sig.take_profit), 'right')}`;
+
+  // سعر الدخول يتوضع **تحت** الشريط لا فوقه — لتفادي التعارض البصري مع رقم الوقف
+  // لما يكونان قريبين من بعض (شائع بصفقات الوقف الضيق)
+  const bottomLabels = `<div style="position:absolute; left:${Math.min(99, Math.max(1, entryPct))}%; transform:translateX(-50%); text-align:center; white-space:nowrap; top:4px;">
+    <div style="font-size:11px; color:${ENTRY_COLOR}; font-weight:800;">${fmt(sig.entry_price)}</div>
+    <div style="font-size:9px; color:${ENTRY_COLOR}; font-weight:700; opacity:.85;">الدخول</div>
+  </div>`;
 
   return `
     <div class="bar-ltr-wrap" style="direction:ltr;">
       <div style="position:relative; height:${sig.split_targets_used ? '34px' : '30px'}; margin-bottom:6px;">${topLabels}</div>
       <div class="bar-track">${segments}${tp1MarkerLine}</div>
-      ${sig.split_targets_used ? `<div class="muted" style="text-align:center; font-size:10px; margin-top:4px;">🎯 صفقة مقسّمة — نصف الكمية بالهدف الأول، والنصف الثاني بالهدف النهائي</div>` : ''}
+      <div style="position:relative; height:28px; margin-top:2px;">${bottomLabels}</div>
     </div>`;
 }
 
@@ -333,18 +339,11 @@ function renderSignals(){
         &nbsp;|&nbsp;
         📉 أقصى تراجع: <b style="color:var(--red);">${(sig.max_drawdown_pct||0).toFixed(2)}%</b>
       </div>` : ''}
-      ${sig.split_targets_used ? `
-      <div style="text-align:center; margin-bottom:6px;">
-        <span style="display:inline-block; background:rgba(110,231,183,.12); color:#0f9d6c; border:1px solid rgba(110,231,183,.35); padding:3px 10px; border-radius:8px; font-size:11px; font-weight:800;">
-          🎯 صفقة مقسّمة الأهداف (Split Targets)
-        </span>
-      </div>` : ''}
       <div class="bar-wrap">${buildBar(sig)}</div>
       ${sig.split_targets_used && sig.actual_r_achieved !== null && sig.actual_r_achieved !== undefined ? `
       <div class="muted" style="text-align:center; font-size:11px; margin-top:6px;">
         📊 العائد الفعلي المجمّع من كلا الجزئين: <b style="color:${sig.actual_r_achieved>=0?'var(--green)':'var(--red)'};">${sig.actual_r_achieved>=0?'+':''}${sig.actual_r_achieved.toFixed(2)}R</b>
       </div>` : ''}
-      <div class="sig-caption">${captionFor(sig.status)}</div>
       <div class="sig-actions">
         ${canExecute ? `<button class="btn" style="font-size:12px; padding:8px 14px;" onclick='executeSignal(${JSON.stringify(sig)})'>⚡ تنفيذ على OKX</button>` : '<span></span>'}
         <span class="muted" style="cursor:pointer;" onclick="toggleDetails(this, ${sig.id})">ℹ️ تفاصيل التحليل</span>
