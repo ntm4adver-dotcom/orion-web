@@ -58,11 +58,11 @@
       <div class="row" style="gap:8px; margin-top:6px;">
         <label class="toggle-btn" style="flex:1;">
           <input type="radio" name="okx_margin_mode" value="cross" {{ 'checked' if s.okx_margin_mode=='cross' }} style="display:none;" onchange="this.closest('form').querySelectorAll('.mm-btn').forEach(b=>b.classList.remove('active')); this.nextElementSibling.classList.add('active');">
-          <span class="mm-btn {{ 'active' if s.okx_margin_mode=='cross' }}" style="display:block; text-align:center; padding:10px; border-radius:8px; border:1px solid var(--border); cursor:pointer;" onclick="this.previousElementSibling.checked=true;">هامش متقاطع (Cross)</span>
+          <span class="mm-btn {{ 'active' if s.okx_margin_mode=='cross' }}" style="display:block; text-align:center; padding:10px; border-radius:8px; border:1px solid var(--border); cursor:pointer;" onclick="this.previousElementSibling.click();">هامش متقاطع (Cross)</span>
         </label>
         <label class="toggle-btn" style="flex:1;">
           <input type="radio" name="okx_margin_mode" value="isolated" {{ 'checked' if s.okx_margin_mode=='isolated' }} style="display:none;" onchange="this.closest('form').querySelectorAll('.mm-btn').forEach(b=>b.classList.remove('active')); this.nextElementSibling.classList.add('active');">
-          <span class="mm-btn {{ 'active' if s.okx_margin_mode=='isolated' }}" style="display:block; text-align:center; padding:10px; border-radius:8px; border:1px solid var(--border); cursor:pointer;" onclick="this.previousElementSibling.checked=true;">هامش منفصل (Isolated)</span>
+          <span class="mm-btn {{ 'active' if s.okx_margin_mode=='isolated' }}" style="display:block; text-align:center; padding:10px; border-radius:8px; border:1px solid var(--border); cursor:pointer;" onclick="this.previousElementSibling.click();">هامش منفصل (Isolated)</span>
         </label>
       </div>
     </div>
