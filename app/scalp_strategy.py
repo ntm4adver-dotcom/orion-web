@@ -24,7 +24,7 @@
 """
 from typing import Optional, List
 
-from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, ema, _get_bias, build_score_breakdown
+from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, ema, hma, _get_bias, build_score_breakdown
 
 
 def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15m: List[Kline],
@@ -40,9 +40,15 @@ def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
         return None
     _log("عدد الشموع كافٍ", f"5د={len(k5m)}, 15د={len(k15m)}, 1س={len(k1h)}", True)
 
-    closes5m = [k.close for k in k5m]
-    ema9_5m = ema(closes5m, 9)
-    ema21_5m = ema(closes5m, 21)
+    # 🔴 إصلاح جذري (دائرية منطقية خطيرة مكتشفة): كانت EMA9/21 تُحسب من **كل** شموع
+    # 5 دقائق، بما فيها شمعة المتابعة (آخر شمعة) اللي نقارن موقعها لاحقاً بالنسبة
+    # لنفس هذا الخط! يعني الخط المرجعي كان متأثر جزئياً بالنقطة اللي نقيسها بالنسبة
+    # له — دائرية تعطي قراءة مضللة، خصوصاً وقت حركة سعرية حادة بالشمعة الأخيرة.
+    # الآن نحسب EMA من الشموع **قبل** الثلاث شموع المستخدمة بالنمط (تراجع+تأكيد+
+    # متابعة) فقط — خط مرجعي مستقل تماماً وثابت، مو متأثر بالشموع قيد الفحص.
+    closes5m_reference = [k.close for k in k5m[:-3]] if len(k5m) > 3 else [k.close for k in k5m]
+    ema9_5m = hma(closes5m_reference, 9)
+    ema21_5m = hma(closes5m_reference, 21)
     trend5m = "صاعد" if ema9_5m >= ema21_5m else "هابط"
 
     trend15m = _get_bias(k15m)

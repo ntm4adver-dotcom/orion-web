@@ -148,6 +148,39 @@ def ema(closes: List[float], span: int) -> float:
     return ema_val
 
 
+def _wma_series(values: List[float], period: int) -> List[float]:
+    """متوسط متحرك مرجّح (Weighted Moving Average) — يعطي وزن أكبر للقيم الأحدث
+    بشكل خطي متدرّج، أساس حساب Hull Moving Average أدناه."""
+    if period < 1:
+        period = 1
+    weights = list(range(1, period + 1))
+    weight_sum = sum(weights)
+    result = []
+    for i in range(len(values)):
+        if i + 1 < period:
+            result.append(values[i])
+            continue
+        subset = values[i + 1 - period:i + 1]
+        result.append(sum(w * v for w, v in zip(weights, subset)) / weight_sum)
+    return result
+
+
+def hma(closes: List[float], period: int) -> float:
+    """Hull Moving Average — مؤشر مصمم خصيصاً يحل التناقض الكلاسيكي بين "السرعة"
+    و"الاستقرار" اللي تعاني منه EMA: يستجيب أسرع للتغيّرات الحقيقية، لكن بتذبذب
+    أقل بكثير من ضجيج لحظي عادي. يُحسب بأخذ فرق مرجّح بين WMA بنصف الفترة وWMA
+    بالفترة الكاملة، ثم تنعيمه بـWMA على جذر الفترة."""
+    if len(closes) < period:
+        period = max(2, len(closes))
+    half = max(1, period // 2)
+    sqrt_p = max(1, int(round(period ** 0.5)))
+    wma_half = _wma_series(closes, half)
+    wma_full = _wma_series(closes, period)
+    raw = [2 * h - f for h, f in zip(wma_half, wma_full)]
+    hma_series = _wma_series(raw, sqrt_p)
+    return hma_series[-1] if hma_series else (closes[-1] if closes else 0.0)
+
+
 def rsi(closes: List[float], period: int = 14) -> float:
     if len(closes) <= period:
         return 50.0
@@ -262,19 +295,30 @@ def efficiency_ratio(klines: List[Kline], period: int = 20) -> float:
 def _get_bias(klines: List[Kline]) -> str:
     if not klines:
         return "صاعد"
-    closes = [k.close for k in klines]
-    e21 = ema(closes, 21)
-    e50 = ema(closes, 50)
-    return "صاعد" if e21 >= e50 else "هابط"
+    # 🔴 إصلاح جذري (اكتشاف جديد بمراجعة شاملة لكل البيانات): كانت الدالة تستخدم
+    # **كل** الشموع بما فيها آخر شمعة، اللي غالباً **لسا قيد التكوين** وقت الفحص
+    # (ما أغلقت بعد). سعرها اللحظي المتذبذب يدخل بحساب الاتجاه بوزن كبير نسبياً،
+    # فيقلب قرار الاتجاه الرئيسي (صاعد/هابط) بشكل غير مستقر بمجرد تذبذب طبيعي —
+    # بالذات خطير عند نقاط الانعكاس، وهذا يأثر مباشرة على 3 استراتيجيات (فيبوناتشي،
+    # السكالب، ICT). نستبعد الآن آخر شمعة، ونعتمد بس على الشموع **المكتملة فعلياً**.
+    confirmed_klines = klines[:-1] if len(klines) > 1 else klines
+    closes = [k.close for k in confirmed_klines]
+    # 📊 تحسين إضافي: استبدال EMA بـHull Moving Average — يحل تناقض "السرعة مقابل
+    # الاستقرار" الكلاسيكي بـEMA (نفس النوع من عدم الاستقرار اللي اكتشفناه للتو).
+    h21 = hma(closes, 21)
+    h50 = hma(closes, 50)
+    return "صاعد" if h21 >= h50 else "هابط"
 
 
 def daily_trend(klines_daily: List[Kline]) -> str:
     if not klines_daily:
         return "صاعد"
-    closes = [k.close for k in klines_daily]
-    e21 = ema(closes, 21)
-    e50 = ema(closes, 50)
-    return "صاعد" if e21 >= e50 else "هابط"
+    # نفس إصلاحي _get_bias: استبعاد آخر شمعة (قيد التكوين) + HMA بدل EMA
+    confirmed = klines_daily[:-1] if len(klines_daily) > 1 else klines_daily
+    closes = [k.close for k in confirmed]
+    h21 = hma(closes, 21)
+    h50 = hma(closes, 50)
+    return "صاعد" if h21 >= h50 else "هابط"
 
 
 # ---------------------------------------------------------------------------
@@ -401,10 +445,14 @@ def analyze_explosive_breakout(
 
     has_obv_div = check_obv_divergence(k5m)
 
-    closes1h = [k.close for k in k1h]
-    ema21 = ema(closes1h, 21)
-    ema50 = ema(closes1h, 50)
-    h1_trend = "صاعد" if ema21 > ema50 else "هابط"
+    # 🔴 نفس إصلاحي _get_bias/daily_trend، مطبَّقين هنا على الانفجار السعري نفسه —
+    # الاستراتيجية الأساسية اللي يعتمد عليها التوافق وصيد التصفيات: استبعاد آخر
+    # شمعة (قيد التكوين) + HMA بدل EMA (أسرع استجابة وأقل تذبذباً عند الانعكاس)
+    confirmed_1h = k1h[:-1] if len(k1h) > 1 else k1h
+    closes1h = [k.close for k in confirmed_1h]
+    h21_1h = hma(closes1h, 21)
+    h50_1h = hma(closes1h, 50)
+    h1_trend = "صاعد" if h21_1h > h50_1h else "هابط"
 
     rsi_val = rsi(closes5m, 14)
     rsi_prev = rsi(closes5m[:-1], 14)
