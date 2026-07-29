@@ -313,14 +313,24 @@ class ScannerState:
         # التوافق مع الاتجاه/الكفاءة الاتجاهية عليها يلغي الاستراتيجية من الأساس.
         _reversal_strategies = {"climactic_reversal"}
 
-        # 🌊 فلتر اختياري حقيقي (بطلب صريح): يرفض أي صفقة لو نظام السوق العام كان
-        # ضعيف/متذبذب (كفاءة اتجاهية منخفضة على البيتكوين) — بعكس التعزيز اللي
-        # يزيد الثقة بس، هذا الفلتر يرفض فعلياً. مُلغى افتراضياً (0) — فعّله من
-        # الإعدادات لو تبي تمنع التداول تماماً وقت سوق متذبذب بلا اتجاه واضح.
+        # 🌊 فلتر اختياري حقيقي (بطلب صريح، طُوِّر بعد اكتشاف نمط متكرر: صفقات تعاكس
+        # ترند سوق عام قوي تفشل بكثرة رغم نظافة الحركة). الفلتر الآن ينسّق مع اتجاه
+        # الصفقة نفسها، مو بس "نظافة الحركة" بمعزل عن الاتجاه:
+        #  - ترند قوي ونظيف + الصفقة تعاكسه = رفض أقوى (محاربة ترند قوي، الأخطر)
+        #  - سوق متذبذب/ضعيف = رفض عادي بغض النظر عن الاتجاه (زي السابق)
+        #  - ترند قوي ونظيف + الصفقة متوافقة = قبول (وتحصل على تعزيز الثقة تلقائياً)
         if (settings.get("is_market_regime_filter_enabled", False) and market_regime_er is not None
                 and strategy_key not in _reversal_strategies):
             min_regime = settings.get("min_market_regime_er", 0.3)
-            if market_regime_er < min_regime:
+            side_trend_check = "صاعد" if result.side == "Long" else "هابط"
+            fighting_strong_trend = (market_regime_er >= min_regime and btc_trend
+                                      and side_trend_check != btc_trend)
+            choppy_market = market_regime_er < min_regime
+            if fighting_strong_trend:
+                db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: الصفقة ({result.side}) تحارب ترند سوق عام قوي ونظيف (كفاءة {market_regime_er:.2f}، اتجاه البيتكوين: {btc_trend}) — رفض احترازي أقوى.")
+                db.increment_rejection_counter("market_regime_filter_fighting_trend")
+                return
+            if choppy_market:
                 db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: نظام السوق العام ضعيف/متذبذب (كفاءة {market_regime_er:.2f} أقل من {min_regime}) — رفض احترازي.")
                 db.increment_rejection_counter("market_regime_filter")
                 return
@@ -409,7 +419,11 @@ class ScannerState:
                 db.increment_rejection_counter("volume_filter")
                 return
 
-        if settings["is_vwap_filter_enabled"]:
+        # 🔴 تعارض حقيقي مكتشف (بسؤال مباشر من المستخدم): فلترا VWAP ومشتري 4 ساعات
+        # يفترضان توافق الصفقة مع الاتجاه السائد الحديث — بالضبط عكس فرضية استراتيجية
+        # الانعكاس (تتاجر عمداً ضد الاتجاه السائد بعد فوليوم تصريف). بدون استثنائها
+        # هنا، تفعيل هذين الفلترين يلغي استراتيجية الانعكاس بالكامل تقريباً.
+        if settings["is_vwap_filter_enabled"] and strategy_key not in _reversal_strategies:
             last20 = k4h[-20:]
             v_sum = sum(k.volume for k in last20)
             vwap4h = ((sum(k.volume * (k.high + k.low + k.close) / 3.0 for k in last20) / v_sum)
@@ -424,7 +438,7 @@ class ScannerState:
                 db.increment_rejection_counter("vwap_filter")
                 return
 
-        if settings["is_4h_buyers_filter_enabled"]:
+        if settings["is_4h_buyers_filter_enabled"] and strategy_key not in _reversal_strategies:
             last20 = k4h[-20:]
             green = sum(k.volume for k in last20 if k.close > k.open)
             red = sum(k.volume for k in last20 if k.close < k.open)
