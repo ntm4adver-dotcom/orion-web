@@ -53,7 +53,17 @@
   </p>
 </div>
 
-<input type="text" id="search-box" placeholder="ابحث عن عملة... (مثال: BTC)" style="margin-bottom:12px;" oninput="renderSignals()">
+<div style="display:flex; gap:10px; margin-bottom:12px; flex-wrap:wrap;">
+  <input type="text" id="search-box" placeholder="🔍 ابحث بالعملة أو الاستراتيجية... (مثال: BTC أو فيبوناتشي)" style="flex:2; min-width:200px;" oninput="renderSignals()">
+  <select id="side-filter" style="flex:1; min-width:120px;" onchange="renderSignals()">
+    <option value="">كل الاتجاهات</option>
+    <option value="Long">▲ شراء (Long)</option>
+    <option value="Short">▼ بيع (Short)</option>
+  </select>
+  <select id="strategy-filter" style="flex:1; min-width:150px;" onchange="renderSignals()">
+    <option value="">كل الاستراتيجيات</option>
+  </select>
+</div>
 
 <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
   <button class="filter-chip active" data-filter="all" onclick="setFilter('all')">الكل (<span id="c-all">0</span>)</button>
@@ -61,6 +71,8 @@
   <button class="filter-chip" data-filter="PENDING" onclick="setFilter('PENDING')">معلقة (<span id="c-pending">0</span>)</button>
   <button class="filter-chip" data-filter="HIT_TP" onclick="setFilter('HIT_TP')">🎯 الأهداف (<span id="c-goals">0</span>)</button>
   <button class="filter-chip" data-filter="HIT_SL" onclick="setFilter('HIT_SL')">🛑 وقف الخسارة (<span id="c-stopped">0</span>)</button>
+  <button class="filter-chip" data-filter="BREAKEVEN" onclick="setFilter('BREAKEVEN')">⚖️ تعادل (<span id="c-breakeven">0</span>)</button>
+  <button class="filter-chip" data-filter="TP1_ONLY" onclick="setFilter('TP1_ONLY')">🎯 هدف أول فقط (<span id="c-tp1only">0</span>)</button>
 </div>
 
 <div id="signals-list"></div>
@@ -261,8 +273,28 @@ function captionFor(status){
 
 function renderSignals(){
   const search = document.getElementById('search-box').value.trim().toUpperCase();
+  const sideFilterVal = document.getElementById('side-filter').value;
+  const strategyFilterVal = document.getElementById('strategy-filter').value;
   let list = allSignals;
-  if (search) list = list.filter(s => s.symbol.toUpperCase().includes(search));
+  // 🔍 البحث الآن يشمل العملة أو اسم الاستراتيجية معاً
+  if (search) list = list.filter(s =>
+    s.symbol.toUpperCase().includes(search) ||
+    strategyLabel(s.strategy || '').toUpperCase().includes(search)
+  );
+  if (sideFilterVal) list = list.filter(s => s.side === sideFilterVal);
+  if (strategyFilterVal) list = list.filter(s => s.strategy === strategyFilterVal);
+
+  // تعبئة قائمة الاستراتيجيات ديناميكياً من البيانات الفعلية (مرة وحدة تكفي، ما تتكرر)
+  const stratSelect = document.getElementById('strategy-filter');
+  if (stratSelect.options.length <= 1) {
+    const seen = new Set();
+    allSignals.forEach(s => { if (s.strategy) seen.add(s.strategy); });
+    [...seen].sort().forEach(strat => {
+      const opt = document.createElement('option');
+      opt.value = strat; opt.innerText = strategyLabel(strat);
+      stratSelect.appendChild(opt);
+    });
+  }
 
   // العدادات والإحصائيات تُحسب من signalStats (يجيها من السيرفر مباشرة عبر SQL على
   // كامل الجدول، بدون أي حد أقصى) — مو من allSignals المحدودة بعدد العرض بالمتصفح.
@@ -273,12 +305,17 @@ function renderSignals(){
     PENDING: signalStats.pending || 0,
     HIT_TP: signalStats.wins || 0,
     HIT_SL: signalStats.losses || 0,
+    BREAKEVEN: signalStats.breakeven || 0,
+    // عدّاد "هدف أول فقط" يُحسب من الصفقات المعروضة حالياً (تقريبي، غير رسمي)
+    TP1_ONLY: allSignals.filter(s => s.tp1_hit && s.status !== 'HIT_TP' && s.status !== 'BREAKEVEN').length,
   };
   document.getElementById('c-all').innerText = counts.all;
   document.getElementById('c-active').innerText = counts.ACTIVE;
   document.getElementById('c-pending').innerText = counts.PENDING;
   document.getElementById('c-goals').innerText = counts.HIT_TP;
   document.getElementById('c-stopped').innerText = counts.HIT_SL;
+  document.getElementById('c-breakeven').innerText = counts.BREAKEVEN;
+  document.getElementById('c-tp1only').innerText = counts.TP1_ONLY;
   document.getElementById('total-count').innerText = `(${counts.all})`;
 
   document.getElementById('win-count').innerText = signalStats.wins || 0;
@@ -302,6 +339,8 @@ function renderSignals(){
   else if (currentFilter === 'PENDING') list = list.filter(s => s.status === 'PENDING');
   else if (currentFilter === 'HIT_TP') list = list.filter(s => s.status === 'HIT_TP');
   else if (currentFilter === 'HIT_SL') list = list.filter(s => s.status === 'HIT_SL');
+  else if (currentFilter === 'BREAKEVEN') list = list.filter(s => s.status === 'BREAKEVEN');
+  else if (currentFilter === 'TP1_ONLY') list = list.filter(s => s.tp1_hit && s.status !== 'HIT_TP' && s.status !== 'BREAKEVEN');
 
   const container = document.getElementById('signals-list');
   if (list.length === 0){
@@ -344,6 +383,14 @@ function renderSignals(){
         📉 أقصى تراجع: <b style="color:var(--red);">${(sig.max_drawdown_pct||0).toFixed(2)}%</b>
       </div>` : ''}
       <div class="bar-wrap">${buildBar(sig)}</div>
+      ${sig.status === 'BREAKEVEN' ? `
+      <div style="text-align:center; background:rgba(251,191,36,.1); border:1px solid rgba(251,191,36,.3); border-radius:8px; padding:6px; margin-top:6px; font-size:11px; color:var(--gold); font-weight:700;">
+        ⚖️ ضربت نقطة التعادل — لا ربح ولا خسارة حقيقية، ما وصلت للهدف النهائي
+      </div>` : ''}
+      ${sig.tp1_hit && sig.status !== 'HIT_TP' && sig.status !== 'BREAKEVEN' ? `
+      <div style="text-align:center; background:rgba(110,231,183,.1); border:1px solid rgba(110,231,183,.3); border-radius:8px; padding:6px; margin-top:6px; font-size:11px; color:#0f9d6c; font-weight:700;">
+        🎯 حققت الهدف الأول (نصف الكمية بربح)، لكن ما وصلت الهدف النهائي — ${sig.status === 'HIT_SL' ? 'ضربت الوقف على بقية الكمية' : 'أُغلقت قبل اكتمال الهدف الثاني'}
+      </div>` : ''}
       ${sig.split_targets_used && sig.actual_r_achieved !== null && sig.actual_r_achieved !== undefined ? `
       <div class="muted" style="text-align:center; font-size:11px; margin-top:6px;">
         📊 العائد الفعلي المجمّع من كلا الجزئين: <b style="color:${sig.actual_r_achieved>=0?'var(--green)':'var(--red)'};">${sig.actual_r_achieved>=0?'+':''}${sig.actual_r_achieved.toFixed(2)}R</b>
