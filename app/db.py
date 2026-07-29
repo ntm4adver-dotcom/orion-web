@@ -629,8 +629,13 @@ def update_max_favorable_if_better(signal_id: int, favorable_pct: float):
 
 
 def clear_signals():
+    """تصفير شامل حقيقي — بطلب صريح: يمسح الصفقات **وكل** البيانات المرتبطة
+    (عدادات رفض الفلاتر، سجل الفحص) عشان البدء من صفر نظيف فعلاً، بدون أي بقايا
+    بيانات قديمة تخلط حسابات المقارنة (زي عدادات رفض متراكمة من فترة سابقة)."""
     with _lock, _connect() as conn:
         conn.execute("DELETE FROM trade_signals")
+        conn.execute("DELETE FROM filter_rejections")
+        conn.execute("DELETE FROM scan_logs")
         conn.commit()
 
 
