@@ -136,12 +136,14 @@ def analyze_climactic_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
 
     probability = max(70, min(93, probability))
 
+    large_order_pressure = micro.large_order_pressure if micro else None
     score_factors = [
         ("حركة ممتدة حقيقية (≥5% صافي تغيّر)", True),
         ("شمعة تصريف/استنزاف بفوليوم متطرف (>8x)", True),
         ("تأكيد انعكاس فعلي (إغلاق بعكس شمعة التصريف)", True),
         ("ضغط متداولين فعلي متوافق", taker_pressure is not None and ((side == "Long" and taker_pressure > 0.1) or (side == "Short" and taker_pressure < -0.1))),
         ("فوليوم تصريف ضخم جداً (>15x)", climax_vol_ratio > 15),
+        ("🆕 ضغط صفقات كبيرة متوافق (Order Flow)", large_order_pressure is not None and ((side == "Long" and large_order_pressure > 0.15) or (side == "Short" and large_order_pressure < -0.15))),
     ]
     score_breakdown, signal_score = build_score_breakdown(score_factors)
 

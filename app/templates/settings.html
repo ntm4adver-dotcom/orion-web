@@ -130,6 +130,24 @@
         </div>
       </div>
 
+      <div class="card" style="margin-top:14px; background:rgba(239,68,68,0.06); border:1px solid rgba(239,68,68,0.25);">
+        <h3 style="margin-top:0; font-size:15px;">🔄 وضع الاختبار العكسي (تجريبي)</h3>
+        <div class="switch">
+          <input type="checkbox" name="is_reverse_mode_enabled" {{ 'checked' if s.is_reverse_mode_enabled }}>
+          <label style="margin:0;">قلب كل إشارة جديدة (Long↔Short) للمقارنة</label>
+        </div>
+        <p class="muted" style="margin-top:6px; font-size:12px; line-height:1.8;">
+          لما مفعّل: كل إشارة جديدة تنقلب اتجاهها بالكامل — Long تصير Short والعكس — <b>بنفس مسافات الوقف
+          والهدف بالضبط</b> (نفس القياس، مو أرقام عشوائية). نقطة الدخول **ما تبقى نفسها** — تُحسب بالانعكاس
+          حول السعر الحالي وقت الإشارة، عشان تدخل بالجهة الصحيحة للاتجاه الجديد (لو استخدمنا نفس رقم الدخول
+          الأصلي، كانت لتدخل فوراً بالسوق أو تُرفض، لأنه محسوب أصلاً لاتجاه معاكس).<br><br>
+          <b>الصفقات المعكوسة تُسجَّل باستراتيجية منفصلة تماماً</b> (باسم مثل <code>fabio_scalper_REVERSED</code>)
+          — تقدر تقارنها بسهولة بالأصلية بصفحتي الإشارات والتطور، بدون ما تختلط بالنتائج الحقيقية.<br><br>
+          ⚠️ <b>هذا وضع تجريبي بحت للتحليل والمقارنة</b> — ما ينصح تفعيله مع التداول الآلي الحقيقي إلا بعد
+          ما تدرس النتائج وتتأكد من وجود نمط حقيقي يستحق البناء عليه.
+        </p>
+      </div>
+
       <div class="switch" style="margin-top:14px;">
         <input type="checkbox" name="is_breakeven_stop_enabled" {{ 'checked' if s.is_breakeven_stop_enabled }}>
         <label style="margin:0;">تفعيل وقف التعادل التلقائي (Breakeven Stop)</label>

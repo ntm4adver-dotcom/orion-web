@@ -298,6 +298,41 @@ CVD_HISTORY_MAX_AGE_MS = 24 * 60 * 60 * 1000  # نافذة تراكمية 24 س�
 CVD_HISTORY_MAX_POINTS = 500  # سقف حماية من تضخم الذاكرة
 
 
+def fetch_large_order_pressure(symbol: str, limit: int = 100, size_multiple: float = 3.0) -> Optional[float]:
+    """🆕 Order Flow متقدم — انظر التوثيق بعميل OKX لنفس المنطق. يكتشف الصفقات
+    الكبيرة من نفس بيانات آخر الصفقات المنفَّذة (بدون طلب API إضافي)."""
+    if _is_banned():
+        return None
+    url = f"{BASE_URL}/fapi/v1/trades"
+    r = _request("GET", url, {"symbol": symbol, "limit": limit}, "fetch_large_order_pressure")
+    if r is None:
+        return None
+    try:
+        r.raise_for_status()
+        data = r.json()
+        trades = []
+        for t in data:
+            qty = float(t.get("qty", 0) or 0)
+            side = "sell" if t.get("isBuyerMaker") else "buy"
+            if qty > 0:
+                trades.append((qty, side))
+        if not trades:
+            return None
+        avg_size = sum(q for q, _ in trades) / len(trades)
+        if avg_size <= 0:
+            return None
+        threshold = avg_size * size_multiple
+        large_trades = [(q, side) for q, side in trades if q >= threshold]
+        if not large_trades:
+            return 0.0
+        large_buy = sum(q for q, side in large_trades if side == "buy")
+        large_sell = sum(q for q, side in large_trades if side == "sell")
+        total_large = large_buy + large_sell
+        return (large_buy - large_sell) / total_large if total_large > 0 else 0.0
+    except Exception:
+        return None
+
+
 def fetch_taker_pressure(symbol: str, limit: int = 100) -> Optional[float]:
     """ضغط المتداولين الفعليين (Taker Buy/Sell Pressure) — انظر التوثيق بعميل OKX
     لنفس المنطق. يعتمد على حقل isBuyerMaker: إذا True فالبائع هو من بادر بالصفقة

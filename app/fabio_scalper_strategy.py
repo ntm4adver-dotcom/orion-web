@@ -93,9 +93,22 @@ def analyze_fabio_scalper(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     for lvn in profile["lvns"][:2]:
         key_levels.append(("LVN", lvn))
 
-    nearest_name, nearest_price = min(key_levels, key=lambda l: abs(current_price - l[1]))
+    # 🔴 إصلاح جذري (بطلب صريح): كان الاختيار بـ"الأقرب" فقط (min distance)، بغض
+    # النظر عن قوة المستوى الحقيقية — يعني POC (نقطة التحكم، أقوى مستوى بالتعريف،
+    # أعلى تراكم فوليوم بكل المنطقة) ممكن يُتجاهل لصالح LVN أضعف بكثير (فراغ سيولة
+    # أصلاً) لمجرد كونه أقرب شوي للسعر الحالي. الآن نختار بناءً على **نقاط مركّبة**
+    # (قرب + قوة المستوى معاً)، مو القرب وحده.
+    level_strength = {"POC": 1.0, "VAH": 0.75, "VAL": 0.75, "LVN": 0.4}
+
+    def _level_score(level):
+        name, price = level
+        dist_pct = abs(current_price - price) / current_price
+        proximity_score = max(0.0, 1.0 - dist_pct / 0.02)  # يتلاشى تدريجياً بعد 2% مسافة
+        return proximity_score * 0.55 + level_strength.get(name, 0.5) * 0.45
+
+    nearest_name, nearest_price = max(key_levels, key=_level_score)
     distance_pct = abs(current_price - nearest_price) / current_price * 100
-    _log("أقرب مستوى مهم (Location)", f"{nearest_name} عند {nearest_price:.6g} — يبعد {distance_pct:.3f}%")
+    _log("أقوى مستوى مهم مرجَّح بالقرب (Location)", f"{nearest_name} عند {nearest_price:.6g} — يبعد {distance_pct:.3f}%")
 
     if distance_pct > 0.35:
         _log("❌ فلتر القرب من المستوى", "السعر لسا بعيد عن أي مستوى مهم — منهج فابيو ينتظر ولا يطارد", False)
@@ -241,6 +254,7 @@ def analyze_fabio_scalper(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     )
     volume_analysis = f"بروفايل فوليوم (POC/VAH/VAL/LVN) + CVD + ضغط متداولين فعلي — منهج Direction-Location-Aggression"
 
+    large_order_pressure = micro.large_order_pressure if micro else None
     score_factors = [
         ("الاتجاه (Direction) محدد بوضوح عبر CVD/ضغط المتداولين", True),
         ("الموقع (Location) قريب من مستوى مهم (POC/VAH/VAL)", True),
@@ -248,6 +262,7 @@ def analyze_fabio_scalper(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         ("عائد/مخاطرة 2:1 كحد أدنى محقَّق (قاعدة فابيو المعلنة)", True),
         ("CVD أو ضغط متداولين قوي جداً (تأكيد إضافي)", (cvd_pct is not None and ((side == "Long" and cvd_pct > 62) or (side == "Short" and cvd_pct < 38))) or (taker_pressure is not None and ((side == "Long" and taker_pressure > 0.2) or (side == "Short" and taker_pressure < -0.2)))),
         ("الفائدة المفتوحة (OI) لا تعاكس الصفقة", oi_change_pct is None or oi_change_pct >= -1.5),
+        ("🆕 ضغط صفقات كبيرة متوافق (Order Flow)", large_order_pressure is not None and ((side == "Long" and large_order_pressure > 0.15) or (side == "Short" and large_order_pressure < -0.15))),
     ]
     score_breakdown, signal_score = build_score_breakdown(score_factors)
 

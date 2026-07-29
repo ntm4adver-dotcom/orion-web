@@ -147,6 +147,7 @@ def analyze_liquidation_hunter(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     )
     volume_analysis = f"تقدير خارطة تصفية تقريبي (Liquidation Heatmap) + مُطلِق انفجار سعري"
 
+    large_order_pressure = micro.large_order_pressure if micro else None
     score_factors = [
         ("الانفجار السعري كمُطلِق زخم", True),
         ("بوابة تأكيد الزخم الإلزامية (Taker Pressure)", True),
@@ -154,6 +155,7 @@ def analyze_liquidation_hunter(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         ("الفائدة المفتوحة (OI) داعمة", oi_change_pct is not None and oi_change_pct > 1.0),
         ("ضغط المتداولين قوي جداً (تأكيد إضافي)", taker_pressure is not None and ((side == "Long" and taker_pressure > 0.15) or (side == "Short" and taker_pressure < -0.15))),
         ("CVD تراكمي متوافق", cvd_pct is not None and ((side == "Long" and cvd_pct > 60) or (side == "Short" and cvd_pct < 40))),
+        ("🆕 ضغط صفقات كبيرة متوافق (Order Flow)", large_order_pressure is not None and ((side == "Long" and large_order_pressure > 0.15) or (side == "Short" and large_order_pressure < -0.15))),
     ]
     score_breakdown, signal_score = build_score_breakdown(score_factors)
 

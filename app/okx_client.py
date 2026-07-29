@@ -697,6 +697,43 @@ CVD_HISTORY_MAX_AGE_MS = 24 * 60 * 60 * 1000  # نافذة تراكمية 24 س�
 CVD_HISTORY_MAX_POINTS = 500  # سقف حماية من تضخم الذاكرة
 
 
+def fetch_large_order_pressure(symbol: str, limit: int = 100, size_multiple: float = 3.0) -> Optional[float]:
+    """🆕 Order Flow متقدم: يكتشف الصفقات "الكبيرة" (أضخم من size_multiple×متوسط
+    حجم الصفقة) من نفس بيانات آخر الصفقات المنفَّذة فعلياً (بدون أي طلب API
+    إضافي — نفس مصدر fetch_taker_pressure)، ويحسب ضغطها الاتجاهي بمعزل عن ضجيج
+    الصفقات الصغيرة المتكررة. إشارة أقوى بكثير على تدخل لاعبين كبار (مؤسسات/
+    حيتان) حقيقي، لأن الضجيج العادي (صفقات تجزئة صغيرة) لا يؤثر عليها إطلاقاً.
+    ترجع رقم بين -1 (ضغط بيع كبير) و 1 (ضغط شراء كبير)، أو 0 لو ما فيه صفقات
+    كبيرة مميّزة (محايد)، أو None لو تعذر الجلب."""
+    inst_id = _to_inst_id(symbol)
+    error_key = f"large_order_pressure:{symbol}"
+    resp = _public_get(f"/api/v5/market/trades?instId={inst_id}&limit={limit}", error_key=error_key)
+    if not resp or resp.get("code") != "0" or not resp.get("data"):
+        return None
+    try:
+        trades = []
+        for t in resp["data"]:
+            sz = float(t.get("sz", 0) or 0)
+            side = t.get("side")
+            if sz > 0 and side in ("buy", "sell"):
+                trades.append((sz, side))
+        if not trades:
+            return None
+        avg_size = sum(sz for sz, _ in trades) / len(trades)
+        if avg_size <= 0:
+            return None
+        threshold = avg_size * size_multiple
+        large_trades = [(sz, side) for sz, side in trades if sz >= threshold]
+        if not large_trades:
+            return 0.0  # ما فيه صفقات كبيرة مميّزة عن البقية — محايد
+        large_buy = sum(sz for sz, side in large_trades if side == "buy")
+        large_sell = sum(sz for sz, side in large_trades if side == "sell")
+        total_large = large_buy + large_sell
+        return (large_buy - large_sell) / total_large if total_large > 0 else 0.0
+    except Exception:
+        return None
+
+
 def fetch_taker_pressure(symbol: str, limit: int = 100) -> Optional[float]:
     """ضغط المتداولين الفعليين (Taker Buy/Sell Pressure): يفحص آخر الصفقات المنفَّذة
     فعلياً بالسوق (مو مجرد أوامر معلّقة بالـ order book) ويحسب هل الأغلبية اشترت

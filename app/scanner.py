@@ -241,6 +241,7 @@ class ScannerState:
                     taker_pressure=exchange.fetch_taker_pressure(symbol) if hasattr(exchange, "fetch_taker_pressure") else None,
                     long_short_ratio=exchange.fetch_long_short_ratio(symbol) if hasattr(exchange, "fetch_long_short_ratio") else None,
                     cvd_pct=exchange.get_cvd_24h_pct(symbol) if hasattr(exchange, "get_cvd_24h_pct") else None,
+                    large_order_pressure=exchange.fetch_large_order_pressure(symbol) if hasattr(exchange, "fetch_large_order_pressure") else None,
                 )
 
                 # ضغط المتداولين (Taker Pressure) صار شرط إلزامي بالانفجار السعري — لو غاب،
@@ -289,6 +290,35 @@ class ScannerState:
             )
 
     def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k15m, k5m, btc_trend=None, btc_klines=None, market_regime_er=None):
+        current_live_price = k5m[-1].close if k5m else None
+
+        # 🔄 وضع العكس التجريبي (بطلب صريح): يقلب كل إشارة (Long↔Short) لمقارنة
+        # الأداء عكسياً واكتشاف هل فيه انحياز منهجي بالتحليل. **لا نستخدم نفس سعر
+        # الدخول الأصلي** — لأنه محسوب بالنسبة لاتجاه مختلف تماماً (خصم تحت السعر
+        # لصفقة شراء، أو علاوة فوق السعر لصفقة بيع)، فلو استخدمناه كما هو للاتجاه
+        # المعاكس، يصير بالجهة الغلط ويخالف قاعدة "انتظار السعر" (يدخل فوراً أو
+        # يُرفض). بدلاً من هذا: **ننعكس حول السعر الحالي نفسه** (2×السعر_الحالي -
+        # الدخول_الأصلي) فيصير الدخول تلقائياً بالجهة الصحيحة للاتجاه الجديد، مع
+        # الحفاظ على **نفس مسافات الوقف والهدف بالضبط** (نفس القياس المطلوب).
+        if settings.get("is_reverse_mode_enabled", False) and current_live_price and current_live_price > 0:
+            original_entry = result.entry_price
+            risk_distance = abs(original_entry - result.stop_loss)
+            reward_distance = abs(result.take_profit - original_entry)
+            new_entry = 2 * current_live_price - original_entry
+            new_side = "Short" if result.side == "Long" else "Long"
+            if new_side == "Short":
+                new_stop = new_entry + risk_distance
+                new_target = new_entry - reward_distance
+            else:
+                new_stop = new_entry - risk_distance
+                new_target = new_entry + reward_distance
+            result.side = new_side
+            result.entry_price = new_entry
+            result.stop_loss = new_stop
+            result.take_profit = new_target
+            result.behavior = f"🔄 [وضع الاختبار العكسي] الإشارة الأصلية كانت {'Long' if new_side=='Short' else 'Short'} — انعكست هنا بنفس مسافات الوقف/الهدف. " + result.behavior
+            strategy_key = f"{strategy_key}_REVERSED"  # استراتيجية منفصلة تماماً بالإحصائيات للمقارنة السهلة
+
         # 🔴 تحقق مركزي حرج (يحمي كل الاستراتيجيات دفعة وحدة، حالياً ومستقبلاً):
         # لصفقة Long، نقطة الدخول يجب تكون **أقل من أو تساوي** السعر الحالي (ننتظر
         # السعر ينزل لها = أمر Limit شراء منطقي). لو طلعت أعلى من السعر الحالي، يعني
@@ -296,7 +326,6 @@ class ScannerState:
         # بدون أي انتظار حقيقي)، وممكن يكون السعر وقتها أصلاً قريب جداً أو تجاوز الوقف
         # — هذا بالضبط سبب صفقات ضربت وقف خلال ثوانٍ من إنشائها. نفس المنطق بالعكس
         # لصفقات Short (الدخول لازم يكون أعلى من أو يساوي السعر الحالي).
-        current_live_price = k5m[-1].close if k5m else None
         if current_live_price and current_live_price > 0:
             tolerance = current_live_price * 0.0005  # هامش تقريب بسيط (0.05%) لتفادي رفض حالات حدّية طبيعية
             if result.side == "Long" and result.entry_price > current_live_price + tolerance:

@@ -31,6 +31,7 @@ class MarketMicrostructure:
     taker_pressure: Optional[float] = None    # ضغط المتداولين الفعليين اللحظي (-1 بيع كامل .. 1 شراء كامل)
     long_short_ratio: Optional[float] = None  # نسبة تمركز الحسابات (>1 أغلبية شراء، <1 أغلبية بيع)
     cvd_pct: Optional[float] = None           # CVD تراكمي 24 ساعة: 0%=بيع كامل, 50%=تعادل, 100%=شراء كامل
+    large_order_pressure: Optional[float] = None  # 🆕 ضغط الصفقات الكبيرة فقط (Order Flow متقدم) — يعزل تدخل اللاعبين الكبار عن ضجيج التجزئة
 
 
 @dataclass
@@ -679,6 +680,7 @@ def analyze_explosive_breakout(
     parts.append(f"🛡️ الستوب لوز (SL): {sl}")
     parts.append(f"⚖️ نسبة العائد للمخاطرة: 1:{rr:.1f}")
 
+    large_order_pressure = micro.large_order_pressure if micro else None
     score_factors = [
         ("اختراق/انضغاط نطاق البولينجر", True),  # بوابة إلزامية أصلاً وصلنا لهنا
         ("زخم الفوليوم المؤكَّد", True),
@@ -687,6 +689,7 @@ def analyze_explosive_breakout(
         ("تأكيد الفائدة المفتوحة (OI)", oi_change_pct is not None and oi_change_pct > 1.0),
         ("ضغط المتداولين الفعليين (Taker Pressure)", taker_pressure is not None and ((side == "Long" and taker_pressure > 0.1) or (side == "Short" and taker_pressure < -0.1))),
         ("CVD تراكمي متوافق", cvd_pct is not None and ((side == "Long" and cvd_pct > 55) or (side == "Short" and cvd_pct < 45))),
+        ("🆕 ضغط صفقات كبيرة متوافق (Order Flow)", large_order_pressure is not None and ((side == "Long" and large_order_pressure > 0.15) or (side == "Short" and large_order_pressure < -0.15))),
     ]
     score_breakdown, signal_score = build_score_breakdown(score_factors)
 
