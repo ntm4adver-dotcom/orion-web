@@ -649,7 +649,24 @@ def fetch_screened_symbols(mode: str, limit_count: int = 10, established_only: b
                 continue
             change_pct = ((last_price - open24h) / open24h * 100.0) if open24h > 0 else 0.0
             symbol = base_symbol + "USDT"
-            liquid_pool.append({"symbol": symbol, "inst_id": inst_id, "volume": quote_volume, "change_pct": change_pct})
+
+            # 🆕 نظافة الحركة اليومية (Daily Efficiency Proxy) — بطلب صريح: نحسب
+            # هل حركة اليوم "اتجاهية نظيفة" أو "متذبذبة عشوائية"، من نفس بيانات
+            # الفوليوم الموجودة أصلاً (high24h/low24h/open24h/last) — **بدون أي
+            # طلب API إضافي إطلاقاً**. نفس مفهوم الكفاءة الاتجاهية اللي أثبتنا
+            # فعاليته بمستوى الإشارة الفردية، مطبَّق الآن بمرحلة اختيار العملة
+            # نفسها، قبل حتى ما يبدأ أي تحليل. الصيغة: |الحركة الصافية| ÷ (المدى
+            # الكامل لليوم) — كل ما اقتربت من 1، كل ما كانت الحركة نظيفة اتجاهية
+            # (سعر تحرك بخط واحد)، وكل ما اقتربت من صفر، كل ما كانت متذبذبة عشوائية
+            # (تصعد وتنزل بلا اتجاه واضح رغم نطاق واسع) — وهذا بالضبط نوع الحركة
+            # اللي أثبتنا مراراً إنه يزيد فشل الاستراتيجيات.
+            high24h = float(obj.get("high24h", 0) or 0)
+            low24h = float(obj.get("low24h", 0) or 0)
+            daily_range = high24h - low24h
+            daily_efficiency = (abs(last_price - open24h) / daily_range) if daily_range > 0 else 0.0
+
+            liquid_pool.append({"symbol": symbol, "inst_id": inst_id, "volume": quote_volume,
+                                 "change_pct": change_pct, "daily_efficiency": daily_efficiency})
 
         if excluded_new_listings > 0:
             last_error["_new_listings_excluded"] = f"استُبعدت {excluded_new_listings} عملة مدرجة حديثاً (أقل من 7 أيام تداول) من قائمة الفحص تلقائياً"
@@ -711,7 +728,15 @@ def fetch_screened_symbols(mode: str, limit_count: int = 10, established_only: b
 
         else:  # top_volume (افتراضي)
             liquid_pool.sort(key=lambda x: x["volume"], reverse=True)
-            result = [c["symbol"] for c in liquid_pool[:limit_count]]
+            # 🆕 فلتر نظافة الحركة (بطلب صريح): من أعلى العملات فوليوماً، نفضّل
+            # اللي حركتها اليوم نظيفة اتجاهية (كفاءة ≥0.2) على اللي متذبذبة عشوائياً
+            # (حتى لو فوليومها أعلى) — لكن نتساهل لو المرشحين النظيفين مو كافيين
+            # لملء العدد المطلوب، عشان ما نرجع بعملات أقل من المطلوب بلا داعٍ.
+            clean_movers = [c for c in liquid_pool if c["daily_efficiency"] >= 0.2]
+            if len(clean_movers) >= limit_count:
+                result = [c["symbol"] for c in clean_movers[:limit_count]]
+            else:
+                result = [c["symbol"] for c in liquid_pool[:limit_count]]
 
         if result:
             last_error.pop("_top_symbols", None)
