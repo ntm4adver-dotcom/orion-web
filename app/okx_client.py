@@ -560,7 +560,24 @@ def _ensure_major_coins(result: List[str], liquid_pool: List[dict], limit_count:
     return final
 
 
-def fetch_screened_symbols(mode: str, limit_count: int = 10) -> List[str]:
+# 🔴 حل جذري (بطلب صريح): بدل فتح المجال لأي عملة بكل السوق وترتيبهم بالفوليوم
+# الخام آخر 24 ساعة (عرضة لعملات ميم صغيرة تشهد ضجة تداول مؤقتة تفوق حتى عملات
+# متوسطة الحجم السوقي الحقيقي)، نقيّد الاختيار على **قائمة عملات موثوقة ومعروفة
+# عالمياً فقط** (بلوتشيب + مشاريع Layer1/Layer2 راسخة + بروتوكولات DeFi كبرى) —
+# نرتبهم بالفوليوم **بينهم فقط**، بدل فتح المجال لكل عملة بالسوق تظهر بفوليوم
+# مرتفع مؤقتاً. هذا يحل مباشرة مشكلة "عملات ضعيفة تسبب فشل الصفقات" اللي أثبتناها
+# بمراجعات متكررة لبيانات إنتاج فعلية طول المحادثة.
+ESTABLISHED_COINS = {
+    "BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "DOT", "LINK",
+    "MATIC", "LTC", "BCH", "ATOM", "UNI", "NEAR", "APT", "ARB", "OP", "FIL",
+    "ETC", "XLM", "ICP", "HBAR", "VET", "ALGO", "SAND", "MANA", "AXS", "FTM",
+    "GRT", "EGLD", "THETA", "EOS", "XTZ", "AAVE", "MKR", "RUNE", "KAVA", "ZEC",
+    "DASH", "CRV", "SNX", "COMP", "ENJ", "CHZ", "GALA", "IMX", "INJ", "SUI",
+    "TIA", "SEI", "WLD", "RENDER", "FET", "TON", "STX", "LDO", "QNT", "ORDI",
+}
+
+
+def fetch_screened_symbols(mode: str, limit_count: int = 10, established_only: bool = False) -> List[str]:
     """يجيب قائمة عملات مصنَّفة حسب معيار مختار — انظر التوثيق بعميل Binance لشرح كل وضع.
     ملاحظة: وضع oi_spike بـ OKX أدق من Binance لأنه يستخدم نداء واحد مجمّع لكل العملات
     دفعة وحدة (bulk endpoint)، بدل نداء منفصل لكل عملة."""
@@ -599,9 +616,14 @@ def fetch_screened_symbols(mode: str, limit_count: int = 10) -> List[str]:
     try:
         liquid_pool = []
         excluded_new_listings = 0
+        excluded_not_established = 0
         for obj in resp.get("data", []):
             inst_id = obj.get("instId", "")
             if not inst_id.endswith("-USDT-SWAP"):
+                continue
+            base_symbol = inst_id.replace("-USDT-SWAP", "")
+            if established_only and base_symbol not in ESTABLISHED_COINS:
+                excluded_not_established += 1
                 continue
             if listing_ages_ok is not None and inst_id not in listing_ages_ok:
                 excluded_new_listings += 1
@@ -612,11 +634,13 @@ def fetch_screened_symbols(mode: str, limit_count: int = 10) -> List[str]:
             if quote_volume < 10_000_000.0 or last_price < 0.0001:
                 continue
             change_pct = ((last_price - open24h) / open24h * 100.0) if open24h > 0 else 0.0
-            symbol = inst_id.replace("-USDT-SWAP", "") + "USDT"
+            symbol = base_symbol + "USDT"
             liquid_pool.append({"symbol": symbol, "inst_id": inst_id, "volume": quote_volume, "change_pct": change_pct})
 
         if excluded_new_listings > 0:
             last_error["_new_listings_excluded"] = f"استُبعدت {excluded_new_listings} عملة مدرجة حديثاً (أقل من 7 أيام تداول) من قائمة الفحص تلقائياً"
+        if excluded_not_established > 0:
+            last_error["_not_established_excluded"] = f"استُبعدت {excluded_not_established} عملة خارج قائمة العملات الموثوقة/المعروفة"
 
         if not liquid_pool:
             last_error["_top_symbols"] = "لم يتم إيجاد عملات مطابقة لشروط السيولة على OKX"
