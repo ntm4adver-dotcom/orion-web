@@ -131,9 +131,6 @@ class ScannerState:
         return symbols
 
     def _run_scan_cycle(self, settings: dict):
-        from . import ict_strategy
-        ict_strategy.set_ignore_kill_zone(settings.get("ict_ignore_kill_zone", False))
-
         symbols = self._resolve_symbols(settings)
         exchange = okx_client if settings["exchange"] == "okx" else binance_client
         db.add_log(f"[{time.strftime('%H:%M:%S')}] بدء فحص حزمة الأزواج الذكية المكتشفة...")
@@ -292,15 +289,19 @@ class ScannerState:
     def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k15m, k5m, btc_trend=None, btc_klines=None, market_regime_er=None):
         current_live_price = k5m[-1].close if k5m else None
 
-        # 🔄 وضع العكس التجريبي (بطلب صريح): يقلب كل إشارة (Long↔Short) لمقارنة
-        # الأداء عكسياً واكتشاف هل فيه انحياز منهجي بالتحليل. **لا نستخدم نفس سعر
-        # الدخول الأصلي** — لأنه محسوب بالنسبة لاتجاه مختلف تماماً (خصم تحت السعر
-        # لصفقة شراء، أو علاوة فوق السعر لصفقة بيع)، فلو استخدمناه كما هو للاتجاه
-        # المعاكس، يصير بالجهة الغلط ويخالف قاعدة "انتظار السعر" (يدخل فوراً أو
-        # يُرفض). بدلاً من هذا: **ننعكس حول السعر الحالي نفسه** (2×السعر_الحالي -
-        # الدخول_الأصلي) فيصير الدخول تلقائياً بالجهة الصحيحة للاتجاه الجديد، مع
-        # الحفاظ على **نفس مسافات الوقف والهدف بالضبط** (نفس القياس المطلوب).
-        if settings.get("is_reverse_mode_enabled", False) and current_live_price and current_live_price > 0:
+        # 🔄🛡️ وضع الهيدج التجريبي (بطلب صريح): بدل استبدال الإشارة الأصلية
+        # بالمعكوسة، نولّد **الاثنين معاً بنفس اللحظة** — زوج هيدج حقيقي (Long
+        # وShort على نفس الفرصة بنفس الوقت)، يطلعون سوا بنفس التصدير للمقارنة
+        # المباشرة بدون الحاجة لتشغيل نسختين منفصلتين من التطبيق. **لا نستخدم نفس
+        # سعر الدخول الأصلي للنسخة المعكوسة** — لأنه محسوب بالنسبة لاتجاه مختلف
+        # تماماً، فلو استخدمناه كما هو للاتجاه المعاكس، يصير بالجهة الغلط ويخالف
+        # قاعدة "انتظار السعر" (يدخل فوراً أو يُرفض). بدلاً من هذا: **ننعكس حول
+        # السعر الحالي نفسه** (2×السعر_الحالي - الدخول_الأصلي) فيصير الدخول
+        # تلقائياً بالجهة الصحيحة، مع الحفاظ على **نفس مسافات الوقف والهدف بالضبط**.
+        if (settings.get("is_reverse_mode_enabled", False) and current_live_price and current_live_price > 0
+                and not strategy_key.endswith("_REVERSED")):
+            import copy
+            reversed_result = copy.copy(result)
             original_entry = result.entry_price
             risk_distance = abs(original_entry - result.stop_loss)
             reward_distance = abs(result.take_profit - original_entry)
@@ -312,12 +313,20 @@ class ScannerState:
             else:
                 new_stop = new_entry - risk_distance
                 new_target = new_entry + reward_distance
-            result.side = new_side
-            result.entry_price = new_entry
-            result.stop_loss = new_stop
-            result.take_profit = new_target
-            result.behavior = f"🔄 [وضع الاختبار العكسي] الإشارة الأصلية كانت {'Long' if new_side=='Short' else 'Short'} — انعكست هنا بنفس مسافات الوقف/الهدف. " + result.behavior
-            strategy_key = f"{strategy_key}_REVERSED"  # استراتيجية منفصلة تماماً بالإحصائيات للمقارنة السهلة
+            reversed_result.side = new_side
+            reversed_result.entry_price = new_entry
+            reversed_result.stop_loss = new_stop
+            reversed_result.take_profit = new_target
+            reversed_result.behavior = (
+                f"🔄🛡️ [زوج هيدج — الجهة المعاكسة] نفس فرصة {strategy_key} بنفس اللحظة، "
+                f"لكن بالاتجاه المعاكس ({new_side}) وبنفس مسافات الوقف/الهدف بالضبط. " + result.behavior
+            )
+            # نعالج النسخة المعكوسة بشكل مستقل تماماً (استدعاء منفصل، نفس كل الفلاتر)،
+            # واللاحقة _REVERSED تمنع أي عودية لانهائية (ما يدخل هذا الشرط مرة ثانية)
+            self._process_signal(settings, symbol, f"{strategy_key}_REVERSED", reversed_result,
+                                  k4h, k1h, k15m, k5m, btc_trend, btc_klines, market_regime_er)
+            # نكمل الآن معالجة الصفقة **الأصلية** بشكل طبيعي تماماً (بدون أي تعديل عليها)
+
 
         # 🔴 تحقق مركزي حرج (يحمي كل الاستراتيجيات دفعة وحدة، حالياً ومستقبلاً):
         # لصفقة Long، نقطة الدخول يجب تكون **أقل من أو تساوي** السعر الحالي (ننتظر

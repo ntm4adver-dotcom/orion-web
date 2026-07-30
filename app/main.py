@@ -1,4 +1,5 @@
 import os
+import time
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse, Response
 from fastapi.templating import Jinja2Templates
@@ -9,6 +10,7 @@ from . import okx_client
 from . import learning
 from . import backup_scheduler
 from . import gdrive_backup
+from . import backtest
 from .strategies import get_strategy_options, strategy_label
 from .auth import is_logged_in, APP_PASSWORD
 from .scanner import scanner_state
@@ -784,3 +786,63 @@ def api_trading_test(request: Request):
         "positions": positions,
         "pending_orders": pending_orders,
     }
+
+
+@app.post("/api/backtest/start")
+async def api_backtest_start(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    body = await request.json()
+    symbols = body.get("symbols") or []
+    days_back = int(body.get("days_back", 30))
+    strategy_keys = body.get("strategy_keys") or None
+    if not symbols:
+        return {"success": False, "message": "لازم تحدد عملة واحدة على الأقل"}
+    days_back = max(3, min(365, days_back))  # حماية: بين 3 أيام وسنة كاملة
+
+    # 🔴 نثبّت المنصة على OKX دائماً بالاختبار الخلفي (بطلب صريح) — Binance تحظر
+    # بمناطق كثيرة، فما نعتمد على إعداد "exchange" الحالي بالإعدادات، نضمن OKX دوماً
+    started = backtest.start_backtest_job(symbols, days_back, okx_client, strategy_keys)
+    if not started:
+        return {"success": False, "message": "فيه اختبار خلفي شغّال بالفعل — انتظر يخلص أو راجع النتيجة الحالية"}
+    return {"success": True, "message": f"بدأ الاختبار الخلفي على {len(symbols)} عملة لآخر {days_back} يوم — هذا ممكن ياخذ عدة دقائق."}
+
+
+@app.get("/api/backtest/status")
+def api_backtest_status(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    status = backtest.get_job_status()
+    # نرجع النتائج الخام بس لو صغيرة (تفادي حمولة ضخمة) — الإحصائيات الملخّصة تكفي عادة
+    if status.get("results") and len(status["results"]) > 500:
+        status = dict(status)
+        status["results"] = status["results"][:500]
+        status["results_truncated"] = True
+    return status
+
+
+@app.get("/api/backtest/export")
+def api_backtest_export(request: Request):
+    """🆕 تصدير كامل نتائج آخر اختبار خلفي بصيغة JSON — نفس روح تصدير الإشارات
+    الحية، عشان ترسلها للتطوير المستقبلي وتحليلها بعمق."""
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    status = backtest.get_job_status()
+    if status["running"]:
+        return JSONResponse({"error": "الاختبار الخلفي لسا شغّال، انتظر يخلص أول"}, status_code=400)
+    if not status["stats"]:
+        return JSONResponse({"error": "ما فيه نتيجة اختبار خلفي محفوظة بعد"}, status_code=404)
+
+    export_data = {
+        "exported_at": int(time.time() * 1000),
+        "backtest_type": "historical_simulation",
+        "note": "هذي نتائج محاكاة على بيانات تاريخية حقيقية (بدون تحيّز نظر مستقبلي) — مو صفقات حية فعلية. الاستراتيجيات المعتمدة على بيانات لحظية (فابيو، مصيدة الحشد) مستبعدة لعدم توفر بياناتها تاريخياً.",
+        "started_at": status["started_at"],
+        "finished_at": status["finished_at"],
+        "duration_seconds": round(status["finished_at"] - status["started_at"], 1) if status["finished_at"] and status["started_at"] else None,
+        "stats": status["stats"],
+        "signals": status["results"],
+    }
+    return JSONResponse(content=export_data, headers={
+        "Content-Disposition": f"attachment; filename=orion_backtest_export_{int(time.time())}.json"
+    })

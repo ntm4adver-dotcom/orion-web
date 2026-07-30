@@ -293,6 +293,23 @@ def efficiency_ratio(klines: List[Kline], period: int = 20) -> float:
     return net_change / total_movement
 
 
+def _hma_bias_pair(closes: List[float]) -> str:
+    """يحسب اتجاه صاعد/هابط بمقارنة HMA(21) مقابل HMA(50) — لكن **يحمي من نفس
+    الفخ اللي اكتشفناه**: لو البيانات غير كافية لـHMA50 الحقيقية (أقل من 50 نقطة)،
+    دالة hma() تقلّص الفترة **بصمت** لعدد أقل، فتصير المقارنة "HMA21 حقيقية مقابل
+    HMA35 مزيّفة" مثلاً — غير متسقة وتعطي قرار عشوائي. هنا نقلّل **الفترتين معاً
+    وبنفس النسبة** (نحافظ على نسبة 21:50 تقريباً) لو البيانات ناقصة، بدل ما وحدة
+    تتقلص بمعزل عن الثانية."""
+    period_long = 50
+    period_short = 21
+    if len(closes) < period_long:
+        period_long = max(4, len(closes))
+        period_short = max(2, round(period_long * (21.0 / 50.0)))
+    h_short = hma(closes, period_short)
+    h_long = hma(closes, period_long)
+    return "صاعد" if h_short >= h_long else "هابط"
+
+
 def _get_bias(klines: List[Kline]) -> str:
     if not klines:
         return "صاعد"
@@ -306,20 +323,17 @@ def _get_bias(klines: List[Kline]) -> str:
     closes = [k.close for k in confirmed_klines]
     # 📊 تحسين إضافي: استبدال EMA بـHull Moving Average — يحل تناقض "السرعة مقابل
     # الاستقرار" الكلاسيكي بـEMA (نفس النوع من عدم الاستقرار اللي اكتشفناه للتو).
-    h21 = hma(closes, 21)
-    h50 = hma(closes, 50)
-    return "صاعد" if h21 >= h50 else "هابط"
+    return _hma_bias_pair(closes)
 
 
 def daily_trend(klines_daily: List[Kline]) -> str:
     if not klines_daily:
         return "صاعد"
-    # نفس إصلاحي _get_bias: استبعاد آخر شمعة (قيد التكوين) + HMA بدل EMA
+    # نفس إصلاحي _get_bias: استبعاد آخر شمعة (قيد التكوين) + HMA بدل EMA + حماية
+    # من عدم اتساق الفترة لو البيانات غير كافية
     confirmed = klines_daily[:-1] if len(klines_daily) > 1 else klines_daily
     closes = [k.close for k in confirmed]
-    h21 = hma(closes, 21)
-    h50 = hma(closes, 50)
-    return "صاعد" if h21 >= h50 else "هابط"
+    return _hma_bias_pair(closes)
 
 
 # ---------------------------------------------------------------------------
@@ -451,9 +465,7 @@ def analyze_explosive_breakout(
     # شمعة (قيد التكوين) + HMA بدل EMA (أسرع استجابة وأقل تذبذباً عند الانعكاس)
     confirmed_1h = k1h[:-1] if len(k1h) > 1 else k1h
     closes1h = [k.close for k in confirmed_1h]
-    h21_1h = hma(closes1h, 21)
-    h50_1h = hma(closes1h, 50)
-    h1_trend = "صاعد" if h21_1h > h50_1h else "هابط"
+    h1_trend = _hma_bias_pair(closes1h)
 
     rsi_val = rsi(closes5m, 14)
     rsi_prev = rsi(closes5m[:-1], 14)

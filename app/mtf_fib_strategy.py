@@ -39,8 +39,13 @@ def analyze_mtf_fib_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})
 
-    if len(k15m) < 30 or len(k5m) < 35:
-        _log("عدد شموع كافٍ (15د≥30، 5د≥35)", f"15د={len(k15m)}, 5د={len(k5m)}", False)
+    # 🔴 إصلاح جذري (بق حقيقي مكتشف): كان الحد الأدنى 30 شمعة بس، لكن _get_bias
+    # تعتمد داخلياً على HMA بفترة 50! لو الشموع المتوفرة بين 30-50، دالة hma()
+    # تعدّل الفترة **بصمت** لعدد أقل (مثلاً HMA35 بدل HMA50 الحقيقية) — فتقارن
+    # HMA21 حقيقية مقابل HMA50 "مزيّفة"، وتعطي قراءة اتجاه عشوائية غير موثوقة.
+    # رفعناه لـ55 (يضمن بعد استبعاد شمعة قيد التكوين، يبقى 54+ — أكثر من كافٍ).
+    if len(k15m) < 55 or len(k5m) < 70:
+        _log("عدد شموع كافٍ (15د≥55، 5د≥70)", f"15د={len(k15m)}, 5د={len(k5m)}", False)
         return None
 
     main_trend = _get_bias(k15m)
@@ -51,6 +56,22 @@ def analyze_mtf_fib_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     swing_range = swing_high - swing_low
     if swing_range <= 0:
         return None
+
+    # 🆕 تأكيد سحب سيولة (Liquidity Sweep) — بطلب صريح: نتحقق هل القاع/القمة
+    # المكتشفة كانت فعلاً "سحب سيولة" حقيقي (اختراق تحت/فوق أدنى/أعلى مستوى
+    # بنافذة أوسع قبلها مباشرة، يدل على اصطياد أوامر وقف متراكمة)، مو مجرد قاع/قمة
+    # محلية عشوائية بلا سياق هيكلي. نضيفها كعامل نقاط إضافي (بونص)، مو شرط إلزامي،
+    # عشان نجمع بيانات حقيقية أول قبل ما نقرر رفض الصفقات اللي بدونها.
+    pre_window = k5m[-70:-35]
+    liquidity_swept = False
+    if pre_window:
+        if low_idx < high_idx:  # القاع هو النقطة الأولى زمنياً — نتحقق سحب سيولة هابط
+            prior_low = min(k.low for k in pre_window)
+            liquidity_swept = swing_low < prior_low
+        else:  # القمة هي النقطة الأولى زمنياً — نتحقق سحب سيولة صاعد
+            prior_high = max(k.high for k in pre_window)
+            liquidity_swept = swing_high > prior_high
+    _log("🆕 تأكيد سحب سيولة حقيقي (اختراق مستوى هيكلي سابق)", liquidity_swept)
 
     last_close = window[-1].close
     entry_price = None
@@ -184,6 +205,7 @@ def analyze_mtf_fib_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         ("منطقة فيبوناتشي 0.72 بمسافة منطقية عن السعر", True),
         ("اتجاه منطقة الدخول صحيح (لا مطاردة)", True),
         ("CVD أو ضغط متداولين متوافق", (cvd_pct is not None and ((side == "Long" and cvd_pct > 58) or (side == "Short" and cvd_pct < 42))) or (taker_pressure is not None and ((side == "Long" and taker_pressure > 0.1) or (side == "Short" and taker_pressure < -0.1)))),
+        ("🆕 تأكيد سحب سيولة حقيقي (اختراق مستوى هيكلي سابق)", liquidity_swept),
     ]
     score_breakdown, signal_score = build_score_breakdown(score_factors)
 

@@ -446,6 +446,52 @@ def place_order(symbol: str, side: str, quantity_usdt: float, leverage: int, mar
     return False, msg or resp.get("msg", "خطأ غير معروف")
 
 
+def fetch_historical_klines(symbol: str, interval: str, total_needed: int) -> List[Kline]:
+    """🆕 يجيب كمية كبيرة من البيانات التاريخية (شهور) عبر الترقيم (Pagination) —
+    أساس نظام الاختبار الخلفي. يستخدم /history-candles (بيانات أقدم من آخر 100-300
+    شمعة) مع معامل after (نمرّر أقدم timestamp بالصفحة السابقة، نجيب أقدم منه)."""
+    inst_id = _to_inst_id(symbol)
+    bar_map = {"1h": "1H", "4h": "4H", "1d": "1D", "1D": "1D"}
+    bar = bar_map.get(interval, interval)
+    all_klines: List[Kline] = []
+    after_ts = None
+    max_pages = (total_needed // 100) + 3  # هامش أمان بسيط لتغطية أي فجوات
+    for _ in range(max_pages):
+        url = f"/api/v5/market/history-candles?instId={inst_id}&bar={bar}&limit=100"
+        if after_ts:
+            url += f"&after={after_ts}"
+        resp = _public_get(url)
+        if not resp or resp.get("code") != "0" or not resp.get("data"):
+            break
+        page = resp.get("data", [])
+        if not page:
+            break
+        for item in page:
+            all_klines.append(Kline(
+                open_time=int(item[0]),
+                open=float(item[1]), high=float(item[2]), low=float(item[3]), close=float(item[4]),
+                volume=float(item[6]),
+                close_time=int(item[0]) + 60000,
+            ))
+        after_ts = page[-1][0]  # أقدم timestamp بهذي الصفحة، نبدأ منه الصفحة الجاية
+        if len(all_klines) >= total_needed:
+            break
+        time.sleep(0.15)  # احترام حدود معدل الطلبات بالمنصة
+    all_klines.reverse()  # ترتيب زمني تصاعدي (الأقدم أول)
+    # نضيف آخر البيانات الحديثة (history-candles ما تشمل آخر شمعة حالياً قيد التكوين غالباً)
+    try:
+        recent = fetch_klines(symbol, interval, limit=min(300, total_needed))
+        if recent:
+            existing_times = {k.open_time for k in all_klines}
+            for k in recent:
+                if k.open_time not in existing_times:
+                    all_klines.append(k)
+            all_klines.sort(key=lambda k: k.open_time)
+    except Exception:
+        pass
+    return all_klines[-total_needed:] if len(all_klines) > total_needed else all_klines
+
+
 def fetch_klines(symbol: str, interval: str, limit: int = 100) -> List[Kline]:
     inst_id = _to_inst_id(symbol)
     bar_map = {"1h": "1H", "4h": "4H", "1d": "1D", "1D": "1D"}

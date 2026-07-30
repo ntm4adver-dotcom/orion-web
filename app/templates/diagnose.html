@@ -23,6 +23,111 @@
 
 <div id="diagnose-result"></div>
 
+<div class="card" style="margin-top:24px; border:1px solid rgba(56,189,248,.3); background:rgba(56,189,248,.04);">
+  <h2 style="margin-top:0;">🕰️ الاختبار الخلفي (Backtesting)</h2>
+  <p class="muted" style="line-height:1.9;">
+    يشغّل كل استراتيجية على <b>أيام أو أشهر من البيانات التاريخية الحقيقية</b> دفعة وحدة، بدون أي تحيّز نظر
+    مستقبلي — بدل انتظار أيام لكل تجربة حية بعيّنة صغيرة. ⚠️ الاستراتيجيات المعتمدة على بيانات لحظية
+    (فابيو، مصيدة الحشد) مستبعدة تلقائياً لأن بياناتها (CVD، ضغط المتداولين) غير متوفرة تاريخياً.
+  </p>
+  <div class="row" style="align-items:flex-end; margin-top:10px;">
+    <div style="flex:2;">
+      <label>العملات (مفصولة بفاصلة، مثال: BTCUSDT,ETHUSDT,SOLUSDT)</label>
+      <input type="text" id="backtest-symbols" placeholder="BTCUSDT,ETHUSDT,SOLUSDT">
+    </div>
+    <div style="flex:1;">
+      <label>عدد الأيام للاختبار (حتى 365 يوم — سنة كاملة)</label>
+      <input type="number" id="backtest-days" value="30" min="3" max="365">
+    </div>
+    <button onclick="startBacktest()" id="backtest-btn" style="height:42px;">🚀 ابدأ الاختبار</button>
+    <button onclick="exportBacktest()" id="backtest-export-btn" style="height:42px; background:#1e293b;">📥 تصدير آخر نتيجة</button>
+  </div>
+  <p class="muted" style="margin-top:8px; font-size:12px;">
+    ⏱️ الأداء يتدرّج تلقائياً حسب طول الفترة (دقة أعلى للفترات القصيرة، أخشن شوي للفترات الطويلة) عشان
+    يبقى الوقت معقول حتى لسنة كاملة. مع هذا، فترات طويلة أو عدة عملات مع بعض تاخذ وقت — جرّب فترة قصيرة
+    (7-14 يوم) أول مرة، وتقدر تصدّر النتيجة وترسلها لي للتطوير.
+  </p>
+  <div id="backtest-status" style="margin-top:14px;"></div>
+  <div id="backtest-results" style="margin-top:14px;"></div>
+</div>
+
+<script>
+let backtestPollInterval = null;
+
+async function exportBacktest(){
+  window.location.href = '/api/backtest/export';
+}
+
+async function startBacktest(){
+  const symbolsRaw = document.getElementById('backtest-symbols').value.trim();
+  if (!symbolsRaw) { alert('حدد عملة واحدة على الأقل'); return; }
+  const symbols = symbolsRaw.split(',').map(s => s.trim().toUpperCase()).filter(s => s);
+  const days = parseInt(document.getElementById('backtest-days').value) || 30;
+
+  const r = await fetch('/api/backtest/start', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({symbols, days_back: days})
+  });
+  const data = await r.json();
+  if (!data.success) { alert(data.message); return; }
+  document.getElementById('backtest-status').innerHTML = `<p class="muted">${data.message}</p>`;
+  if (backtestPollInterval) clearInterval(backtestPollInterval);
+  backtestPollInterval = setInterval(pollBacktestStatus, 3000);
+  pollBacktestStatus();
+}
+
+async function pollBacktestStatus(){
+  const r = await fetch('/api/backtest/status');
+  const data = await r.json();
+  const statusDiv = document.getElementById('backtest-status');
+  const resultsDiv = document.getElementById('backtest-results');
+
+  if (data.running) {
+    statusDiv.innerHTML = `<p>⏳ جاري الاختبار... العملة الحالية: <b>${data.current_symbol || '—'}</b> (${data.progress}/${data.total} عملة)</p>`;
+    return;
+  }
+
+  if (backtestPollInterval) { clearInterval(backtestPollInterval); backtestPollInterval = null; }
+
+  if (data.error) {
+    statusDiv.innerHTML = `<p style="color:var(--red);">❌ خطأ: ${data.error}</p>`;
+    return;
+  }
+
+  if (!data.stats) {
+    statusDiv.innerHTML = '';
+    return;
+  }
+
+  const durationSec = data.finished_at && data.started_at ? Math.round(data.finished_at - data.started_at) : null;
+  statusDiv.innerHTML = `<p style="color:var(--green);">✅ اكتمل الاختبار${durationSec ? ` (استغرق ${durationSec} ثانية)` : ''} — إجمالي ${data.stats.total_signals} صفقة محاكاة</p>`;
+
+  if (data.stats.per_strategy.length === 0) {
+    resultsDiv.innerHTML = '<p class="muted">ما فيه صفقات محاكاة — إما الفترة قصيرة جداً أو ما فيه أنماط تحقق شروط الاستراتيجيات بهذي البيانات.</p>';
+    return;
+  }
+
+  resultsDiv.innerHTML = `
+    <table>
+      <thead><tr><th>الاستراتيجية</th><th>صفقات مغلقة</th><th>فوز</th><th>خسارة</th><th>مهلة انتهت</th><th>نسبة النجاح</th><th>صافي R</th></tr></thead>
+      <tbody>
+        ${data.stats.per_strategy.map(s => `<tr>
+          <td><b>${s.strategy}</b></td>
+          <td>${s.closed_trades}</td>
+          <td style="color:var(--green);">${s.wins}</td>
+          <td style="color:var(--red);">${s.losses}</td>
+          <td class="muted">${s.timeout}</td>
+          <td><b>${s.win_rate}%</b></td>
+          <td style="color:${s.net_r>=0?'var(--green)':'var(--red)'}; font-weight:800;">${s.net_r>=0?'+':''}${s.net_r}R</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+// نتحقق عند تحميل الصفحة هل فيه اختبار شغّال أو نتيجة سابقة
+pollBacktestStatus();
+</script>
+
 <style>
 .trace-row{ display:flex; justify-content:space-between; align-items:center; padding:8px 10px; border-radius:8px; margin-bottom:4px; font-size:13px; }
 .trace-row.pass{ background:rgba(34,197,94,.08); }

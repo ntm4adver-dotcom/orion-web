@@ -42,7 +42,11 @@ def analyze_liquidation_hunter(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         _log("❌ القرار النهائي", "ما فيه أي حدث انفجار سعري أصلاً — توقفنا هنا", False)
         return None
 
-    if not k1h or len(k1h) < 20:
+    # 🔴 رُفع من 20 إلى 60 للتطابق مع الحد الحقيقي المطلوب داخلياً من analyze()
+    # (الانفجار السعري، المُستدعاة كمُطلِق أدناه) — كانت الحماية موجودة أصلاً (لو
+    # البيانات ناقصة، analyze() ترفض بأمان بدورها)، لكن هذا يوفّر استدعاء غير
+    # ضروري ويوضّح الكود بدقة أكبر.
+    if not k1h or len(k1h) < 60:
         return None
 
     current_price = k5m[-1].close if k5m else k1h[-1].close

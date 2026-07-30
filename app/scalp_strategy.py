@@ -35,8 +35,10 @@ def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})
 
-    if len(k5m) < 30 or len(k15m) < 30 or len(k1h) < 30:
-        _log("عدد الشموع كافٍ (5د/15د/1س ≥30)", f"5د={len(k5m)}, 15د={len(k15m)}, 1س={len(k1h)}", False)
+    # 🔴 نفس إصلاح فيبوناتشي الترند: _get_bias تعتمد HMA بفترة 50، فيحتاج حد أدنى
+    # يضمن بيانات كافية فعلياً (مو تعديل صامت لفترة أقصر يعطي قراءة غير موثوقة)
+    if len(k5m) < 30 or len(k15m) < 55 or len(k1h) < 55:
+        _log("عدد الشموع كافٍ (5د≥30، 15د/1س≥55)", f"5د={len(k5m)}, 15د={len(k15m)}, 1س={len(k1h)}", False)
         return None
     _log("عدد الشموع كافٍ", f"5د={len(k5m)}, 15د={len(k15m)}, 1س={len(k1h)}", True)
 
