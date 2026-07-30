@@ -171,8 +171,22 @@ def amend_position_stop_loss(symbol: str, new_stop_price: float, api_key: str, a
         return False, "تعذر تحديد رقم أمر الوقف/الهدف المرتبط"
 
     successes, failures = 0, []
-    for algo_id in algo_ids:
+    for order in resp["data"]:
+        algo_id = order.get("algoId")
+        if not algo_id:
+            continue
+        # 🔴 إصلاح حاسم (بطلب صريح بعد بلاغ مشكلة حقيقية): كانت الدالة تعدّل
+        # newSlTriggerPx بس، بدون إرسال newTpTriggerPx — واحتمال قوي إن OKX تتطلب
+        # كلا الحقلين معاً بأمر التعديل (زي أوامر OCO وقت الإنشاء أصلاً)، فيعتبر
+        # غياب حقل الهدف كـ"إلغاء/تصفير" له، مما يسبب إغلاق الصفقة فوراً عند أي
+        # تحرك بسيط (بالضبط المشكلة المُبلَّغة: "يقفل الصفقة لما توصل للنص"). الآن
+        # نجيب قيمة الهدف **الحالية نفسها** من الأمر المعلّق ونرسلها صراحة، عشان
+        # نضمن عدم تأثرها إطلاقاً — نعدّل الوقف فقط فعلياً، مهما كان سلوك OKX الداخلي.
+        current_tp = order.get("tpTriggerPx")
         body = {"instId": inst_id, "algoId": algo_id, "newSlTriggerPx": str(new_stop_price), "newSlOrdPx": "-1"}
+        if current_tp:
+            body["newTpTriggerPx"] = str(current_tp)
+            body["newTpOrdPx"] = "-1"
         amend_resp = _request("POST", "/api/v5/trade/amend-algo-order", body, api_key, api_secret, passphrase, is_testnet)
         if amend_resp and amend_resp.get("code") == "0":
             successes += 1

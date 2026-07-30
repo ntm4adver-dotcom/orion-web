@@ -39,13 +39,23 @@
       <label>عدد الأيام للاختبار (حتى 365 يوم — سنة كاملة)</label>
       <input type="number" id="backtest-days" value="30" min="3" max="365">
     </div>
+    <div style="flex:1;">
+      <label>وضع الاختبار</label>
+      <select id="backtest-mode">
+        <option value="raw">🔬 خام (بدون فلاتر أو تعادل/تقسيم)</option>
+        <option value="live" selected>⚙️ بإعداداتك الحقيقية (فلاتر + تعادل + تقسيم)</option>
+      </select>
+    </div>
     <button onclick="startBacktest()" id="backtest-btn" style="height:42px;">🚀 ابدأ الاختبار</button>
     <button onclick="exportBacktest()" id="backtest-export-btn" style="height:42px; background:#1e293b;">📥 تصدير آخر نتيجة</button>
   </div>
   <p class="muted" style="margin-top:8px; font-size:12px;">
     ⏱️ الأداء يتدرّج تلقائياً حسب طول الفترة (دقة أعلى للفترات القصيرة، أخشن شوي للفترات الطويلة) عشان
     يبقى الوقت معقول حتى لسنة كاملة. مع هذا، فترات طويلة أو عدة عملات مع بعض تاخذ وقت — جرّب فترة قصيرة
-    (7-14 يوم) أول مرة، وتقدر تصدّر النتيجة وترسلها لي للتطوير.
+    (7-14 يوم) أول مرة، وتقدر تصدّر النتيجة وترسلها لي للتطوير.<br>
+    🔬 <b>الوضع الخام</b>: أداء الاستراتيجية المحض بدون أي فلترة إضافية أو حماية رأس مال — مفيد لمقارنة
+    "الأداء الأصلي الخالص". ⚙️ <b>بإعداداتك الحقيقية</b>: يطابق تماماً تجربتك الحية الفعلية بكل فلاترك
+    المفعّلة حالياً. أي وضع تستخدمه، التصدير يسجّل التفاصيل كاملة عشان تعرف الفرق بدقة.
   </p>
   <div id="backtest-status" style="margin-top:14px;"></div>
   <div id="backtest-results" style="margin-top:14px;"></div>
@@ -63,10 +73,11 @@ async function startBacktest(){
   if (!symbolsRaw) { alert('حدد عملة واحدة على الأقل'); return; }
   const symbols = symbolsRaw.split(',').map(s => s.trim().toUpperCase()).filter(s => s);
   const days = parseInt(document.getElementById('backtest-days').value) || 30;
+  const useLiveSettings = document.getElementById('backtest-mode').value === 'live';
 
   const r = await fetch('/api/backtest/start', {
     method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({symbols, days_back: days})
+    body: JSON.stringify({symbols, days_back: days, use_live_settings: useLiveSettings})
   });
   const data = await r.json();
   if (!data.success) { alert(data.message); return; }

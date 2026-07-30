@@ -34,6 +34,8 @@ _job_state = {
     "error": None,
     "started_at": None,
     "finished_at": None,
+    "settings_snapshot": None,
+    "use_live_settings": True,
 }
 _job_lock = threading.Lock()
 
@@ -43,10 +45,12 @@ def get_job_status() -> Dict[str, Any]:
         return dict(_job_state)
 
 
-def _run_backtest_job(symbols: List[str], days_back: int, exchange, strategy_keys: Optional[List[str]] = None):
+def _run_backtest_job(symbols: List[str], days_back: int, exchange, strategy_keys: Optional[List[str]] = None,
+                       use_live_settings: bool = True):
     with _job_lock:
         _job_state.update({"running": True, "progress": 0, "total": len(symbols), "results": [],
-                            "stats": None, "error": None, "started_at": time.time(), "finished_at": None})
+                            "stats": None, "error": None, "started_at": time.time(), "finished_at": None,
+                            "settings_snapshot": None, "use_live_settings": use_live_settings})
     all_results = []
     try:
         # 🔴 بطلب صريح: نجيب إعداداتك الحقيقية المحفوظة بالتطبيق (نفس الفلاتر،
@@ -54,9 +58,24 @@ def _run_backtest_job(symbols: List[str], days_back: int, exchange, strategy_key
         # الخلفي كامل — مو إعدادات افتراضية مصطنعة، نفس تجربتك الحقيقية بالضبط.
         settings = db.get_settings()
 
+        # 🆕 إصلاح مهم (بطلب صريح): نسجّل لقطة كاملة من الإعدادات الفعلية
+        # المستخدمة وقت هذا التشغيل بالذات — بدونها ما نقدر نقارن بدقة بين
+        # اختبارين مختلفين لاحقاً (نفس المشكلة اللي واجهناها لما اختلفت نتيجة
+        # XRP لوحدها عن نتيجة 3 عملات مع بعض، وما قدرنا نتأكد هل السبب فرق
+        # بالإعدادات أو فرق بالعملات/العيّنة لأن التصدير ما كان يسجّل الإعدادات).
+        # لو الوضع الخام (use_live_settings=False)، نسجّل هذا صراحة بدل الإعدادات
+        # الحقيقية، عشان يكون واضح تماماً بالتصدير أي وضع استُخدم بالضبط.
+        if use_live_settings:
+            safe_settings = {k: v for k, v in settings.items()
+                             if not any(k.startswith(p) for p in ("okx_", "telegram_", "gdrive_"))}
+        else:
+            safe_settings = {"mode": "raw — بدون أي فلتر أو إدارة صفقة إضافية (تعادل/تقسيم)، كل صفقة خام على الوقف والهدف الأصليين فقط"}
+        with _job_lock:
+            _job_state["settings_snapshot"] = safe_settings
+
         # نجيب بيانات البيتكوين مرة وحدة لكل الفترة (لفلاتر التوافق ونظام السوق)
         btc_data = None
-        if settings.get("is_market_alignment_filter_enabled") or settings.get("is_market_regime_filter_enabled"):
+        if use_live_settings and (settings.get("is_market_alignment_filter_enabled") or settings.get("is_market_regime_filter_enabled")):
             btc_data = fetch_backtest_data("BTCUSDT", days_back, exchange)
 
         for idx, symbol in enumerate(symbols):
@@ -70,6 +89,7 @@ def _run_backtest_job(symbols: List[str], days_back: int, exchange, strategy_key
 
             symbol_results = run_symbol_backtest(symbol, days_back, exchange, strategy_keys,
                                                   settings=settings, btc_data=btc_data,
+                                                  use_live_settings=use_live_settings,
                                                   progress_callback=_progress_cb)
             all_results.extend(symbol_results)
     except Exception as e:
@@ -82,12 +102,13 @@ def _run_backtest_job(symbols: List[str], days_back: int, exchange, strategy_key
                                 "stats": stats, "finished_at": time.time()})
 
 
-def start_backtest_job(symbols: List[str], days_back: int, exchange, strategy_keys: Optional[List[str]] = None) -> bool:
+def start_backtest_job(symbols: List[str], days_back: int, exchange, strategy_keys: Optional[List[str]] = None,
+                        use_live_settings: bool = True) -> bool:
     """يبدأ مهمة اختبار خلفي جديدة بخيط منفصل — يرجع False لو فيه مهمة شغّالة أصلاً."""
     with _job_lock:
         if _job_state["running"]:
             return False
-    t = threading.Thread(target=_run_backtest_job, args=(symbols, days_back, exchange, strategy_keys), daemon=True)
+    t = threading.Thread(target=_run_backtest_job, args=(symbols, days_back, exchange, strategy_keys, use_live_settings), daemon=True)
     t.start()
     return True
 
@@ -157,8 +178,12 @@ def _simulate_trade_outcome(result, k_future: List[Kline], settings: dict, max_c
     tp1_price = entry + (tp - entry) * 0.5 if is_split else None
     tp1_hit = False
 
-    is_breakeven_enabled = bool(settings.get("is_breakeven_stop_enabled", True))
-    is_auto_be_half = bool(settings.get("is_auto_breakeven_half_target_enabled", True))
+    # 🔴 إصلاح خلل حقيقي: كانت القيم الافتراضية (fallback) True — فحتى بالوضع
+    # الخام (قاموس settings فاضٍ)، كان .get(key, True) يرجع True بالخطأ ويفعّل
+    # التعادل تلقائياً! الآن fallback = False دائماً، فالقاموس الفاضي = كل شي
+    # معطّل فعلياً كما هو متوقع بالوضع الخام، بغض النظر عن الافتراضي بالتطبيق الحي.
+    is_breakeven_enabled = bool(settings.get("is_breakeven_stop_enabled", False))
+    is_auto_be_half = bool(settings.get("is_auto_breakeven_half_target_enabled", False))
     manual_be_r = settings.get("breakeven_trigger_r_multiple", 1.0)
     breakeven_r = (rr_full / 2.0) if is_auto_be_half else manual_be_r
     breakeven_activated = False
@@ -249,14 +274,23 @@ def run_symbol_backtest(symbol: str, days_back: int, exchange,
                          decision_interval: Optional[str] = None,
                          settings: Optional[dict] = None,
                          btc_data: Optional[Dict[str, List[Kline]]] = None,
+                         use_live_settings: bool = True,
                          progress_callback=None) -> List[Dict[str, Any]]:
     """يشغّل الاختبار الخلفي الكامل لعملة وحدة عبر كل الاستراتيجيات المطلوبة.
     يرجع قائمة نتائج (كل عنصر = صفقة محاكاة كاملة بنفس بنية الصفقات الحقيقية).
-    settings: نفس إعداداتك الحقيقية بالتطبيق — تُطبَّق نفس الفلاتر بالضبط (توافق
+
+    use_live_settings=True (افتراضي): تُطبَّق نفس فلاترك الحقيقية بالتطبيق (توافق
     الترند، الكفاءة الاتجاهية، نظام السوق) + نفس إدارة الصفقة (التعادل، تقسيم
-    الأهداف)، مو قيم افتراضية ثابتة منفصلة عن تجربتك الحقيقية."""
+    الأهداف) — يحاكي تجربتك الحقيقية بالضبط.
+
+    use_live_settings=False (🆕 الوضع الخام — بطلب صريح): يتجاوز **كل** الفلاتر
+    (تُقبل كل إشارة تولّدها الاستراتيجية مباشرة)، وتُلغى محاكاة التعادل وتقسيم
+    الأهداف بالكامل — كل صفقة تُحسب فوز/خسارة خام على الوقف/الهدف الأصليين بس.
+    هذا يعطي صورة "الأداء الخام المحض" للاستراتيجية نفسها، بمعزل عن أي إعداد،
+    عشان تقارنه بدقة مقابل نتيجة الوضع بالإعدادات الحقيقية."""
     from . import db as _db
     settings = settings or _db.get_settings()
+    outcome_settings = settings if use_live_settings else {}  # قاموس فاضي = كل شي معطّل تلقائياً (لا تعادل، لا تقسيم)
     decision_interval = decision_interval or _choose_decision_interval(days_back)
     data = fetch_backtest_data(symbol, days_back, exchange)
     if not data:
@@ -324,15 +358,17 @@ def run_symbol_backtest(symbol: str, days_back: int, exchange,
             if not result:
                 continue
 
-            # 🔴 نفس دالة الفلاتر المشتركة المستخدمة بالفحص الحي بالضبط — نفس
-            # الإعدادات الفعلية (توافق الترند، الكفاءة الاتجاهية، نظام السوق، إلخ)
-            from .scanner import evaluate_signal_filters
-            accepted, _reason, _counter = evaluate_signal_filters(
-                settings, symbol, strategy_key, result, k4h_asof, k1h_asof, k15m_asof, k_fine_asof,
-                btc_trend, btc_klines_asof, market_regime_er,
-            )
-            if not accepted:
-                continue
+            # 🔴 نفس دالة الفلاتر المشتركة المستخدمة بالفحص الحي بالضبط — لكن
+            # بالوضع الخام (use_live_settings=False) نتجاوزها بالكامل، نقبل كل
+            # إشارة تولّدها الاستراتيجية مباشرة (بدون أي فلترة إضافية)
+            if use_live_settings:
+                from .scanner import evaluate_signal_filters
+                accepted, _reason, _counter = evaluate_signal_filters(
+                    settings, symbol, strategy_key, result, k4h_asof, k1h_asof, k15m_asof, k_fine_asof,
+                    btc_trend, btc_klines_asof, market_regime_er,
+                )
+                if not accepted:
+                    continue
 
             # نجيب شموع الفريم الدقيق اللي بعد لحظة الإشارة فعلياً (بيانات حقيقية
             # مستقبلية بالنسبة لهذي اللحظة — هذا صحيح ومقصود هنا، لأننا الآن "نتحقق
@@ -342,7 +378,7 @@ def run_symbol_backtest(symbol: str, days_back: int, exchange,
             if not k_fine_future:
                 continue
 
-            outcome = _simulate_trade_outcome(result, k_fine_future, settings)
+            outcome = _simulate_trade_outcome(result, k_fine_future, outcome_settings)
             if outcome["status"] == "NEVER_FILLED":
                 continue  # السعر ما وصل نقطة الدخول إطلاقاً — نتجاهلها (نفس منطق الإشارات المُلغاة حياً)
 

@@ -799,13 +799,15 @@ async def api_backtest_start(request: Request):
     if not symbols:
         return {"success": False, "message": "لازم تحدد عملة واحدة على الأقل"}
     days_back = max(3, min(365, days_back))  # حماية: بين 3 أيام وسنة كاملة
+    use_live_settings = bool(body.get("use_live_settings", True))
 
     # 🔴 نثبّت المنصة على OKX دائماً بالاختبار الخلفي (بطلب صريح) — Binance تحظر
     # بمناطق كثيرة، فما نعتمد على إعداد "exchange" الحالي بالإعدادات، نضمن OKX دوماً
-    started = backtest.start_backtest_job(symbols, days_back, okx_client, strategy_keys)
+    started = backtest.start_backtest_job(symbols, days_back, okx_client, strategy_keys, use_live_settings)
     if not started:
         return {"success": False, "message": "فيه اختبار خلفي شغّال بالفعل — انتظر يخلص أو راجع النتيجة الحالية"}
-    return {"success": True, "message": f"بدأ الاختبار الخلفي على {len(symbols)} عملة لآخر {days_back} يوم — هذا ممكن ياخذ عدة دقائق."}
+    mode_text = "بإعداداتك الحقيقية (فلاتر + تعادل + تقسيم)" if use_live_settings else "بالوضع الخام (بدون أي فلتر أو إدارة صفقة إضافية)"
+    return {"success": True, "message": f"بدأ الاختبار الخلفي {mode_text} على {len(symbols)} عملة لآخر {days_back} يوم — هذا ممكن ياخذ عدة دقائق."}
 
 
 @app.get("/api/backtest/status")
@@ -836,10 +838,13 @@ def api_backtest_export(request: Request):
     export_data = {
         "exported_at": int(time.time() * 1000),
         "backtest_type": "historical_simulation",
+        "mode": "live_settings" if status.get("use_live_settings", True) else "raw",
+        "mode_description": "بإعداداتك الحقيقية (فلاتر + تعادل + تقسيم أهداف)" if status.get("use_live_settings", True) else "raw — بدون أي فلتر أو إدارة صفقة إضافية، كل صفقة خام على الوقف/الهدف الأصليين فقط",
         "note": "هذي نتائج محاكاة على بيانات تاريخية حقيقية (بدون تحيّز نظر مستقبلي) — مو صفقات حية فعلية. الاستراتيجيات المعتمدة على بيانات لحظية (فابيو، مصيدة الحشد) مستبعدة لعدم توفر بياناتها تاريخياً.",
         "started_at": status["started_at"],
         "finished_at": status["finished_at"],
         "duration_seconds": round(status["finished_at"] - status["started_at"], 1) if status["finished_at"] and status["started_at"] else None,
+        "active_settings_snapshot": status.get("settings_snapshot"),
         "stats": status["stats"],
         "signals": status["results"],
     }
