@@ -33,7 +33,12 @@ def evaluate_signal_filters(settings: dict, symbol: str, strategy_key: str, resu
         if result.side == "Short" and result.entry_price < current_live_price - tolerance:
             return False, f"نقطة الدخول ({result.entry_price:.6g}) أقل من السعر الحالي ({current_live_price:.6g}) بصفقة بيع", "entry_direction_check"
 
-    _reversal_strategies = {"climactic_reversal"}
+    # 📊 إصلاح مبني على دليل تجريبي مباشر (مقارنة باك تيست خام مقابل بإعدادات
+    # حقيقية): stop_hunt وliquidation_hunter أظهرتا نمط معكوس تماماً — نسبة نجاح
+    # الصفقات "المرفوضة" بفلتر التوافق كانت أعلى من "المقبولة" (30.6% مقابل 15.9%
+    # لصيد الاستوبات، 40% مقابل 20% لصيد التصفيات) — دليل قوي إن الفلتر يرفض
+    # بالضبط أفضل صفقاتهم (طبيعة ارتدادية/زخم لحظي قد يعاكس الترند الأكبر أحياناً).
+    _reversal_strategies = {"climactic_reversal", "stop_hunt", "liquidation_hunter"}
     is_reversed_signal = strategy_key.endswith("_REVERSED")
     if is_reversed_signal:
         _reversal_strategies = _reversal_strategies | {strategy_key}
