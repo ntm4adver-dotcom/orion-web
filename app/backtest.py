@@ -18,8 +18,9 @@ Direction) لن تولّد أي إشارة بالاختبار الخلفي — �
 import threading
 import time
 from typing import List, Dict, Any, Optional
-from .analyzer import Kline
+from .analyzer import Kline, efficiency_ratio, _get_bias
 from .strategies import STRATEGY_REGISTRY
+from . import db
 
 # 🆕 حالة المهمة الخلفية العالمية — يشتغل الاختبار الخلفي بخيط منفصل (نفس نمط
 # السكانر الحي بالضبط)، بدون ما يعطّل الخادم أو يحجب باقي الطلبات وقت التشغيل
@@ -48,6 +49,16 @@ def _run_backtest_job(symbols: List[str], days_back: int, exchange, strategy_key
                             "stats": None, "error": None, "started_at": time.time(), "finished_at": None})
     all_results = []
     try:
+        # 🔴 بطلب صريح: نجيب إعداداتك الحقيقية المحفوظة بالتطبيق (نفس الفلاتر،
+        # التعادل، تقسيم الأهداف اللي مفعّلة عندك الآن)، ونستخدمها بالاختبار
+        # الخلفي كامل — مو إعدادات افتراضية مصطنعة، نفس تجربتك الحقيقية بالضبط.
+        settings = db.get_settings()
+
+        # نجيب بيانات البيتكوين مرة وحدة لكل الفترة (لفلاتر التوافق ونظام السوق)
+        btc_data = None
+        if settings.get("is_market_alignment_filter_enabled") or settings.get("is_market_regime_filter_enabled"):
+            btc_data = fetch_backtest_data("BTCUSDT", days_back, exchange)
+
         for idx, symbol in enumerate(symbols):
             with _job_lock:
                 _job_state["current_symbol"] = symbol
@@ -58,6 +69,7 @@ def _run_backtest_job(symbols: List[str], days_back: int, exchange, strategy_key
                     _job_state["current_symbol"] = f"{sym} ({step}/{total_steps} نقطة قرار)"
 
             symbol_results = run_symbol_backtest(symbol, days_back, exchange, strategy_keys,
+                                                  settings=settings, btc_data=btc_data,
                                                   progress_callback=_progress_cb)
             all_results.extend(symbol_results)
     except Exception as e:
@@ -133,45 +145,89 @@ def fetch_backtest_data(symbol: str, days_back: int, exchange) -> Optional[Dict[
     return {"fine": k_fine, "fine_tf": fine_tf, "15m": k15m, "1h": k1h, "4h": k4h, "1d": k_daily}
 
 
-def _simulate_trade_outcome(result, k5m_future: List[Kline], max_candles: int = 800) -> Dict[str, Any]:
-    """يمشي عبر شموع 5 دقايق **بعد** لحظة توليد الإشارة، يحدد أيهم انضرب أول
-    (الوقف أو الهدف)، ويتتبع أعلى ربح عائم (MFE) بالطريق — نفس منطق التتبع الحي
-    بالضبط، بس على بيانات تاريخية مؤكَّدة."""
-    entry, sl, tp, side = result.entry_price, result.stop_loss, result.take_profit, result.side
-    initial_risk_pct = abs(entry - sl) / entry * 100 if entry else 0
+def _simulate_trade_outcome(result, k_future: List[Kline], settings: dict, max_candles: int = 800) -> Dict[str, Any]:
+    """يمشي عبر الشموع **بعد** لحظة توليد الإشارة، يطبّق **نفس التعادل وتقسيم
+    الأهداف المفعّلين عندك بالإعدادات الحقيقية** بالضبط (مو محاكاة خام)، ويحدد
+    النتيجة النهائية + العائد الفعلي المحقَّق."""
+    entry, sl_original, tp, side = result.entry_price, result.stop_loss, result.take_profit, result.side
+    rr_full = result.rr or 0.0
+    initial_risk_pct = abs(entry - sl_original) / entry * 100 if entry else 0.0
+
+    is_split = bool(settings.get("is_split_targets_enabled", False))
+    tp1_price = entry + (tp - entry) * 0.5 if is_split else None
+    tp1_hit = False
+
+    is_breakeven_enabled = bool(settings.get("is_breakeven_stop_enabled", True))
+    is_auto_be_half = bool(settings.get("is_auto_breakeven_half_target_enabled", True))
+    manual_be_r = settings.get("breakeven_trigger_r_multiple", 1.0)
+    breakeven_r = (rr_full / 2.0) if is_auto_be_half else manual_be_r
+    breakeven_activated = False
+    current_sl = sl_original
+
     entered = False
     max_favorable_pct = 0.0
 
-    for i, k in enumerate(k5m_future[:max_candles]):
+    def _final_result(status: str, resolve_idx: int) -> Dict[str, Any]:
+        actual_r = None
+        if is_split and tp1_hit:
+            tp1_contribution = 0.5 * (rr_full / 2.0)
+            if status == "HIT_TP":
+                actual_r = tp1_contribution + 0.5 * rr_full
+            else:  # HIT_SL أو BREAKEVEN على النصف الباقي
+                remainder = 0.0 if (status == "BREAKEVEN") else -0.5
+                actual_r = tp1_contribution + remainder
+        return {"status": status, "candles_to_resolve": resolve_idx,
+                "max_favorable_pct": max_favorable_pct, "actual_r_achieved": actual_r,
+                "breakeven_activated": breakeven_activated, "tp1_hit": tp1_hit}
+
+    for i, k in enumerate(k_future[:max_candles]):
         if not entered:
-            # ننتظر السعر يوصل نقطة الدخول (نفس منطق أمر Limit الحقيقي)
             if side == "Long" and k.low <= entry:
                 entered = True
             elif side == "Short" and k.high >= entry:
                 entered = True
             if not entered:
                 continue
-        # تتبع الربح العائم
-        if side == "Long":
-            favorable = (k.high - entry) / entry * 100
-        else:
-            favorable = (entry - k.low) / entry * 100
-        max_favorable_pct = max(max_favorable_pct, favorable)
 
         if side == "Long":
-            if k.low <= sl:
-                return {"status": "HIT_SL", "candles_to_resolve": i, "max_favorable_pct": max_favorable_pct}
-            if k.high >= tp:
-                return {"status": "HIT_TP", "candles_to_resolve": i, "max_favorable_pct": max_favorable_pct}
+            favorable_pct = (k.high - entry) / entry * 100
         else:
-            if k.high >= sl:
-                return {"status": "HIT_SL", "candles_to_resolve": i, "max_favorable_pct": max_favorable_pct}
+            favorable_pct = (entry - k.low) / entry * 100
+        max_favorable_pct = max(max_favorable_pct, favorable_pct)
+
+        # 🎯 تقسيم الأهداف: تحقق الهدف الأول (لو مفعّل ولسا ما تحقق)
+        if is_split and not tp1_hit and tp1_price:
+            if (side == "Long" and k.high >= tp1_price) or (side == "Short" and k.low <= tp1_price):
+                tp1_hit = True
+                # بمجرد تحقق الهدف الأول، النصف الباقي ينتقل لوقف تعادل تلقائياً
+                # (نفس منطق السكانر الحي بالضبط — حماية فورية لرأس المال)
+                if is_breakeven_enabled and not breakeven_activated:
+                    breakeven_activated = True
+                    current_sl = entry
+
+        # ⚖️ التعادل التلقائي (لو ما تفعّل أصلاً عبر تحقق الهدف الأول أعلاه)
+        if is_breakeven_enabled and not breakeven_activated and initial_risk_pct > 0:
+            if favorable_pct >= initial_risk_pct * breakeven_r:
+                breakeven_activated = True
+                current_sl = entry
+
+        if side == "Long":
+            if k.high >= tp:
+                return _final_result("HIT_TP", i)
+            if k.low <= current_sl:
+                status = "BREAKEVEN" if (breakeven_activated and current_sl == entry) else "HIT_SL"
+                return _final_result(status, i)
+        else:
             if k.low <= tp:
-                return {"status": "HIT_TP", "candles_to_resolve": i, "max_favorable_pct": max_favorable_pct}
+                return _final_result("HIT_TP", i)
+            if k.high >= current_sl:
+                status = "BREAKEVEN" if (breakeven_activated and current_sl == entry) else "HIT_SL"
+                return _final_result(status, i)
 
     if not entered:
-        return {"status": "NEVER_FILLED", "candles_to_resolve": None, "max_favorable_pct": 0.0}
-    return {"status": "TIMEOUT", "candles_to_resolve": max_candles, "max_favorable_pct": max_favorable_pct}
+        return {"status": "NEVER_FILLED", "candles_to_resolve": None, "max_favorable_pct": 0.0,
+                "actual_r_achieved": None, "breakeven_activated": False, "tp1_hit": False}
+    return _final_result("TIMEOUT", max_candles)
 
 
 def _choose_decision_interval(days_back: int) -> str:
@@ -191,9 +247,16 @@ def _choose_decision_interval(days_back: int) -> str:
 def run_symbol_backtest(symbol: str, days_back: int, exchange,
                          strategy_keys: Optional[List[str]] = None,
                          decision_interval: Optional[str] = None,
+                         settings: Optional[dict] = None,
+                         btc_data: Optional[Dict[str, List[Kline]]] = None,
                          progress_callback=None) -> List[Dict[str, Any]]:
     """يشغّل الاختبار الخلفي الكامل لعملة وحدة عبر كل الاستراتيجيات المطلوبة.
-    يرجع قائمة نتائج (كل عنصر = صفقة محاكاة كاملة بنفس بنية الصفقات الحقيقية)."""
+    يرجع قائمة نتائج (كل عنصر = صفقة محاكاة كاملة بنفس بنية الصفقات الحقيقية).
+    settings: نفس إعداداتك الحقيقية بالتطبيق — تُطبَّق نفس الفلاتر بالضبط (توافق
+    الترند، الكفاءة الاتجاهية، نظام السوق) + نفس إدارة الصفقة (التعادل، تقسيم
+    الأهداف)، مو قيم افتراضية ثابتة منفصلة عن تجربتك الحقيقية."""
+    from . import db as _db
+    settings = settings or _db.get_settings()
     decision_interval = decision_interval or _choose_decision_interval(days_back)
     data = fetch_backtest_data(symbol, days_back, exchange)
     if not data:
@@ -208,8 +271,14 @@ def run_symbol_backtest(symbol: str, days_back: int, exchange,
     k_fine_full = data["fine"]
     k_fine_index_by_time = {k.open_time: idx for idx, k in enumerate(k_fine_full)}
 
+    # 🔴 مؤشرات زمنية منفصلة لبيانات البيتكوين (لو متوفرة) — نفس الفكرة، نتقدّم
+    # بالتوازي مع الوقت الحالي، بدون أي تحيّز نظر مستقبلي لبيانات البيتكوين أيضاً
+    btc_cursors = None
+    is_btc_symbol = symbol.upper().startswith("BTC")
+    if btc_data and not is_btc_symbol:
+        btc_cursors = {tf: _TimeframeCursor(klines) for tf, klines in btc_data.items() if tf != "fine_tf"}
+
     results = []
-    # نبدأ من نقطة فيها بيانات تاريخية كافية للمؤشرات (60 شمعة قرار على الأقل كهامش أمان)
     start_idx = 60
     total_steps = len(decision_klines) - start_idx
 
@@ -229,6 +298,20 @@ def run_symbol_backtest(symbol: str, days_back: int, exchange,
         if len(k4h_asof) < 30 or len(k1h_asof) < 30 or len(k15m_asof) < 30 or len(k_fine_asof) < 30:
             continue
 
+        # حساب اتجاه البيتكوين وقوة نظام السوق "حتى هذي اللحظة بالضبط" — نفس
+        # المنطق المستخدم بالفحص الحي، بدون أي نظر مستقبلي لبيانات البيتكوين
+        btc_trend = None
+        btc_klines_asof = None
+        market_regime_er = None
+        if btc_cursors:
+            btc_klines_asof = btc_cursors["4h"].advance_to(current_time)
+            if len(btc_klines_asof) >= 30:
+                btc_trend = _get_bias(btc_klines_asof)
+                market_regime_er = efficiency_ratio(btc_klines_asof, period=20)
+        elif is_btc_symbol:
+            btc_trend = _get_bias(k4h_asof)
+            market_regime_er = efficiency_ratio(k4h_asof, period=20)
+
         for strategy_key in strategy_keys:
             if strategy_key in _MICRO_DEPENDENT_STRATEGIES:
                 continue  # مستبعدة صراحة — تحتاج بيانات لحظية غير متوفرة تاريخياً
@@ -241,6 +324,16 @@ def run_symbol_backtest(symbol: str, days_back: int, exchange,
             if not result:
                 continue
 
+            # 🔴 نفس دالة الفلاتر المشتركة المستخدمة بالفحص الحي بالضبط — نفس
+            # الإعدادات الفعلية (توافق الترند، الكفاءة الاتجاهية، نظام السوق، إلخ)
+            from .scanner import evaluate_signal_filters
+            accepted, _reason, _counter = evaluate_signal_filters(
+                settings, symbol, strategy_key, result, k4h_asof, k1h_asof, k15m_asof, k_fine_asof,
+                btc_trend, btc_klines_asof, market_regime_er,
+            )
+            if not accepted:
+                continue
+
             # نجيب شموع الفريم الدقيق اللي بعد لحظة الإشارة فعلياً (بيانات حقيقية
             # مستقبلية بالنسبة لهذي اللحظة — هذا صحيح ومقصود هنا، لأننا الآن "نتحقق
             # من النتيجة" بعد ما ولّدنا الإشارة بناءً على بيانات ماضية فقط، مو نغش)
@@ -249,7 +342,7 @@ def run_symbol_backtest(symbol: str, days_back: int, exchange,
             if not k_fine_future:
                 continue
 
-            outcome = _simulate_trade_outcome(result, k_fine_future)
+            outcome = _simulate_trade_outcome(result, k_fine_future, settings)
             if outcome["status"] == "NEVER_FILLED":
                 continue  # السعر ما وصل نقطة الدخول إطلاقاً — نتجاهلها (نفس منطق الإشارات المُلغاة حياً)
 
@@ -259,6 +352,9 @@ def run_symbol_backtest(symbol: str, days_back: int, exchange,
                 "take_profit": result.take_profit, "rr": result.rr,
                 "probability": result.prob, "quality": result.quality,
                 "signal_score": getattr(result, "signal_score", 100.0),
+                "breakeven_activated": outcome.get("breakeven_activated", False),
+                "tp1_hit": outcome.get("tp1_hit", False),
+                "actual_r_achieved": outcome.get("actual_r_achieved"),
                 "timestamp": current_time, "status": outcome["status"],
                 "max_favorable_pct": outcome["max_favorable_pct"],
             })
@@ -268,17 +364,33 @@ def run_symbol_backtest(symbol: str, days_back: int, exchange,
 
 def compute_backtest_stats(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     """يحسب إحصائيات ملخّصة — نفس منطق get_strategy_performance() الحي بالضبط،
-    مطبَّق على نتائج الاختبار الخلفي."""
+    مطبَّق على نتائج الاختبار الخلفي. يستخدم العائد الفعلي المحسوب (actual_r_achieved)
+    لو الصفقة مقسّمة الأهداف، بدل الافتراض العام (رابح=rr كامل/خاسر=-1R)."""
     by_strategy: Dict[str, Dict[str, Any]] = {}
     for r in results:
         strat = r["strategy"]
-        by_strategy.setdefault(strat, {"wins": 0, "losses": 0, "timeout": 0, "total_win_r": 0.0, "total_loss_r": 0.0})
+        by_strategy.setdefault(strat, {"wins": 0, "losses": 0, "breakeven": 0, "timeout": 0,
+                                        "total_win_r": 0.0, "total_loss_r": 0.0})
+        actual_r = r.get("actual_r_achieved")
         if r["status"] == "HIT_TP":
             by_strategy[strat]["wins"] += 1
-            by_strategy[strat]["total_win_r"] += (r["rr"] or 0.0)
+            by_strategy[strat]["total_win_r"] += actual_r if actual_r is not None else (r["rr"] or 0.0)
         elif r["status"] == "HIT_SL":
             by_strategy[strat]["losses"] += 1
-            by_strategy[strat]["total_loss_r"] += 1.0
+            if actual_r is not None:
+                if actual_r >= 0:
+                    by_strategy[strat]["total_win_r"] += actual_r
+                else:
+                    by_strategy[strat]["total_loss_r"] += -actual_r
+            else:
+                by_strategy[strat]["total_loss_r"] += 1.0
+        elif r["status"] == "BREAKEVEN":
+            by_strategy[strat]["breakeven"] += 1
+            if actual_r is not None and actual_r != 0:
+                if actual_r >= 0:
+                    by_strategy[strat]["total_win_r"] += actual_r
+                else:
+                    by_strategy[strat]["total_loss_r"] += -actual_r
         else:
             by_strategy[strat]["timeout"] += 1
 
@@ -288,8 +400,8 @@ def compute_backtest_stats(results: List[Dict[str, Any]]) -> Dict[str, Any]:
         win_rate = round((v["wins"] / closed) * 100, 1) if closed > 0 else 0.0
         net_r = round(v["total_win_r"] - v["total_loss_r"], 2)
         summary.append({
-            "strategy": strat, "total_trades": closed + v["timeout"], "closed_trades": closed,
-            "wins": v["wins"], "losses": v["losses"], "timeout": v["timeout"],
+            "strategy": strat, "total_trades": closed + v["breakeven"] + v["timeout"], "closed_trades": closed,
+            "wins": v["wins"], "losses": v["losses"], "breakeven": v["breakeven"], "timeout": v["timeout"],
             "win_rate": win_rate, "total_win_r": round(v["total_win_r"], 2),
             "total_loss_r": round(-v["total_loss_r"], 2), "net_r": net_r,
         })

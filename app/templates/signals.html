@@ -129,6 +129,10 @@ const STRATEGY_LABELS = {
   'confluence': '🤝 استراتيجية التوافق',
 };
 function strategyLabel(key){
+  if (key && key.endsWith('_REVERSED')) {
+    const baseKey = key.replace('_REVERSED', '');
+    return `${STRATEGY_LABELS[baseKey] || baseKey} — 🔄 معكوسة (هيدج)`;
+  }
   return STRATEGY_LABELS[key] || key;
 }
 
@@ -356,17 +360,19 @@ function renderSignals(){
     const st = statusMeta(sig.status);
     const canExecute = sig.status === 'PENDING' || sig.status === 'ACTIVE';
 
+    const isReversed = sig.strategy && sig.strategy.endsWith('_REVERSED');
     return `
-    <div class="sig-card">
+    <div class="sig-card" ${isReversed ? 'style="border:2px solid #a855f7; background:rgba(168,85,247,.04);"' : ''}>
       <div class="sig-top">
         <div>
+          ${isReversed ? `<span class="prob-pill" style="background:#a855f7; color:#fff;">🔄 صفقة هيدج (معاكسة)</span>` : ''}
           <span class="prob-pill">احتمال: ${sig.probability}%</span>
           ${sig.signal_score !== undefined && sig.signal_score !== null ? `<span class="prob-pill" style="background:rgba(168,85,247,.15); color:#a855f7;" title="نقاط قوة الإشارة">💯 ${sig.signal_score}/100</span>` : ''}
           <span class="side-pill ${isLong ? 'long' : 'short'}">${isLong ? '▲ شراء (LONG)' : '▼ بيع (SHORT)'}</span>
         </div>
         <div class="sig-symbol">${sig.symbol}</div>
       </div>
-      ${sig.strategy ? `<div class="muted" style="font-size:11px; margin-bottom:8px;">${strategyLabel(sig.strategy)}</div>` : ''}
+      ${sig.strategy ? `<div class="muted" style="font-size:11px; margin-bottom:8px; ${isReversed ? 'color:#a855f7; font-weight:700;' : ''}">${strategyLabel(sig.strategy)}</div>` : ''}
       <div class="sig-mid">
         <span class="status-pill ${st.cls}">${st.label}</span>
         ${sig.breakeven_activated ? '<span style="color:var(--cyan); font-size:11px; font-weight:700;">🎯 وقف تعادل مفعّل</span>' : ''}
