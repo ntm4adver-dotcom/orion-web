@@ -90,10 +90,19 @@ def _detect_stop_hunt(klines: List[Kline], lookback: int = 50, vol_period: int =
             if risk <= 0:
                 continue
             take_profit = entry_price + (risk * 3.0)
+            # 🆕 حقول تمييزية حقيقية (بطلب صريح): كانت نقاط القوة تعتمد بشكل كبير
+            # على بيانات لحظية (Microstructure) غير متوفرة بالاختبار الخلفي، فتصير
+            # النقاط **ثابتة تماماً** بغض النظر عن جودة الصفقة الفعلية. الآن نحسب
+            # مقاييس حقيقية من بيانات الشموع نفسها (متوفرة دائماً، حي أو باك تيست):
+            # قوة الاستعادة الفعلية (كم تجاوزت حد الـ15% الأدنى)، وعمق كسر المستوى
+            # التاريخي (كل ما كان الكسر أعمق، كل ما كان فخ السيولة أوضح وأقوى).
+            recovery_strength_pct = (klines[-1].close - lowest_low) / candle_range if candle_range > 0 else 0
+            sweep_depth_pct = (lowest_low - current.low) / candle_range if candle_range > 0 else 0
             return {
                 "type": "BULLISH_STOP_HUNT", "side": "Long", "swept_level": lowest_low,
                 "entry_price": entry_price, "stop_loss": stop_loss, "take_profit": take_profit,
                 "volume_ratio": volume_ratio, "candles_ago": offset,
+                "recovery_strength_pct": recovery_strength_pct, "sweep_depth_pct": sweep_depth_pct,
             }
 
         # صيد استوبات هابط (سحب سيولة القمم)
@@ -112,10 +121,13 @@ def _detect_stop_hunt(klines: List[Kline], lookback: int = 50, vol_period: int =
             if risk <= 0:
                 continue
             take_profit = entry_price - (risk * 3.0)
+            recovery_strength_pct = (highest_high - klines[-1].close) / candle_range if candle_range > 0 else 0
+            sweep_depth_pct = (current.high - highest_high) / candle_range if candle_range > 0 else 0
             return {
                 "type": "BEARISH_STOP_HUNT", "side": "Short", "swept_level": highest_high,
                 "entry_price": entry_price, "stop_loss": stop_loss, "take_profit": take_profit,
                 "volume_ratio": volume_ratio, "candles_ago": offset,
+                "recovery_strength_pct": recovery_strength_pct, "sweep_depth_pct": sweep_depth_pct,
             }
 
     return None
@@ -217,11 +229,20 @@ def analyze_stop_hunt(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     )
     volume_analysis = f"صيد استوبات مؤكَّد بفوليوم {signal['volume_ratio']:.2f}× — عائد/مخاطرة ثابت لا يقل عن 1:3"
 
+    # 🔴 إصلاح جذري (بطلب صريح): كانت أول عاملين ثابتين True دائماً (بوابات مرّت
+    # أصلاً، مو تمييز حقيقي)، وعامل الفائدة المفتوحة يعطي "تصريح مجاني" لو البيانات
+    # غير متوفرة (None) — والعاملين اللحظيين (Taker/CVD) يفشلان تلقائياً بالباك
+    # تيست (بيانات غير متوفرة تاريخياً). النتيجة: نقاط ثابتة 66.7 دائماً، بلا أي
+    # قيمة تمييزية حقيقية بين صفقة قوية وضعيفة (أثبتناه بمراجعة بيانات فعلية).
+    # الآن نستخدم مقاييس حقيقية من الشمعة نفسها (متوفرة دائماً، حي أو باك تيست):
+    recovery_strength = signal.get("recovery_strength_pct", 0.15)
+    sweep_depth = signal.get("sweep_depth_pct", 0.0)
     score_factors = [
-        ("كسر مستوى تاريخي بفتيلة (Wick) ورفض واضح", True),
-        ("تأكيد متابعة (شمعة تالية صامدة، مو فشل النمط)", True),
-        ("فوليوم مؤكَّد وقت السحب", signal["volume_ratio"] > 1.2),
-        ("الفائدة المفتوحة (OI) داعمة أو محايدة", oi_change_pct is None or oi_change_pct >= -1.5),
+        ("استعادة قوية وواضحة (>30% من مدى الشمعة)", recovery_strength > 0.30),
+        ("عمق كسر مستوى تاريخي ملموس (>10% من مدى الشمعة)", sweep_depth > 0.10),
+        ("فوليوم مؤكَّد وقت السحب (≥1.5×)", signal["volume_ratio"] >= 1.5),
+        ("فوليوم استثنائي جداً (≥2.5×)", signal["volume_ratio"] >= 2.5),
+        ("الفائدة المفتوحة (OI) داعمة فعلياً (بيانات متوفرة)", oi_change_pct is not None and oi_change_pct >= -1.5),
         ("ضغط المتداولين الفعليين (Taker Pressure)", taker_pressure is not None and ((side == "Long" and taker_pressure > 0.15) or (side == "Short" and taker_pressure < -0.15))),
         ("CVD تراكمي متوافق", cvd_pct is not None and ((side == "Long" and cvd_pct > 60) or (side == "Short" and cvd_pct < 40))),
     ]

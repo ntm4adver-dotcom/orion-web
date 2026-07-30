@@ -312,6 +312,16 @@ def run_symbol_backtest(symbol: str, days_back: int, exchange,
     if btc_data and not is_btc_symbol:
         btc_cursors = {tf: _TimeframeCursor(klines) for tf, klines in btc_data.items() if tf != "fine_tf"}
 
+    # 🔴 إصلاح منهجي خطير (اكتشاف مباشر بمراجعة تصدير حقيقي): كان الاختبار الخلفي
+    # **يعيد اكتشاف نفس فرصة صيد الاستوبات كل نقطة قرار** (كل 15 دقيقة) طول ما
+    # السعر لسا داخل نفس الهيكل التاريخي — نفس مستوى الوقف بالضبط تكرر 16 مرة
+    # متتالية بتصدير حقيقي، وكل تكرار احتُسب "صفقة فوز مستقلة"! هذا يضخّم النتائج
+    # بشكل وهمي (100% نجاح، أرقام "مثالية" غير واقعية). بالفحص الحي فيه منع تكرار
+    # حقيقي (ما نفتح صفقة جديدة على نفس العملة+الاستراتيجية+الاتجاه طول ما فيه
+    # صفقة نشطة بالفعل)، لكن الباك تيست كان يفتقده تماماً. نتتبع الآن "آخر وقت
+    # نشاط" لكل تركيبة، ونمنع أي صفقة جديدة عليها طول ما السابقة نظرياً نشطة.
+    active_until: Dict[tuple, int] = {}
+
     results = []
     start_idx = 60
     total_steps = len(decision_klines) - start_idx
@@ -358,6 +368,13 @@ def run_symbol_backtest(symbol: str, days_back: int, exchange,
             if not result:
                 continue
 
+            # 🔴 فحص منع التكرار (نفس منطق الفحص الحي بالضبط): لو فيه صفقة سابقة
+            # على نفس (الرمز، الاستراتيجية، الاتجاه) لسا نظرياً نشطة بهذي اللحظة،
+            # نتخطى — هذا يمنع احتساب نفس الفرصة الحقيقية عدة مرات كصفقات مستقلة
+            dup_key = (symbol, strategy_key, result.side)
+            if active_until.get(dup_key, -1) >= current_time:
+                continue
+
             # 🔴 نفس دالة الفلاتر المشتركة المستخدمة بالفحص الحي بالضبط — لكن
             # بالوضع الخام (use_live_settings=False) نتجاوزها بالكامل، نقبل كل
             # إشارة تولّدها الاستراتيجية مباشرة (بدون أي فلترة إضافية)
@@ -381,6 +398,14 @@ def run_symbol_backtest(symbol: str, days_back: int, exchange,
             outcome = _simulate_trade_outcome(result, k_fine_future, outcome_settings)
             if outcome["status"] == "NEVER_FILLED":
                 continue  # السعر ما وصل نقطة الدخول إطلاقاً — نتجاهلها (نفس منطق الإشارات المُلغاة حياً)
+
+            # نحسب وقت الإغلاق الحقيقي (من عدد الشموع المستغرقة بالمحاكاة) ونسجّله
+            # كـ"مشغول" لهذي التركيبة — أي صفقة جديدة عليها قبل هذا الوقت تُتخطى
+            resolve_idx = outcome.get("candles_to_resolve")
+            if resolve_idx is not None and resolve_idx < len(k_fine_future):
+                active_until[dup_key] = k_fine_future[resolve_idx].close_time
+            else:
+                active_until[dup_key] = k_fine_future[-1].close_time  # انتهت المهلة القصوى بدون قرار
 
             results.append({
                 "symbol": symbol, "strategy": strategy_key, "side": result.side,
