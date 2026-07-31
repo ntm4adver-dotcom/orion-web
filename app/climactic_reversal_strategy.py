@@ -30,13 +30,13 @@ def analyze_climactic_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})
 
-    if len(k15m) < 30:
+    if len(k15m) < 900:
         return None
 
-    window = k15m[-30:]
+    window = k15m[-400:]
     swing_start_price = window[0].close
     net_change_pct = (window[-1].close - swing_start_price) / swing_start_price * 100
-    _log("صافي التغيّر خلال آخر 30 شمعة 15د (فحص حركة ممتدة)", f"{net_change_pct:.2f}%")
+    _log("صافي التغيّر خلال آخر 4 أيام (فحص حركة ممتدة)", f"{net_change_pct:.2f}%")
 
     if abs(net_change_pct) < 5.0:
         _log("❌ فلتر الحركة الممتدة (يحتاج ≥5% تغيّر صافٍ)", f"{net_change_pct:.2f}% غير كافٍ — رفض", False)
@@ -44,9 +44,8 @@ def analyze_climactic_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
 
     established_direction_down = net_change_pct < 0
 
-    # نبحث عن شمعة تصريف (فوليوم متطرف بنفس اتجاه الحركة الممتدة) بآخر 6 شموع (نستثني الأخيرة)
     recent_candles = k15m[-7:-1]
-    vol_ref = [k.volume for k in k15m[-27:-7]]
+    vol_ref = [k.volume for k in k15m[-400:-7]]
     avg_vol = sum(vol_ref) / len(vol_ref) if vol_ref else 1.0
     if avg_vol <= 0:
         return None

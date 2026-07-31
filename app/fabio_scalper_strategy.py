@@ -37,11 +37,11 @@ def analyze_fabio_scalper(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})
 
-    window = k15m[-100:] if len(k15m) >= 100 else k15m
+    window = k15m[-400:] if len(k15m) >= 400 else k15m
     # 🔴 رفعنا الحد من 20 إلى 50 شمعة (كان يعني 5 ساعات بس تُبنى منها بروفايل فوليوم
     # "تاريخي" — قصير جداً ليعكس تراكم حقيقي ذو معنى إحصائي. 50 شمعة ≈ 12.5 ساعة،
     # أقرب لدورة تداول يومية جزئية حقيقية، مو مجرد نافذة عشوائية صغيرة.
-    if len(window) < 50:
+    if len(window) < 200:
         _log("عدد شموع كافٍ لبناء بروفايل الفوليوم", len(window), False)
         return None
 
@@ -171,10 +171,10 @@ def analyze_fabio_scalper(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         # غير كافية — يفقد الحماية بالضبط بالحالات اللي نحتاجها فيها (عملة جديدة
         # نسبياً، بيانات محدودة). الآن نرفض الصفقة صراحة لو ما قدرنا نطبّق هذا
         # الفحص الوقائي المهم بثقة كافية، بدل تجاهله بصمت.
-        if len(k4h) < 10:
+        if len(k4h) < 100:
             _log("❌ بيانات 4 ساعات غير كافية لتطبيق فحص الترند الأوسع الوقائي", len(k4h), False)
             return None
-        broader_window = k4h[-20:] if len(k4h) >= 20 else k4h
+        broader_window = k4h[-100:] if len(k4h) >= 100 else k4h
         broader_change_pct = ((broader_window[-1].close - broader_window[0].close) / broader_window[0].close * 100) if broader_window else 0
         _log("فحص الترند الأوسع (4 ساعات) قبل قبول نموذج التوازن", f"{broader_change_pct:.2f}%")
 

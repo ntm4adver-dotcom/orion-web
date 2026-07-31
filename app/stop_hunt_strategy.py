@@ -140,7 +140,10 @@ def analyze_stop_hunt(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})
 
-    signal = _detect_stop_hunt(k1h, lookback=24, vol_period=20, recent_window=5)
+    # 🔴 إصلاح جذري (بطلب صريح): كانت نافذة البحث عن مستويات تاريخية مسحوبة
+    # يوم واحد بس (lookback=24 ساعة) — ضيقة جداً لتمييز مستوى هيكلي حقيقي.
+    # رفعناها لـ72 ساعة (3 أيام) — نستغل البيانات المتوفرة أصلاً (170 ساعة مجلوبة)
+    signal = _detect_stop_hunt(k1h, lookback=400, vol_period=20, recent_window=5)
     _log("نمط صيد استوبات مكتشف على فريم الساعة (آخر 5 شموع)",
          f"{signal['type']} (قبل {signal['candles_ago']} شمعة)" if signal else "لا يوجد", signal is not None)
     if signal is None:

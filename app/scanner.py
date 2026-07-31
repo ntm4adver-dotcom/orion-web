@@ -11,8 +11,64 @@ from . import binance_client
 from . import okx_client
 from . import telegram_alert
 from . import learning
-from .analyzer import MarketMicrostructure
+from .analyzer import MarketMicrostructure, Kline
 from .strategies import get_active_strategies, strategy_label
+
+
+def _fetch_klines_cached(exchange, symbol: str, timeframe: str, target_count: int) -> list:
+    """🆕 جلب ذكي تراكمي (بطلب صريح — 'عمارة طوبة فوق طوبة'): بدل إعادة جلب
+    1000 شمعة من الصفر كل دورة فحص (بطيء جداً وضغط كبير على المنصة)، نبني أرشيف
+    محلي دائم لكل (عملة+فريم) بشكل مستقل تماماً عن الباقي:
+      - أول مرة (ما فيه أرشيف): جلب كامل بالترقيم (fetch_historical_klines).
+      - كل مرة بعدها: جلب "خفيف" بس (آخر شموع قليلة عبر fetch_klines العادية
+        الأسرع بكثير)، نضيف بس الجديد فعلاً (بمقارنة الوقت)، ونحدّث الشمعة
+        الأخيرة لو كانت "حيّة" وقت آخر حفظ وصارت مؤكَّدة الآن — ثم نقرأ الأرشيف
+        الكامل المحدَّث من قاعدة البيانات (سريع جداً، بدون انتظار شبكة)."""
+    latest_cached = db.get_latest_cached_open_time(symbol, timeframe)
+
+    if latest_cached is None:
+        # أول مرة لهذي التركيبة — جلب كامل بالترقيم
+        if hasattr(exchange, "fetch_historical_klines"):
+            fresh = exchange.fetch_historical_klines(symbol, timeframe, target_count)
+        else:
+            fresh = exchange.fetch_klines(symbol, timeframe, min(target_count, 300))
+        if fresh:
+            db.save_candles(symbol, timeframe, [
+                {"open_time": k.open_time, "open": k.open, "high": k.high, "low": k.low,
+                 "close": k.close, "volume": k.volume, "close_time": k.close_time} for k in fresh
+            ], keep_latest=target_count + 200)
+        return fresh
+
+    # فيه أرشيف سابق — جلب خفيف بس (آخر شموع قليلة تكفي لتغطية الفجوة منذ آخر فحص)
+    light_fetch_count = 300  # هامش أمان كبير يغطي أي فجوة زمنية معقولة بين دورات الفحص
+    recent = exchange.fetch_klines(symbol, timeframe, light_fetch_count)
+
+    # 🔴 إصلاح ثغرة حقيقية (اكتُشفت بمراجعة ذاتية): لو انقطع التطبيق فترة طويلة،
+    # أو فاصل الفحص كان طويلاً جداً، الجلب الخفيف (300 شمعة) ممكن ما يكفي يغطي
+    # الفجوة الحقيقية بين آخر شمعة مخزَّنة والآن — فيصير "ثقب" بمنتصف الأرشيف
+    # (شموع مفقودة)، يفسد حسابات القمم/القيعان والمؤشرات المبنية عليه. نتحقق الآن:
+    # هل أقدم شمعة بالجلب الخفيف لسا "متصلة" بآخر شمعة مخزَّنة (فجوة معقولة)، أو
+    # فيه ثقب حقيقي؟ لو فيه ثقب، نسوي تعبئة كاملة (جلب كامل بالترقيم) بدل الاكتفاء
+    # بالجلب الخفيف الناقص.
+    if recent:
+        earliest_new = min(k.open_time for k in recent)
+        interval_ms = {"5m": 300_000, "15m": 900_000, "1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000}.get(timeframe, 300_000)
+        gap_ms = earliest_new - latest_cached
+        max_acceptable_gap = interval_ms * (light_fetch_count + 5)  # هامش أمان بسيط فوق سعة الجلب الخفيف
+        if gap_ms > max_acceptable_gap:
+            db.add_log(f"⚠️ [{symbol}/{timeframe}] فجوة كبيرة بأرشيف الشموع (انقطاع طويل محتمل) — تعبئة كاملة تلقائية بدل الجلب الخفيف الناقص")
+            if hasattr(exchange, "fetch_historical_klines"):
+                recent = exchange.fetch_historical_klines(symbol, timeframe, target_count)
+            # لو ما فيه دعم ترقيم بالمنصة، نكتفي بالخفيف رغم الفجوة (احتياط أخير، أفضل من الانهيار)
+
+        db.save_candles(symbol, timeframe, [
+            {"open_time": k.open_time, "open": k.open, "high": k.high, "low": k.low,
+             "close": k.close, "volume": k.volume, "close_time": k.close_time} for k in recent
+        ], keep_latest=target_count + 200)
+
+    cached = db.get_cached_candles(symbol, timeframe)
+    return [Kline(open_time=c["open_time"], open=c["open"], high=c["high"], low=c["low"],
+                   close=c["close"], volume=c["volume"], close_time=c["close_time"]) for c in cached][-target_count:]
 
 
 def evaluate_signal_filters(settings: dict, symbol: str, strategy_key: str, result,
@@ -102,8 +158,13 @@ def evaluate_signal_filters(settings: dict, symbol: str, strategy_key: str, resu
         if vol_ratio < settings["min_volume_ratio"]:
             return False, f"معدل الحجم ({vol_ratio:.2f}x) أقل من الحد الأدنى", "volume_filter"
 
+    # 🔴 إصلاح تعارض تحليلي (اكتُشف بمراجعة استغلال البيانات المتوفرة، مو خلل
+    # برمجي): كانت هذي النافذة 20 شمعة (3.3 يوم) رغم توفر 999 شمعة فعلياً بفريم
+    # 4 ساعات — استخدام ضئيل جداً (2%). رفعناها لـ80 شمعة (13.3 يوم) — توسيع
+    # معتدل (مو جذري زي الاستراتيجيات الفردية) لأن VWAP/نسبة المشتريات بطبيعتها
+    # مرجع "حديث نسبياً"، مو مستوى هيكلي بعيد المدى يستفيد من أشهر من البيانات.
     if settings["is_vwap_filter_enabled"] and strategy_key not in _reversal_strategies:
-        last20 = k4h[-20:]
+        last20 = k4h[-80:]
         v_sum = sum(k.volume for k in last20)
         vwap4h = ((sum(k.volume * (k.high + k.low + k.close) / 3.0 for k in last20) / v_sum)
                   if v_sum > 0 else last20[-1].close)
@@ -114,7 +175,7 @@ def evaluate_signal_filters(settings: dict, symbol: str, strategy_key: str, resu
             return False, "السعر فوق خط VWAP", "vwap_filter"
 
     if settings["is_4h_buyers_filter_enabled"] and strategy_key not in _reversal_strategies:
-        last20 = k4h[-20:]
+        last20 = k4h[-80:]
         green = sum(k.volume for k in last20 if k.close > k.open)
         red = sum(k.volume for k in last20 if k.close < k.open)
         total = green + red
@@ -314,21 +375,25 @@ class ScannerState:
             if idx > 0:
                 time.sleep(1.2)  # تأخير أكبر بين كل عملة وأخرى لتجنب تقييد معدل الطلبات من المنصة
             try:
-                db.add_log(f"جاري سحب بيانات الشموع لزوج {symbol}...")
-                k4h = exchange.fetch_klines(symbol, "4h", 100)
-                time.sleep(0.25)
-                # 170 شمعة ساعة (~7 أيام) بدل 100 — استراتيجية "صيد التصفيات" مصممة
-                # تحتاج نافذة أسبوع كامل لتقدير خارطة تصفية شاملة (كانت تشتغل بـ4 أيام
-                # بس فعلياً أثناء الفحص التلقائي، أقل من المصمَّم له)
-                k1h = exchange.fetch_klines(symbol, "1h", 170)
-                time.sleep(0.25)
-                # 110 شمعة 15د بدل 100 — هامش أمان بسيط فوق حاجة استراتيجية فابيو
-                # فالنتيني (بروفايل الفوليوم يحتاج بالضبط آخر 100 شمعة)
-                k15m = exchange.fetch_klines(symbol, "15m", 110)
-                time.sleep(0.25)
-                k5m = exchange.fetch_klines(symbol, "5m", 150)
-                time.sleep(0.25)
-                k_daily = exchange.fetch_klines(symbol, "1d", 100)
+                db.add_log(f"جاري سحب بيانات الشموع لزوج {symbol} (نطاق موسّع 1000+ شمعة لكل فريم)...")
+                # 🔴 إصلاح جذري وشامل (بطلب صريح): "اجلب 1000+ شمعة لكل فريم، وقت
+                # التحليل مو مهم، الأهم دقة وصحة التحليل". الحد الأقصى للطلب الواحد
+                # بـ/api/v5/market/candles محدود (~300 شمعة)، فلا نقدر نجيب 1000+
+                # بطلب وحد — نستخدم الآن fetch_historical_klines (نفس دالة الترقيم
+                # المبنية أصلاً لنظام الاختبار الخلفي، تتجاوز الحد عبر عدة طلبات
+                # متتالية) بدل fetch_klines المحدودة، لكل فريم بالفحص الحي أيضاً.
+                def _fetch(interval: str, count: int, fallback_count: int):
+                    return _fetch_klines_cached(exchange, symbol, interval, count)
+
+                k4h = _fetch("4h", 1000, 100)      # 1000 شمعة 4 ساعات ≈ 5.5 شهر
+                time.sleep(0.15)
+                k1h = _fetch("1h", 1000, 170)      # 1000 شمعة ساعة ≈ 6 أسابيع
+                time.sleep(0.15)
+                k15m = _fetch("15m", 1000, 130)    # 1000 شمعة 15 دقيقة ≈ 10.4 يوم
+                time.sleep(0.15)
+                k5m = _fetch("5m", 1000, 220)      # 1000 شمعة 5 دقايق ≈ 3.5 يوم
+                time.sleep(0.15)
+                k_daily = _fetch("1d", 500, 100)   # 500 شمعة يومية ≈ 1.4 سنة (يومي لا يحتاج 1000، أطول أفق زمني أصلاً)
 
                 if len(k5m) < 30 or len(k1h) < 60:
                     reason = getattr(exchange, "last_error", {}).get(symbol) if hasattr(exchange, "last_error") else None
@@ -368,15 +433,34 @@ class ScannerState:
                     f"ضغط متداولين={_fmt(micro.taker_pressure)} | CVD={_fmt(micro.cvd_pct, '%')}"
                 )
 
+                # 🔴 إصلاح معماري جوهري (بطلب صريح، ينطبق على كل الاستراتيجيات
+                # دفعة وحدة): آخر شمعة بأي فريم مجلوب من المنصة هي الشمعة **الحيّة
+                # قيد التكوين فعلياً** (لم تُغلق بعد وقت الفحص) — سلوك طبيعي لأي API
+                # منصة تداول. لو مررناها للاستراتيجيات كأنها "شمعة مغلقة"، فكل حساب
+                # نمط/دخول/تأكيد يعتمد عليها فعلياً يستخدم بيانات لحظية "حيّة" مموّهة
+                # كشمعة كاملة — بالضبط سبب ملاحظة "يحلل على اللحظي مو فريم حقيقي".
+                # الآن ننشئ نسخ **مؤكَّدة** (تستبعد آخر شمعة) بمكان مركزي واحد، تُمرَّر
+                # لكل الاستراتيجيات — بدل ترقيع كل استراتيجية لحالها (معرّض للنسيان،
+                # زي ما حصل فعلاً بأكثر من مكان قبل). السعر اللحظي الحقيقي (للتحقق
+                # من اتجاه الدخول ومقارنته لاحقاً) يبقى منفصلاً من النسخة الخام غير
+                # المقصوصة، عشان يعكس اللحظة الفعلية بدقة، لا شمعة سابقة مؤكَّدة.
+                current_live_price = k5m[-1].close if k5m else None
+                k4h_confirmed = k4h[:-1] if len(k4h) > 1 else k4h
+                k1h_confirmed = k1h[:-1] if len(k1h) > 1 else k1h
+                k15m_confirmed = k15m[:-1] if len(k15m) > 1 else k15m
+                k5m_confirmed = k5m[:-1] if len(k5m) > 1 else k5m
+                k_daily_confirmed = k_daily[:-1] if len(k_daily) > 1 else k_daily
+
                 matched_any = False
                 for strategy_key, strategy_fn in get_active_strategies(
                         settings.get("active_strategy", "explosive_breakout"),
                         settings.get("combined_enabled_strategies", "")):
-                    result = strategy_fn(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro)
+                    result = strategy_fn(symbol, k4h_confirmed, k1h_confirmed, k15m_confirmed, k5m_confirmed, k_daily_confirmed, micro=micro)
                     if result is None:
                         continue
                     matched_any = True
-                    self._process_signal(settings, symbol, strategy_key, result, k4h, k1h, k15m, k5m, btc_trend, btc_klines, market_regime_er)
+                    self._process_signal(settings, symbol, strategy_key, result, k4h_confirmed, k1h_confirmed, k15m_confirmed, k5m_confirmed,
+                                          btc_trend, btc_klines, market_regime_er, current_live_price)
 
                 if not matched_any:
                     db.add_log(f"▫️ {symbol}: ليس له اتجاه كافٍ حالياً.")
@@ -398,8 +482,14 @@ class ScannerState:
                 f"أو حصل خطأ أثناء التحليل:\n\n{body}",
             )
 
-    def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k15m, k5m, btc_trend=None, btc_klines=None, market_regime_er=None):
-        current_live_price = k5m[-1].close if k5m else None
+    def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k15m, k5m, btc_trend=None, btc_klines=None, market_regime_er=None, current_live_price=None):
+        # 🔴 current_live_price الآن يُمرَّر صراحة من المستدعي (يعكس السعر اللحظي
+        # الحقيقي وقت الفحص) — k4h/k1h/k15m/k5m هنا أصبحت نسخ "مؤكَّدة" (بدون آخر
+        # شمعة حيّة قيد التكوين)، فما نقدر نشتق السعر اللحظي الحقيقي منها بعد الآن.
+        # نحتفظ بحساب احتياطي (fallback) بس لو استُدعيت الدالة من مكان قديم بدون
+        # تمرير القيمة صراحة (حماية توافقية، حالة نادرة).
+        if current_live_price is None:
+            current_live_price = k5m[-1].close if k5m else None
 
         # 🔄🛡️ وضع الهيدج التجريبي (بطلب صريح): بدل استبدال الإشارة الأصلية
         # بالمعكوسة، نولّد **الاثنين معاً بنفس اللحظة** — زوج هيدج حقيقي (Long
@@ -436,7 +526,7 @@ class ScannerState:
             # نعالج النسخة المعكوسة بشكل مستقل تماماً (استدعاء منفصل، نفس كل الفلاتر)،
             # واللاحقة _REVERSED تمنع أي عودية لانهائية (ما يدخل هذا الشرط مرة ثانية)
             self._process_signal(settings, symbol, f"{strategy_key}_REVERSED", reversed_result,
-                                  k4h, k1h, k15m, k5m, btc_trend, btc_klines, market_regime_er)
+                                  k4h, k1h, k15m, k5m, btc_trend, btc_klines, market_regime_er, current_live_price)
             # نكمل الآن معالجة الصفقة **الأصلية** بشكل طبيعي تماماً (بدون أي تعديل عليها)
 
 

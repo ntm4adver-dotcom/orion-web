@@ -23,6 +23,33 @@ from typing import Optional, Tuple
 from . import db
 
 
+def get_coin_strategy_adjustment(symbol: str, strategy_key: Optional[str], settings: dict) -> Tuple[int, Optional[str]]:
+    """🆕 يرجع (مقدار التعديل، رسالة أو None) بناءً على أداء "هذي الاستراتيجية
+    بالذات على هذي العملة بالذات" — يسد فجوة حقيقية بين تعلّم العملة عموماً
+    وتعلّم الاستراتيجية عموماً (مثال حقيقي اكتُشف بالباك تيست: صيد الاستوبات قوية
+    جداً على SOL/ADA، ضعيفة تحديداً على XRP — تركيبة محددة، مو خاصية عامة).
+    وزن أعلى من التعديلين العامين (±20 بدل ±15/±5) لأنه أدق تحديداً وأكثر دلالة."""
+    if not settings.get("is_coin_learning_enabled", True) or not strategy_key:
+        return 0, None
+
+    perf = db.get_coin_strategy_performance_for(symbol, strategy_key)
+    min_trades = int(settings.get("coin_strategy_learning_min_trades", 8))
+    if not perf or perf["total"] < min_trades:
+        return 0, None
+
+    win_rate = perf["win_rate"]
+    weak = float(settings.get("coin_learning_weak_threshold", 35))
+    strong = float(settings.get("coin_learning_strong_threshold", 70))
+
+    if win_rate < weak:
+        return 20, (f"🎯 [تعلم تركيبة] {strategy_key} على {symbol} تحديداً سجلها ضعيف جداً "
+                     f"({win_rate:.0f}% من {perf['total']} صفقة) — رُفع الحد الأدنى +20% (أقوى تأثير، الأدق تحديداً).")
+    if win_rate >= strong:
+        return -8, (f"🎯 [تعلم تركيبة] {strategy_key} على {symbol} تحديداً سجلها قوي جداً "
+                     f"({win_rate:.0f}% من {perf['total']} صفقة) — خُفّف الحد الأدنى -8%.")
+    return 0, None
+
+
 def get_coin_adjustment(symbol: str, side: str, settings: dict) -> Tuple[int, Optional[str]]:
     """يرجع (مقدار التعديل على الحد الأدنى المطلوب، رسالة توضيحية أو None) بناءً على أداء العملة+الاتجاه تحديداً."""
     if not settings.get("is_coin_learning_enabled", True):
@@ -72,14 +99,16 @@ def get_strategy_adjustment(strategy_key: Optional[str], settings: dict) -> Tupl
 
 
 def effective_threshold(symbol: str, side: str, settings: dict, strategy_key: Optional[str] = None) -> Tuple[int, Optional[str]]:
-    """يرجع (الحد الأدنى الفعّال بعد التعديل المزدوج: عملة + استراتيجية، مقيّد بين 50% و95%)، ورسالة مدمجة."""
+    """يرجع (الحد الأدنى الفعّال بعد التعديل الثلاثي: عملة + استراتيجية + تركيبة
+    عملة×استراتيجية معاً، مقيّد بين 50% و95%)، ورسالة مدمجة."""
     base = int(settings.get("min_probability", 70))
 
     coin_adj, coin_msg = get_coin_adjustment(symbol, side, settings)
     strat_adj, strat_msg = get_strategy_adjustment(strategy_key, settings)
+    combo_adj, combo_msg = get_coin_strategy_adjustment(symbol, strategy_key, settings)
 
-    effective = max(50, min(95, base + coin_adj + strat_adj))
+    effective = max(50, min(95, base + coin_adj + strat_adj + combo_adj))
 
-    messages = [m for m in (coin_msg, strat_msg) if m]
+    messages = [m for m in (coin_msg, strat_msg, combo_msg) if m]
     combined_msg = " | ".join(messages) if messages else None
     return effective, combined_msg

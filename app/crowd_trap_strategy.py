@@ -41,7 +41,7 @@ def analyze_crowd_trap(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     if micro is None:
         _log("بيانات البنية الجزئية متوفرة", False, False)
         return None
-    if len(k1h) < 20 or len(k5m) < 10:
+    if len(k1h) < 400 or len(k5m) < 10:
         return None
 
     long_short_ratio = micro.long_short_ratio
@@ -98,8 +98,10 @@ def analyze_crowd_trap(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     if atr_val <= 0 or current_price <= 0:
         return None
 
-    recent_swing_high = max(k.high for k in k1h[-15:])
-    recent_swing_low = min(k.low for k in k1h[-15:])
+    # 🔴 إصلاح جذري (بطلب صريح): كانت النافذة 15 ساعة بس — ضيقة جداً لتمييز
+    # مستوى هيكلي حقيقي. رفعناها لـ72 ساعة (3 أيام)
+    recent_swing_high = max(k.high for k in k1h[-400:])
+    recent_swing_low = min(k.low for k in k1h[-400:])
     entry_price = current_price
 
     if side == "Long":

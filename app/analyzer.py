@@ -370,7 +370,7 @@ def detect_immediate_reversal_after_sweep(klines: List[Kline], side: str) -> boo
     return prev.low < klines[-3].low and last.low >= prev.low and last.close > prev.close
 
 
-def structural_stop_loss(klines: List[Kline], side: str, entry_price: float, atr_val: float, lookback: int = 8) -> float:
+def structural_stop_loss(klines: List[Kline], side: str, entry_price: float, atr_val: float, lookback: int = 150) -> float:
     if len(klines) < lookback or atr_val <= 0.0:
         return entry_price - atr_val * 0.8 if side == "Long" else entry_price + atr_val * 0.8
     zone = klines[-lookback:]
@@ -403,7 +403,7 @@ def analyze_explosive_breakout(
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})
 
-    if len(k5m) < 30 or len(k1h) < 60:
+    if len(k5m) < 200 or len(k1h) < 100:
         _log("عدد الشموع كافٍ (5د≥30، 1س≥60)", f"5د={len(k5m)}, 1س={len(k1h)}", False)
         return None
     _log("عدد الشموع كافٍ", f"5د={len(k5m)}, 1س={len(k1h)}", True)
@@ -585,7 +585,7 @@ def analyze_explosive_breakout(
         entry_note = f"دخول محدد (Limit) عند مستوى النطاق المكسور {entry_price:.6g} — بانتظار إعادة اختبار (Retest)"
     _log("📍 منطق نقطة الدخول", entry_note)
 
-    sl = structural_stop_loss(k5m, side, entry_price, effective_atr, lookback=8)
+    sl = structural_stop_loss(k5m, side, entry_price, effective_atr, lookback=150)
     risk_distance = abs(entry_price - sl)
     if entry_price and risk_distance / entry_price < 0.0015:
         _log("❌ فلتر أدنى مسافة وقف خسارة", f"المسافة {risk_distance/entry_price*100:.3f}% أقل من الحد الأدنى (0.15%) — السوق شبه ساكن", False)

@@ -82,6 +82,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     # محرك التعلم الذاتي (Coin Learning) — يتعلم من سجل الصفقات المغلقة الحقيقي فقط
     "is_coin_learning_enabled": 1,
     "coin_learning_min_trades": 5,       # الحد الأدنى من الصفقات المغلقة قبل ما ناخذ قرار بناءً على الأداء
+    "coin_strategy_learning_min_trades": 8,  # 🆕 الحد الأدنى لتعلّم تركيبة (عملة+استراتيجية) تحديداً — أعلى من العام لأنه أدق ونحتاج ثقة أكبر
     "coin_learning_weak_threshold": 35,  # أقل من هذه النسبة % = سجل ضعيف، يرفع شرط الدخول
     "coin_learning_strong_threshold": 70,  # أعلى من هذه النسبة % = سجل قوي، يخفف شرط الدخول قليلاً
     "strategy_learning_min_trades": 10,   # نفس الفكرة لكن على مستوى الاستراتيجية ككل (كل العملات مجتمعة)
@@ -178,6 +179,26 @@ def init_db():
                 count INTEGER DEFAULT 0
             )
         """)
+        # 🆕 جدول تخزين الشموع التراكمي (بطلب صريح): بدل إعادة جلب 1000 شمعة من
+        # الصفر كل دورة فحص (بطيء وضغط كبير على المنصة)، نبني الأرشيف "طوبة فوق
+        # طوبة" — أول جلب يخزّن الألف شمعة كاملة، وكل دورة لاحقة تجلب بس الشموع
+        # الجديدة وتضيفها، مع تقليم القديم للحفاظ على نافذة ثابتة. كل (عملة+فريم)
+        # مستقلة تماماً عن الباقي.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS candle_cache (
+                symbol TEXT NOT NULL,
+                timeframe TEXT NOT NULL,
+                open_time INTEGER NOT NULL,
+                open REAL NOT NULL,
+                high REAL NOT NULL,
+                low REAL NOT NULL,
+                close REAL NOT NULL,
+                volume REAL NOT NULL,
+                close_time INTEGER NOT NULL,
+                PRIMARY KEY (symbol, timeframe, open_time)
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_candle_cache_lookup ON candle_cache(symbol, timeframe, open_time DESC)")
         conn.commit()
         # seed defaults if missing
         cur = conn.execute("SELECT key FROM app_settings")
@@ -305,6 +326,54 @@ def get_rejection_counts() -> Dict[str, int]:
     with _lock, _connect() as conn:
         cur = conn.execute("SELECT filter_name, count FROM filter_rejections ORDER BY count DESC")
         return {row["filter_name"]: row["count"] for row in cur.fetchall()}
+
+
+def get_cached_candles(symbol: str, timeframe: str) -> List[Dict[str, Any]]:
+    """🆕 يجيب كل الشموع المخزَّنة لهذي التركيبة (عملة+فريم)، مرتبة زمنياً تصاعدياً
+    (الأقدم أول). ترجع قائمة قواميس (مو كائنات Kline مباشرة، عشان db.py ما يعتمد
+    على analyzer.py) — المستدعي (okx_client أو scanner) يحوّلها لـKline عند الحاجة."""
+    with _lock, _connect() as conn:
+        cur = conn.execute("""
+            SELECT open_time, open, high, low, close, volume, close_time
+            FROM candle_cache WHERE symbol=? AND timeframe=? ORDER BY open_time ASC
+        """, (symbol, timeframe))
+        return [dict(row) for row in cur.fetchall()]
+
+
+def save_candles(symbol: str, timeframe: str, candles: List[Dict[str, Any]], keep_latest: int = 1200):
+    """🆕 يخزّن شموع جديدة (أو يحدّث الموجود لو نفس open_time — مفيد للشمعة اللي
+    كانت 'حيّة' وقت آخر حفظ وصارت مؤكَّدة الآن)، ثم يقلّم الأرشيف للاحتفاظ بس
+    بآخر keep_latest شمعة — نافذة متحركة ثابتة الحجم، مو نمو غير محدود بالتخزين."""
+    if not candles:
+        return
+    with _lock, _connect() as conn:
+        conn.executemany("""
+            INSERT INTO candle_cache (symbol, timeframe, open_time, open, high, low, close, volume, close_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(symbol, timeframe, open_time) DO UPDATE SET
+                open=excluded.open, high=excluded.high, low=excluded.low,
+                close=excluded.close, volume=excluded.volume, close_time=excluded.close_time
+        """, [(symbol, timeframe, c["open_time"], c["open"], c["high"], c["low"], c["close"], c["volume"], c["close_time"]) for c in candles])
+
+        # تقليم: نحتفظ بس بأحدث keep_latest شمعة، نحذف الباقي
+        conn.execute("""
+            DELETE FROM candle_cache WHERE symbol=? AND timeframe=? AND open_time NOT IN (
+                SELECT open_time FROM candle_cache WHERE symbol=? AND timeframe=?
+                ORDER BY open_time DESC LIMIT ?
+            )
+        """, (symbol, timeframe, symbol, timeframe, keep_latest))
+        conn.commit()
+
+
+def get_latest_cached_open_time(symbol: str, timeframe: str) -> Optional[int]:
+    """🆕 يرجع أحدث open_time مخزَّن لهذي التركيبة، أو None لو ما فيه أرشيف بعد
+    (يحدد هل نسوي 'أول جلب كامل' أو 'جلب تراكمي للجديد بس')."""
+    with _lock, _connect() as conn:
+        cur = conn.execute("""
+            SELECT MAX(open_time) as latest FROM candle_cache WHERE symbol=? AND timeframe=?
+        """, (symbol, timeframe))
+        row = cur.fetchone()
+        return row["latest"] if row and row["latest"] is not None else None
 
 
 def get_signal_stats() -> Dict[str, Any]:
@@ -512,6 +581,30 @@ def get_coin_performance(limit: int = 200) -> List[Dict[str, Any]]:
         r["total"] = total
         r["win_rate"] = round((r["wins"] / total) * 100.0, 1) if total > 0 else 0.0
     return rows
+
+
+def get_coin_strategy_performance_for(symbol: str, strategy_key: str) -> Optional[Dict[str, Any]]:
+    """🆕 يجيب أداء "هذي الاستراتيجية بالذات على هذي العملة بالذات" — مختلف عن
+    get_coin_performance_for (اللي يجمع كل الاستراتيجيات على عملة معينة) وعن
+    get_strategy_performance (اللي يجمع كل العملات لاستراتيجية معينة). هذا يسد
+    فجوة حقيقية: استراتيجية قوية عموماً ممكن تكون ضعيفة تحديداً على عملة معينة
+    (والعكس)، وهذا مو مكتشف بمستوى "العملة عموماً" ولا "الاستراتيجية عموماً"."""
+    with _lock, _connect() as conn:
+        cur = conn.execute("""
+            SELECT
+                SUM(CASE WHEN status='HIT_TP' THEN 1 ELSE 0 END) AS wins,
+                SUM(CASE WHEN status='HIT_SL' THEN 1 ELSE 0 END) AS losses
+            FROM trade_signals
+            WHERE status IN ('HIT_TP','HIT_SL') AND symbol=? AND strategy=?
+        """, (symbol, strategy_key))
+        row = cur.fetchone()
+    wins = row["wins"] or 0
+    losses = row["losses"] or 0
+    total = wins + losses
+    if total == 0:
+        return None
+    return {"symbol": symbol, "strategy": strategy_key, "wins": wins, "losses": losses,
+            "total": total, "win_rate": round((wins / total) * 100.0, 1)}
 
 
 def get_coin_performance_for(symbol: str, side: str) -> Optional[Dict[str, Any]]:
