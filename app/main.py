@@ -707,7 +707,7 @@ async def api_signals_execute(request: Request):
             leverage=s["okx_leverage"], margin_mode=s["okx_margin_mode"],
             stop_loss=stop_loss, tp1=tp1_price, tp2=take_profit,
             api_key=s["okx_api_key"], api_secret=s["okx_api_secret"], passphrase=s["okx_passphrase"],
-            is_testnet=s["okx_is_testnet"], is_market_order=s.get("is_instant_entry_enabled", False),
+            is_testnet=s["okx_is_testnet"], is_market_order=s.get("is_instant_entry_enabled", True),
             is_max_leverage_enabled=s.get("okx_is_max_leverage_enabled", False),
             entry_price=entry_price,
         )
@@ -717,7 +717,7 @@ async def api_signals_execute(request: Request):
             leverage=s["okx_leverage"], margin_mode=s["okx_margin_mode"],
             stop_loss=stop_loss, take_profit=take_profit,
             api_key=s["okx_api_key"], api_secret=s["okx_api_secret"], passphrase=s["okx_passphrase"],
-            is_testnet=s["okx_is_testnet"], is_market_order=s.get("is_instant_entry_enabled", False),
+            is_testnet=s["okx_is_testnet"], is_market_order=s.get("is_instant_entry_enabled", True),
             is_max_leverage_enabled=s.get("okx_is_max_leverage_enabled", False),
             entry_price=entry_price,
         )

@@ -398,6 +398,7 @@ def analyze_explosive_breakout(
     min_rr_floor: float = 3.0,
     micro: Optional[MarketMicrostructure] = None,
     trace: Optional[list] = None,
+    current_price: Optional[float] = None,
 ) -> Optional[AnalysisResult]:
     def _log(label, value, ok=None):
         if trace is not None:
@@ -410,7 +411,12 @@ def analyze_explosive_breakout(
 
     last_k5m = k5m[-1]
     prev_k5m = k5m[-2]
-    last_price = last_k5m.close
+    # 🔴 إصلاح جوهري (نفس فئة الخلل المكتشف بكل استراتيجيات "الدخول الفوري"):
+    # last_k5m.close تبقى مستخدَمة صح لتحليل **خصائص الشمعة كنمط** (فحص الجسم،
+    # الفتيل، إلخ) — هذا صحيح تماماً بيانات مؤكَّدة. لكن last_price (المرجع
+    # للسعر الحالي الفعلي، ولاحقاً entry_price) يجب يعكس اللحظة الحقيقية، لا
+    # شمعة مؤكَّدة متأخرة لغاية 5 دقايق. نستخدم current_price المُمرَّر لو متوفر.
+    last_price = current_price if current_price is not None else last_k5m.close
     if last_price <= 0.0:
         return None
 
@@ -731,6 +737,6 @@ def analyze_explosive_breakout(
     )
 
 
-def analyze(symbol: str, k4h, k1h, k15m, k5m, k_daily, micro=None, trace=None) -> Optional[AnalysisResult]:
+def analyze(symbol: str, k4h, k1h, k15m, k5m, k_daily, micro=None, trace=None, current_price=None) -> Optional[AnalysisResult]:
     """نقطة الدخول الرئيسية — تعادل OrionAnalyzer.analyze في الأصل (استراتيجية واحدة فقط)."""
-    return analyze_explosive_breakout(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro, trace=trace)
+    return analyze_explosive_breakout(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro, trace=trace, current_price=current_price)

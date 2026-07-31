@@ -33,7 +33,8 @@ from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, build_sc
 
 def analyze_crowd_trap(symbol: str, k4h, k1h, k15m, k5m, k_daily,
                         micro: Optional[MarketMicrostructure] = None,
-                        trace: Optional[list] = None) -> Optional[AnalysisResult]:
+                        trace: Optional[list] = None,
+                        current_price: Optional[float] = None) -> Optional[AnalysisResult]:
     def _log(label, value, ok=None):
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})
@@ -93,7 +94,10 @@ def analyze_crowd_trap(symbol: str, k4h, k1h, k15m, k5m, k_daily,
 
     # ما فيه نمط سعري نبني عليه الدخول (هذا مقصود بتصميم الاستراتيجية) — نستخدم
     # هيكل السعر الأخير على فريم الساعة لتحديد وقف منطقي، وATR لهدف واقعي
-    current_price = k5m[-1].close
+    # 🔴 إصلاح جوهري (نفس فئة الخلل المكتشف بكل استراتيجيات "الدخول الفوري"):
+    # نستخدم السعر الحي الحقيقي المُمرَّر من السكانر لو متوفر، بدل شمعة مؤكَّدة
+    # متأخرة لغاية 5 دقايق كاملة عن اللحظة الفعلية.
+    current_price = current_price if current_price is not None else k5m[-1].close
     atr_val = atr(k1h, 14)
     if atr_val <= 0 or current_price <= 0:
         return None

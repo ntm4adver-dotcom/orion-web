@@ -32,7 +32,8 @@ from .volume_profile import compute_volume_profile
 
 def analyze_fabio_scalper(symbol: str, k4h, k1h, k15m, k5m, k_daily,
                            micro: Optional[MarketMicrostructure] = None,
-                           trace: Optional[list] = None) -> Optional[AnalysisResult]:
+                           trace: Optional[list] = None,
+                           current_price: Optional[float] = None) -> Optional[AnalysisResult]:
     def _log(label, value, ok=None):
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})
@@ -62,7 +63,8 @@ def analyze_fabio_scalper(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     if profile is None:
         return None
 
-    current_price = k5m[-1].close if k5m else window[-1].close
+    # 🔴 إصلاح جوهري: نستخدم السعر الحي الحقيقي المُمرَّر من السكانر لو متوفر
+    current_price = current_price if current_price is not None else (k5m[-1].close if k5m else window[-1].close)
     atr_val = atr(k15m, 14)
     if atr_val <= 0:
         return None

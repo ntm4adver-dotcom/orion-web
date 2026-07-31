@@ -455,7 +455,7 @@ class ScannerState:
                 for strategy_key, strategy_fn in get_active_strategies(
                         settings.get("active_strategy", "explosive_breakout"),
                         settings.get("combined_enabled_strategies", "")):
-                    result = strategy_fn(symbol, k4h_confirmed, k1h_confirmed, k15m_confirmed, k5m_confirmed, k_daily_confirmed, micro=micro)
+                    result = strategy_fn(symbol, k4h_confirmed, k1h_confirmed, k15m_confirmed, k5m_confirmed, k_daily_confirmed, micro=micro, current_price=current_live_price)
                     if result is None:
                         continue
                     matched_any = True
@@ -610,7 +610,7 @@ class ScannerState:
                     stop_loss=result.stop_loss, tp1=tp1_price, tp2=result.take_profit,
                     api_key=settings["okx_api_key"], api_secret=settings["okx_api_secret"],
                     passphrase=settings["okx_passphrase"], is_testnet=settings["okx_is_testnet"],
-                    is_market_order=settings.get("is_instant_entry_enabled", False),
+                    is_market_order=settings.get("is_instant_entry_enabled", True),
                     is_max_leverage_enabled=settings.get("okx_is_max_leverage_enabled", False),
                     entry_price=result.entry_price,
                 )
@@ -621,7 +621,7 @@ class ScannerState:
                     stop_loss=result.stop_loss, take_profit=result.take_profit,
                     api_key=settings["okx_api_key"], api_secret=settings["okx_api_secret"],
                     passphrase=settings["okx_passphrase"], is_testnet=settings["okx_is_testnet"],
-                    is_market_order=settings.get("is_instant_entry_enabled", False),
+                    is_market_order=settings.get("is_instant_entry_enabled", True),
                     is_max_leverage_enabled=settings.get("okx_is_max_leverage_enabled", False),
                     entry_price=result.entry_price,
                 )

@@ -135,7 +135,8 @@ def _detect_stop_hunt(klines: List[Kline], lookback: int = 50, vol_period: int =
 
 def analyze_stop_hunt(symbol: str, k4h, k1h, k15m, k5m, k_daily,
                        micro: Optional[MarketMicrostructure] = None,
-                       trace: Optional[list] = None) -> Optional[AnalysisResult]:
+                       trace: Optional[list] = None,
+                       current_price: Optional[float] = None) -> Optional[AnalysisResult]:
     def _log(label, value, ok=None):
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})
@@ -168,20 +169,14 @@ def analyze_stop_hunt(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     # الصفقة. نستخدم الآن **نفس مرجع السعر بالضبط** (k5m[-1].close) كنقطة الدخول،
     # عشان يكون متطابق 100% مع اللي يتحقق منه السكانر لاحقاً — يلغي فجوة التزامن
     # هذي نهائياً، بدل ما نعتمد بس على رفض السكانر كطبقة حماية أخيرة.
-    if k5m:
+    # 🔴 تحديث إضافي (اكتُشف بمراجعة تفاعل مع إصلاح "البيانات المؤكَّدة" اللاحق):
+    # k5m[-1] صارت الآن **مؤكَّدة** (متأخرة لغاية 5 دقايق)، مو الشمعة الحيّة اللي
+    # كانت وقت الإصلاح الأصلي أعلاه. نستخدم الآن current_price (السعر الحي الحقيقي
+    # المُمرَّر من السكانر) لو متوفر — أدق تطابقاً مع فحص السكانر الفعلي وقت اللحظة.
+    if current_price is not None:
+        entry_price = current_price
+    elif k5m:
         entry_price = k5m[-1].close
-
-    # 🔴 إصلاح جذري (باگ حقيقي مكتشف بمراجعة السكانر بالكامل): بعد تحديث entry_price
-    # فوق (من إغلاق شمعة الساعة لإغلاق 5 دقائق الأحدث)، كان take_profit يبقى كما هو —
-    # محسوب أصلاً من entry_price **القديم** (بفارق قد يصل ساعة كاملة من الحركة).
-    # يعني عائد/مخاطرة الفعلي يصير مختلف تماماً عن 1:3 المُعلن (أحياناً أقل بكثير)،
-    # وهذي الاستراتيجية أصلاً **بدون أي فلتر أدنى لعائد/مخاطرة** يمسك هذا الانحراف —
-    # صفقات بعائد/مخاطرة ضعيف جداً كانت تمر بصمت. الآن نعيد حساب الهدف بالضبط
-    # 1:3 بالنسبة لسعر الدخول **الفعلي** المُستخدم، ونضيف فلتر أدنى صريح كحماية أخيرة.
-    if side == "Long":
-        tp = entry_price + (entry_price - sl) * 3.0
-    else:
-        tp = entry_price - (sl - entry_price) * 3.0
 
     # تحقق أمان: نتأكد الاتجاه لسا سليم منطقياً بعد تحديث سعر الدخول (نادر جداً
     # يصير خلاف كذا، لكن حماية إضافية بدون كلفة)
@@ -233,10 +228,6 @@ def analyze_stop_hunt(symbol: str, k4h, k1h, k15m, k5m, k_daily,
 
     probability = min(95, probability)
     rr = round(abs(tp - entry_price) / risk, 2) if risk > 0 else 3.0
-    _log("عائد/مخاطرة (مُعاد حسابه بالنسبة لسعر الدخول الفعلي)", f"1:{rr}")
-    if rr < 2.0:
-        _log("❌ فلتر أدنى عائد/مخاطرة (1:2) — كان غائباً بالكامل قبل هذا الإصلاح", f"1:{rr} غير كافٍ — رفض", False)
-        return None
     _log("✅ القرار النهائي", f"{side} — احتمالية {probability}%", True)
 
     type_ar = "صعودي (سحب سيولة القيعان)" if side == "Long" else "هبوطي (سحب سيولة القمم)"

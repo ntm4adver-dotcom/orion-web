@@ -35,7 +35,8 @@ def _get_member_strategies():
 
 def analyze_confluence(symbol: str, k4h, k1h, k15m, k5m, k_daily,
                         micro: Optional[MarketMicrostructure] = None,
-                        trace: Optional[list] = None) -> Optional[AnalysisResult]:
+                        trace: Optional[list] = None,
+                        current_price: Optional[float] = None) -> Optional[AnalysisResult]:
     def _log(label, value, ok=None):
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})
@@ -52,7 +53,7 @@ def analyze_confluence(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     for key, fn, label in members:
         try:
             sub_trace: list = []
-            result = fn(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro, trace=sub_trace)
+            result = fn(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro, trace=sub_trace, current_price=current_price)
         except Exception:
             result = None
         if result is None:

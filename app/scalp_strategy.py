@@ -30,7 +30,8 @@ from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, ema, hma
 def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15m: List[Kline],
                              k5m: List[Kline], k_daily: List[Kline],
                              micro: Optional[MarketMicrostructure] = None,
-                             trace: Optional[list] = None) -> Optional[AnalysisResult]:
+                             trace: Optional[list] = None,
+                             current_price: Optional[float] = None) -> Optional[AnalysisResult]:
     def _log(label, value, ok=None):
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})
@@ -152,7 +153,14 @@ def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
         _log("❌ فلتر الفائدة المفتوحة (OI)", f"تغيّر OI={oi_change_pct:.2f}% (سيولة تخرج) — رفض", False)
         return None
 
-    entry_price = last.close
+    # 🔴 إصلاح جوهري (اكتُشف بمراجعة تفاعل إصلاحين سابقين): بعد إصلاح "البيانات
+    # المؤكَّدة" (استبعاد الشمعة الحيّة قيد التكوين)، last.close صارت تعكس إغلاق
+    # آخر شمعة **مؤكَّدة** — متأخرة لغاية 5 دقايق كاملة عن اللحظة الفعلية. هذا
+    # صحيح تماماً لتحديد **النمط والتأكيد** (الغرض الأصلي من الإصلاح)، لكن خطأ
+    # لحساب **نقطة الدخول الفورية** نفسها (يفترض تعكس السعر الآن، مو قبل 5 دقايق).
+    # نستخدم الآن current_price (السعر الحي الحقيقي المُمرَّر من السكانر) لو متوفر،
+    # وإلا (كالباك تيست، ما فيه "سعر حي" منفصل) نرجع لإغلاق آخر شمعة كأفضل تقريب.
+    entry_price = current_price if current_price is not None else last.close
     safe_buffer = max(atr5m * 0.6, entry_price * 0.004)  # الأكبر بين ATR موسَّع أو 0.4% من السعر
     # 🔴 خلل حقيقي مكتشف بمراجعة عميقة للمنطق (بطلب صريح، مو ترقيع رقم): الوقف كان
     # يعتمد بس على min/max(prev, last) — **يتجاهل شمعة التأكيد نفسها (confirm_candle)

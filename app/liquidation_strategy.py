@@ -27,14 +27,20 @@ from .liquidation_heatmap import estimate_liquidation_heatmap
 
 def analyze_liquidation_hunter(symbol: str, k4h, k1h, k15m, k5m, k_daily,
                                 micro: Optional[MarketMicrostructure] = None,
-                                trace: Optional[list] = None) -> Optional[AnalysisResult]:
+                                trace: Optional[list] = None,
+                                current_price: Optional[float] = None) -> Optional[AnalysisResult]:
     def _log(label, value, ok=None):
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})
 
+    # 🔴 إصلاح جوهري: نستخدم السعر الحي الحقيقي المُمرَّر من السكانر لو متوفر،
+    # ونحسبه **أولاً** قبل تمريره للانفجار السعري المُستدعى داخلياً — عشان تناسق
+    # كامل (نفس السعر بالضبط يُستخدم بكل مراحل التحليل، مو قيم مختلفة قليلاً)
+    current_price = current_price if current_price is not None else (k5m[-1].close if k5m else k1h[-1].close)
+
     # الخطوة 1: الانفجار السعري كمُطلِق
     breakout_trace: list = []
-    breakout_result = analyze(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro, trace=breakout_trace)
+    breakout_result = analyze(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro, trace=breakout_trace, current_price=current_price)
     if trace is not None:
         trace.append({"check": "── ⚡ المرحلة 1: كاشف الحدث (الانفجار السعري) ──", "value": "", "ok": None})
         trace.extend(breakout_trace)
@@ -48,8 +54,6 @@ def analyze_liquidation_hunter(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     # ضروري ويوضّح الكود بدقة أكبر.
     if not k1h or len(k1h) < 100:
         return None
-
-    current_price = k5m[-1].close if k5m else k1h[-1].close
     funding_rate = micro.funding_rate if micro else None
     long_short_ratio = micro.long_short_ratio if micro else None
 
