@@ -610,7 +610,7 @@ class ScannerState:
                     stop_loss=result.stop_loss, tp1=tp1_price, tp2=result.take_profit,
                     api_key=settings["okx_api_key"], api_secret=settings["okx_api_secret"],
                     passphrase=settings["okx_passphrase"], is_testnet=settings["okx_is_testnet"],
-                    is_market_order=settings.get("is_instant_entry_enabled", True),
+                    is_market_order=settings.get("is_instant_entry_enabled", False),
                     is_max_leverage_enabled=settings.get("okx_is_max_leverage_enabled", False),
                     entry_price=result.entry_price,
                 )
@@ -621,7 +621,7 @@ class ScannerState:
                     stop_loss=result.stop_loss, take_profit=result.take_profit,
                     api_key=settings["okx_api_key"], api_secret=settings["okx_api_secret"],
                     passphrase=settings["okx_passphrase"], is_testnet=settings["okx_is_testnet"],
-                    is_market_order=settings.get("is_instant_entry_enabled", True),
+                    is_market_order=settings.get("is_instant_entry_enabled", False),
                     is_max_leverage_enabled=settings.get("okx_is_max_leverage_enabled", False),
                     entry_price=result.entry_price,
                 )

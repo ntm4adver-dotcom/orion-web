@@ -26,10 +26,49 @@ from typing import Optional, List
 from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, _get_bias, build_score_breakdown
 
 
-def _find_swing_extremes(window: List[Kline]):
-    high_idx = max(range(len(window)), key=lambda i: window[i].high)
-    low_idx = min(range(len(window)), key=lambda i: window[i].low)
-    return high_idx, window[high_idx].high, low_idx, window[low_idx].low
+def _find_swing_pivots(window: List[Kline], left: int = 3, right: int = 3) -> list:
+    """🔴 إصلاح جذري (بطلب صريح، بعد اكتشاف مشكلة حقيقية بمراجعة الشارت): الطريقة
+    القديمة (`_find_swing_extremes`) كانت تاخذ أعلى high وأدنى low "مطلقين" على
+    كامل نافذة الـ150 شمعة (12.5 ساعة) — بدون أي اعتبار لموقعهم الزمني، ولا لعدد
+    الأرجل السعرية الفعلية بينهم. لو صار خلال الـ12.5 ساعة صعود-هبوط-صعود-هبوط
+    (عدة أرجل)، الدالة توهم إنه "تراجع واحد بسيط" بينما هو فعلياً محصلة حركة
+    مركّبة قديمة — فيرسم فيبوناتشي على مدى مضلل تماماً (واسع جداً لو القمة/القاع
+    قديمين، أو غير ممثل للتراجع الحقيقي لو صدفة قريبين من نهاية النافذة).
+
+    الحل: خوارزمية "Swing Pivots" حقيقية (Fractal) — نقطة تُعتبر قمة هيكلية لو
+    كانت أعلى high من `left` شمعة قبلها و`right` شمعة بعدها معاً (وبالعكس للقاع).
+    يرجع قائمة مرتبة زمنياً: [(index, price, 'high'|'low'), ...] — نقاط انعكاس
+    محلية حقيقية، مو مجرد أعلى/أدنى سعر بمعزل عن الزمن."""
+    n = len(window)
+    pivots = []
+    for i in range(left, n - right):
+        seg_highs = [window[j].high for j in range(i - left, i + right + 1)]
+        seg_lows = [window[j].low for j in range(i - left, i + right + 1)]
+        if window[i].high == max(seg_highs) and seg_highs.count(window[i].high) == 1:
+            pivots.append((i, window[i].high, "high"))
+        if window[i].low == min(seg_lows) and seg_lows.count(window[i].low) == 1:
+            pivots.append((i, window[i].low, "low"))
+    return pivots
+
+
+def _last_alternating_leg(pivots: list):
+    """من قائمة نقاط الانعكاس الهيكلية (مرتبة زمنياً)، يرجع آخر "رجلة" كاملة
+    متبادلة (قمة→قاع أو قاع→قمة) — أي آخر تراجع/انعكاس فعلي حصل، بغض النظر عن
+    أي حركة مركّبة أقدم قبله بنفس النافذة. لو تكرر نفس نوع النقطة (قمم متتالية
+    بدون قاع بينها مثلاً)، نحتفظ بالأقصى بينهم فقط (أعلى قمة أو أدنى قاع)، عشان
+    نمثل النقطة الهيكلية الحقيقية الوحيدة، لا كل قمة محلية صغيرة على حدة."""
+    if not pivots:
+        return None
+    cleaned = []
+    for p in pivots:
+        if cleaned and cleaned[-1][2] == p[2]:
+            if (p[2] == "high" and p[1] > cleaned[-1][1]) or (p[2] == "low" and p[1] < cleaned[-1][1]):
+                cleaned[-1] = p
+        else:
+            cleaned.append(p)
+    if len(cleaned) < 2:
+        return None
+    return cleaned[-2], cleaned[-1]  # (بداية الرجلة الأخيرة, نهايتها)
 
 
 def analyze_mtf_fib_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
@@ -59,7 +98,39 @@ def analyze_mtf_fib_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     # تطابق أفق HMA50 بالضبط — واسعة كفاية لتفادي ضجيج النافذة الضيقة القديمة
     # (35 شمعة)، لكن متسقة زمنياً مع معنى "تراجع حالي" الحقيقي.
     window = k5m[-150:]
-    high_idx, swing_high, low_idx, swing_low = _find_swing_extremes(window)
+
+    # 🔴 الإصلاح الجذري نفسه: بدل global max/min على كامل النافذة، نستخرج أولاً
+    # كل نقاط الانعكاس الهيكلية الحقيقية (pivots)، ثم ناخذ آخر "رجلة" متبادلة
+    # منها فقط — يعني آخر تراجع فعلي حصل، بصرف النظر عن أي حركة قديمة قبله.
+    pivots = _find_swing_pivots(window, left=3, right=3)
+    leg = _last_alternating_leg(pivots)
+    if leg is None:
+        _log("❌ رجلة تراجع هيكلية واضحة (Swing Leg)", "لا توجد نقاط انعكاس محلية كافية بالنافذة لتحديد تراجع حقيقي", False)
+        return None
+    start_point, end_point = leg
+    start_idx, start_price, start_type = start_point
+    end_idx, end_price, end_type = end_point
+
+    # 🆕 فحص حداثة (بطلب صريح — نفس الملاحظة): نقطة نهاية الرجلة (قاع التراجع
+    # بترند صاعد، أو قمة التراجع بترند هابط) لازم تكون قريبة فعلاً من اللحظة
+    # الحالية — مو نقطة انعكاس قديمة انتهى أثرها من ساعات وصار بعدها حركة تانية.
+    # 40 شمعة 5د ≈ 3.3 ساعة: هامش معقول لـ"تراجع حالي" ضمن ترند أفقه ~13.75 ساعة.
+    RECENCY_LIMIT = 40
+    candles_since_end = (len(window) - 1) - end_idx
+    _log("حداثة نقطة نهاية التراجع", f"{candles_since_end} شمعة (5د) من الآن — الحد {RECENCY_LIMIT}")
+    if candles_since_end > RECENCY_LIMIT:
+        _log("❌ فلتر حداثة التراجع", "نقطة الانعكاس الأخيرة قديمة جداً — ليست تراجعاً حالياً — رفض", False)
+        return None
+
+    if start_type == "high" and end_type == "low":
+        high_idx, swing_high = start_idx, start_price
+        low_idx, swing_low = end_idx, end_price
+    elif start_type == "low" and end_type == "high":
+        low_idx, swing_low = start_idx, start_price
+        high_idx, swing_high = end_idx, end_price
+    else:
+        return None
+
     swing_range = swing_high - swing_low
     if swing_range <= 0:
         return None
