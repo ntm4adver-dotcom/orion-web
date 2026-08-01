@@ -63,6 +63,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "breakeven_trigger_r_multiple": 1.0,  # نسبة المخاطرة (R) المطلوبة لتفعيل وقف التعادل — تُستخدم بس لو الوضع التلقائي أدناه مُلغى
     "is_auto_breakeven_half_target_enabled": 1,  # الافتراضي: تفعيل تلقائي لوقف التعادل عند نصف عائد/مخاطرة الصفقة نفسها
     "is_split_targets_enabled": 0,  # تقسيم الهدف لهدفين: نصف الكمية عند نصف المسافة، والنصف الثاني عند الهدف الكامل
+    "is_fixed_rr_enabled": 0,  # 🆕 فرض عائد/مخاطرة ثابت على كل صفقة (يتجاوز هدف الاستراتيجية المحسوب)
+    "fixed_rr_value": 3.0,  # 🆕 قيمة R الثابتة المفروضة (لو الإعداد أعلاه مفعّل) - الهدف = الدخول ± (المخاطرة × هذا الرقم)
     "combined_enabled_strategies": "",  # قائمة مفاتيح استراتيجيات مفصولة بفاصلة تعمل داخل وضع "الكل معاً" — فاضي = الكل مفعّل
     # OKX trading connection
     "okx_api_key": "",
@@ -237,7 +239,7 @@ def get_settings() -> Dict[str, Any]:
                  "is_coin_learning_enabled", "is_auto_backup_enabled", "is_gdrive_backup_enabled",
                  "is_efficiency_filter_enabled", "is_market_alignment_filter_enabled",
                  "is_breakeven_stop_enabled", "is_auto_breakeven_half_target_enabled",
-                 "is_split_targets_enabled", "is_market_regime_filter_enabled", "is_reverse_mode_enabled"):
+                 "is_split_targets_enabled", "is_market_regime_filter_enabled", "is_reverse_mode_enabled", "is_fixed_rr_enabled"):
         settings[bkey] = bool(int(settings.get(bkey, 0)))
     return settings
 

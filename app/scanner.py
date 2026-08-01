@@ -80,6 +80,25 @@ def evaluate_signal_filters(settings: dict, symbol: str, strategy_key: str, resu
     الخلفي يعكس فعلياً نفس سلوك التطبيق الحي، مو أرقام ثابتة منفصلة.
     ترجع (accepted: bool, reason: str, counter_key: str). تُعدّل result بمكانها
     لو تحقق تعزيز الثقة (نفس التعديل يصير بالحي والباك تيست معاً)."""
+    # 🔴 حارس تسلسل منطقي صارم (بطلب صريح، بعد اكتشاف عكس منطقي حقيقي بفيبوناتشي):
+    # فحوصات هيكلية أساسية **لازم** تتحقق دائماً بغض النظر عن الاستراتيجية — تمسك
+    # أي تناقض هيكلي (وقف/هدف بالجهة الغلط، عائد/مخاطرة سلبي أو صفري، اتجاه غير
+    # صالح) فوراً، قبل حتى ما نصل لأي فلتر آخر. يُطبَّق على **كل** استراتيجية
+    # (حالية ومستقبلية) بالحي والباك تيست معاً — طبقة حماية شاملة لا تعتمد على
+    # مراجعة يدوية لكل استراتيجية لحالها.
+    if result.side not in ("Long", "Short"):
+        return False, f"اتجاه غير صالح: '{result.side}'", "sequence_integrity_invalid_side"
+    if result.side == "Long":
+        if not (result.stop_loss < result.entry_price < result.take_profit):
+            return False, f"تسلسل هيكلي غلط لصفقة شراء: وقف={result.stop_loss:.6g}، دخول={result.entry_price:.6g}، هدف={result.take_profit:.6g} — يفترض وقف<دخول<هدف", "sequence_integrity_broken"
+    else:
+        if not (result.take_profit < result.entry_price < result.stop_loss):
+            return False, f"تسلسل هيكلي غلط لصفقة بيع: هدف={result.take_profit:.6g}، دخول={result.entry_price:.6g}، وقف={result.stop_loss:.6g} — يفترض هدف<دخول<وقف", "sequence_integrity_broken"
+    risk = abs(result.entry_price - result.stop_loss)
+    reward = abs(result.take_profit - result.entry_price)
+    if risk <= 0 or reward <= 0:
+        return False, f"مخاطرة أو عائد صفري/سلبي (مخاطرة={risk:.6g}, عائد={reward:.6g})", "sequence_integrity_zero_risk_reward"
+
     current_live_price = k5m[-1].close if k5m else None
 
     if current_live_price and current_live_price > 0:
@@ -483,6 +502,23 @@ class ScannerState:
             )
 
     def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k15m, k5m, btc_trend=None, btc_klines=None, market_regime_er=None, current_live_price=None):
+        # 🆕 فرض عائد/مخاطرة ثابت (بطلب صريح): يتجاوز هدف الاستراتيجية المحسوب،
+        # ويفرض R محدد يكتبه المستخدم بنفسه — لا يزيد ولا ينقص. يُطبَّق **أول شي**
+        # (قبل الهيدج، الحارس، أي فلتر) عشان الوقف يبقى كما حسبته الاستراتيجية
+        # (بقي كما هو، بس الهدف يتغيّر)، وكل الحسابات اللاحقة (نسبة R، تقسيم
+        # الأهداف، إلخ) تعتمد على الهدف الثابت الجديد بشكل متسق تلقائياً.
+        if settings.get("is_fixed_rr_enabled", False):
+            fixed_rr = float(settings.get("fixed_rr_value", 3.0))
+            if fixed_rr > 0:
+                risk_distance = abs(result.entry_price - result.stop_loss)
+                if risk_distance > 0:
+                    if result.side == "Long":
+                        result.take_profit = result.entry_price + (risk_distance * fixed_rr)
+                    else:
+                        result.take_profit = result.entry_price - (risk_distance * fixed_rr)
+                    result.rr = round(fixed_rr, 2)
+                    result.behavior = f"🎯 [R ثابت مفروض: {fixed_rr}] " + result.behavior
+
         # 🔴 current_live_price الآن يُمرَّر صراحة من المستدعي (يعكس السعر اللحظي
         # الحقيقي وقت الفحص) — k4h/k1h/k15m/k5m هنا أصبحت نسخ "مؤكَّدة" (بدون آخر
         # شمعة حيّة قيد التكوين)، فما نقدر نشتق السعر اللحظي الحقيقي منها بعد الآن.

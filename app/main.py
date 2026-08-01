@@ -96,7 +96,7 @@ async def settings_save(request: Request):
                   "is_cancel_if_exceeds_target_enabled",
                   "is_efficiency_filter_enabled", "is_market_alignment_filter_enabled",
                   "is_breakeven_stop_enabled", "is_auto_breakeven_half_target_enabled",
-                  "is_split_targets_enabled", "is_market_regime_filter_enabled", "is_reverse_mode_enabled"]
+                  "is_split_targets_enabled", "is_market_regime_filter_enabled", "is_reverse_mode_enabled", "is_fixed_rr_enabled"]
     updates = {}
     for key in db.DEFAULT_SETTINGS:
         if key in checkboxes:

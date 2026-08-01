@@ -217,6 +217,27 @@
       </p>
     </div>
 
+    <div class="card" style="margin-top:16px; background:rgba(168,85,247,0.05);">
+      <h3 style="margin-top:0;">🎯 فرض عائد/مخاطرة ثابت (R محدد)</h3>
+      <div class="switch">
+        <input type="checkbox" name="is_fixed_rr_enabled" {{ 'checked' if s.is_fixed_rr_enabled }}>
+        <label style="margin:0;">فرض R ثابت على كل صفقة (يتجاوز هدف الاستراتيجية المحسوب)</label>
+      </div>
+      <div style="margin-top:10px;">
+        <label>قيمة R الثابتة المفروضة</label>
+        <input type="number" step="0.1" min="0.5" max="20" name="fixed_rr_value" value="{{ s.fixed_rr_value }}">
+      </div>
+      <p class="muted" style="margin-top:6px; font-size:12px; line-height:1.8;">
+        لما مفعّل: **الوقف يبقى كما تحسبه الاستراتيجية** (بدون تغيير — يمثل تحليلها الفني الحقيقي للمخاطرة)،
+        لكن **الهدف يُستبدل بالكامل** بالرقم اللي تكتبه هنا بالضبط — لا يزيد ولا ينقص عن هذا الـR، بغض النظر
+        عن هدف الاستراتيجية الأصلي المحسوب من هيكل السعر.<br><br>
+        مثال: لو حطيت 3، وصفقة عندها مخاطرة 2%، الهدف الجديد = الدخول + (2% × 3) = 6% بعيد عن الدخول،
+        بغض النظر عن أي هدف كانت الاستراتيجية حسبته أصلاً.<br><br>
+        ⚠️ يتوافق تلقائياً مع تقسيم الأهداف والتعادل التلقائي لو مفعّلين معه — الهدف الثابت هنا يصير
+        "الهدف الأصلي" اللي تُبنى عليه بقية الحسابات.
+      </p>
+    </div>
+
     <script>
     function toggleCombinedBox(){
       const sel = document.getElementById('active-strategy-select');
