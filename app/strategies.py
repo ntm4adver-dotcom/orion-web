@@ -18,8 +18,12 @@ from .liquidation_strategy import analyze_liquidation_hunter
 from .fabio_scalper_strategy import analyze_fabio_scalper
 from .mtf_fib_strategy import analyze_mtf_fib_trend
 from .crowd_trap_strategy import analyze_crowd_trap
-from .confluence_strategy import analyze_confluence
+from .daily_breakout_strategy import analyze_daily_breakout
 from .climactic_reversal_strategy import analyze_climactic_reversal
+
+# ⚠️ استراتيجيات أُزيلت من السجل (لسا موجودة كملفات، بس مو مسجّلة/مفعّلة):
+#  - confluence ("استراتيجية التوافق"): أُزيلت بطلب صريح، واستُبدلت بـ
+#    daily_breakout (اختراق قمة/قاع اليوم السابق بفوليوم + إغلاق شمعة كامل).
 
 # ⚠️ استراتيجيات أُزيلت من السجل (لسا موجودة كملفات، بس مو مسجّلة/مفعّلة):
 #  - ict_smart_sweep: بيانات فعلية أظهرت صفر إشارة بأي وقت رغم أيام تشغيل — شروطها
@@ -63,9 +67,9 @@ STRATEGY_REGISTRY = {
         "label": "🎭 مصيدة الحشد (Crowd Trap Divergence) — تصميم أصيل، بدون نمط سعري",
         "fn": analyze_crowd_trap,
     },
-    "confluence": {
-        "label": "🤝 استراتيجية التوافق (تحتاج اتفاق استراتيجيتين أو أكثر، R:R≥5)",
-        "fn": analyze_confluence,
+    "daily_breakout": {
+        "label": "📅 اختراق قمة/قاع اليوم السابق (Previous Day High/Low Breakout)",
+        "fn": analyze_daily_breakout,
     },
     "climactic_reversal": {
         "label": "🌊 الارتداد بعد فوليوم التصريف/الاستنزاف (Selling/Buying Climax)",
