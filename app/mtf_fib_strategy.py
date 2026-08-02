@@ -23,7 +23,7 @@
 """
 from typing import Optional, List
 
-from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, _get_bias, build_score_breakdown
+from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, _get_bias, build_score_breakdown, find_significant_swing
 
 
 def _find_swing_extremes(window: List[Kline]):
@@ -59,9 +59,24 @@ def analyze_mtf_fib_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     # أفق الاتجاه المكتشف، مو يتجاوزه بأكثر من الضعف. الآن 150 شمعة (12.5 ساعة)
     # تطابق أفق HMA50 بالضبط — واسعة كفاية لتفادي ضجيج النافذة الضيقة القديمة
     # (35 شمعة)، لكن متسقة زمنياً مع معنى "تراجع حالي" الحقيقي.
-    window = k5m[-150:]
-    high_idx, swing_high, low_idx, swing_low = _find_swing_extremes(window)
+    # 🔴 إصلاح جذري (بناءً على مراجعة شارت حقيقي MUBARAKUSDT): الطريقة القديمة
+    # كانت تاخذ أعلى/أدنى نقطة بنافذة ثابتة 150 شمعة بشكل أعمى، بدون أي تحقق
+    # هل هذي النقطة فعلاً "بيفوت" هيكلي ذو معنى، أو مجرد تذبذب صغير داخل رينج
+    # أوسع بكثير (بالضبط اللي صار: فيبوناتشي ارتسم على نطاق ضيق جداً غير ممثل
+    # للحركة الحقيقية). الآن نستخدم find_significant_swing: يشترط انعكاس
+    # يتجاوز عتبة ATR (بيفوت هيكلي حقيقي)، ويتحقق إن رجل الحركة نفسها نظيفة
+    # اتجاهياً (Efficiency Ratio)، مو رينج متذبذب. لو ما لقى سوينق مؤهل، نرفض
+    # الإشارة كاملة بدل ما نفرض سوينق ضعيف الجودة.
+    atr_5m = atr(k5m, 14)
+    window = k5m[-400:]
+    swing = find_significant_swing(window, atr_5m, min_move_atr=3.0, min_leg_efficiency=0.35)
+    if swing is None:
+        _log("❌ سوينق هيكلي مؤهل (ZigZag + Efficiency Ratio)", "لا يوجد انعكاس بحجم كافٍ أو الحركة غير نظيفة اتجاهياً — رفض", False)
+        return None
+    high_idx, swing_high = swing["high_idx"], swing["swing_high"]
+    low_idx, swing_low = swing["low_idx"], swing["swing_low"]
     swing_range = swing_high - swing_low
+    _log("سوينق هيكلي مكتشف (ZigZag)", f"قمة {swing_high:.6g} @ {high_idx} ← قاع {swing_low:.6g} @ {low_idx}, ER={swing['leg_efficiency']:.2f}", True)
     if swing_range <= 0:
         return None
 
@@ -77,7 +92,12 @@ def analyze_mtf_fib_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     # (آخر نقطة زمنياً، حيث الاستعادة الهابطة تبدأ)، مو القاع! الكود كان يتحقق
     # من الطرف **المعاكس تماماً** بكلا السيناريوهين. الإصلاح: نتحقق سحب السيولة
     # عند **آخر نقطة زمنياً بالتسلسل** (نقطة الانعكاس الحقيقية)، مو الأولى.
-    pre_window = k5m[-350:-150]
+    # 🔴 تصحيح تناسق: بعد التحول لـfind_significant_swing (نافذة متغيرة 400
+    # شمعة بدل 150 ثابتة)، pre_window لازم يكون نسبي لبداية السوينق المكتشف
+    # فعلياً (min(low_idx, high_idx))، مو تقطيعة ثابتة [-350:-150] كانت مبنية
+    # على افتراض النافذة القديمة 150 فقط.
+    leg_start_idx = min(low_idx, high_idx)
+    pre_window = window[max(0, leg_start_idx - 150):leg_start_idx]
     liquidity_swept = False
     if pre_window:
         if high_idx < low_idx:  # القمة أولاً، القاع أخيراً (main_trend صاعد) — نقطة الانعكاس = القاع

@@ -293,6 +293,81 @@ def efficiency_ratio(klines: List[Kline], period: int = 20) -> float:
     return net_change / total_movement
 
 
+def find_significant_swing(klines: List[Kline], atr_val: float, min_move_atr: float = 3.0,
+                            min_leg_efficiency: float = 0.35, max_lookback: int = 400):
+    """🆕 اكتشاف سوينق (قمة/قاع) حقيقي هيكلياً — بديل عن أخذ أعلى/أدنى نقطة
+    بنافذة ثابتة الطول بشكل أعمى (كان يلقط تذبذبات صغيرة داخل رينج أوسع على
+    إنها "السوينق"، بدون أي معنى هيكلي حقيقي).
+
+    الفكرة (ZigZag مبسّط):
+      1) نمشي عبر الشموع من الأقدم للأحدث ونتتبع أعلى قمة/أدنى قاع مؤقتين.
+      2) نأكّد "بيفوت" (نقطة تحول محورية) بس لما الانعكاس من القمة/القاع
+         المؤقت يتجاوز عتبة `min_move_atr × ATR` — عتبة موضوعية تفرّق بين
+         انعكاس هيكلي حقيقي وتذبذب عادي، بدل الاعتماد على طول نافذة تعسفي.
+      3) نرجع بس **آخر رجل حركة (Leg) مؤكدة** بين آخر بيفوتين، ونتحقق إن
+         هذي الحركة نفسها "نظيفة" اتجاهياً (Efficiency Ratio ≥ الحد الأدنى)
+         — يعني حركة اتجاهية حقيقية، مو رينج متذبذب صدفة أعلاه/أدناه أعلى/
+         أدنى نقطة.
+
+    يرجع None لو ما لقى سوينق مؤهل (بدل ما يفرض سوينق ضعيف الجودة).
+    """
+    if atr_val <= 0 or len(klines) < 20:
+        return None
+
+    window = klines[-max_lookback:]
+    threshold = atr_val * min_move_atr
+
+    pivots = []  # كل عنصر: (index, price, "high"|"low")
+    dir_up = None
+    ext_idx, ext_price = 0, window[0].close
+
+    for i, k in enumerate(window):
+        if dir_up is None:
+            if k.high - ext_price >= threshold:
+                pivots.append((ext_idx, ext_price, "low"))
+                dir_up, ext_idx, ext_price = True, i, k.high
+            elif ext_price - k.low >= threshold:
+                pivots.append((ext_idx, ext_price, "high"))
+                dir_up, ext_idx, ext_price = False, i, k.low
+            continue
+
+        if dir_up:
+            if k.high > ext_price:
+                ext_idx, ext_price = i, k.high
+            elif ext_price - k.low >= threshold:
+                pivots.append((ext_idx, ext_price, "high"))
+                dir_up, ext_idx, ext_price = False, i, k.low
+        else:
+            if k.low < ext_price:
+                ext_idx, ext_price = i, k.low
+            elif k.high - ext_price >= threshold:
+                pivots.append((ext_idx, ext_price, "low"))
+                dir_up, ext_idx, ext_price = True, i, k.high
+
+    pivots.append((ext_idx, ext_price, "high" if dir_up else "low"))
+
+    if len(pivots) < 2:
+        return None  # ما فيه حركة كافية القوة تكوّن بيفوت هيكلي واحد حتى
+
+    # آخر رجل حركة مؤكدة = بين آخر بيفوتين
+    (idx_a, price_a, kind_a), (idx_b, price_b, kind_b) = pivots[-2], pivots[-1]
+    if idx_b <= idx_a:
+        return None
+
+    leg_klines = window[idx_a:idx_b + 1]
+    er = efficiency_ratio(leg_klines, period=len(leg_klines) - 1) if len(leg_klines) > 2 else 0.0
+    if er < min_leg_efficiency:
+        return None  # الحركة موجودة بس "متسخة" (رينج/تذبذب) — مو رجل اتجاهية نظيفة
+
+    if kind_a == "low" and kind_b == "high":
+        return {"low_idx": idx_a, "swing_low": price_a, "high_idx": idx_b, "swing_high": price_b,
+                "direction": "up", "leg_efficiency": er}
+    if kind_a == "high" and kind_b == "low":
+        return {"high_idx": idx_a, "swing_high": price_a, "low_idx": idx_b, "swing_low": price_b,
+                "direction": "down", "leg_efficiency": er}
+    return None
+
+
 def _hma_bias_pair(closes: List[float]) -> str:
     """يحسب اتجاه صاعد/هابط بمقارنة HMA(21) مقابل HMA(50) — لكن **يحمي من نفس
     الفخ اللي اكتشفناه**: لو البيانات غير كافية لـHMA50 الحقيقية (أقل من 50 نقطة)،

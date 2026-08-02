@@ -55,6 +55,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "min_efficiency_ratio": 0.15,  # الحد الأدنى لنسبة الكفاءة الاتجاهية (0-1، كل ما زاد كل ما كان الاتجاه أنظف) — خُفّض من 0.28 بناءً على دليل رفض مفرط فعلي
     "is_market_alignment_filter_enabled": 1,  # رفض أي صفقة تعاكس اتجاه السوق العام (البيتكوين)
     "min_btc_correlation": 0.35,  # الحد الأدنى لمعامل الارتباط بالبيتكوين قبل اعتبار العملة "فكّت الارتباط"
+    "is_btc_decoupling_exception_enabled": 1,  # 🆕 لو مفعّل: العملة اللي "فكّت ارتباطها" تُقيَّم بناءً على اتجاهها الخاص بدل البيتكوين. لو معطّل: كل الصفقات تُقيَّم دايماً بالنسبة لاتجاه البيتكوين، حتى لو الارتباط ضعيف مؤقتاً (بطلب صريح: فك الارتباط أحياناً مؤقت والسوق يجبر العملة ترجع تتبع البيتكوين لاحقاً)
     "is_breakeven_stop_enabled": 1,  # نقل الوقف لنقطة الدخول تلقائياً عند تحقيق ربح 1R
     "min_signal_score": 0,  # الحد الأدنى لنقاط قوة الإشارة (0-100) — 0 يعني بدون فلترة إضافية
     "is_market_regime_filter_enabled": 0,  # رفض الصفقات المعاكسة لترند سوق عام ضعيف/متذبذب (فلتر اختياري، مو بس تعزيز)
@@ -239,7 +240,8 @@ def get_settings() -> Dict[str, Any]:
                  "is_coin_learning_enabled", "is_auto_backup_enabled", "is_gdrive_backup_enabled",
                  "is_efficiency_filter_enabled", "is_market_alignment_filter_enabled",
                  "is_breakeven_stop_enabled", "is_auto_breakeven_half_target_enabled",
-                 "is_split_targets_enabled", "is_market_regime_filter_enabled", "is_reverse_mode_enabled", "is_fixed_rr_enabled"):
+                 "is_split_targets_enabled", "is_market_regime_filter_enabled", "is_reverse_mode_enabled", "is_fixed_rr_enabled",
+                 "is_btc_decoupling_exception_enabled"):
         settings[bkey] = bool(int(settings.get(bkey, 0)))
     return settings
 

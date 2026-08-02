@@ -147,15 +147,34 @@ def evaluate_signal_filters(settings: dict, symbol: str, strategy_key: str, resu
             min_corr = settings.get("min_btc_correlation", 0.35)
             is_decoupled = abs(correlation) < min_corr
 
+        # 🔴 إصلاح خطأ منطقي (بطلب صريح بعد مراجعة الكود): abs(correlation) صحيح
+        # لتحديد *هل فيه علاقة أصلاً*، لكن الخطوة اللي بعدها كانت تقارن الاتجاه
+        # مباشرة بغض النظر عن إشارة الارتباط. لو الارتباط سالب قوي (العملة تتحرك
+        # عكس البيتكوين تماماً)، الاتجاه "المتوافق" المتوقع للعملة هو *عكس*
+        # اتجاه البيتكوين، مو نفسه. بدون هالتصحيح، صفقة صحيحة فعلياً (متوافقة مع
+        # نمط الارتباط العكسي) كانت تُرفض خطأً على إنها "تعاكس السوق العام".
+        expected_trend = btc_trend
+        if btc_trend and correlation is not None and correlation < 0:
+            expected_trend = "هابط" if btc_trend == "صاعد" else "صاعد"
+
+        # 🆕 لو المستخدم عطّل استثناء "فك الارتباط" (بطلب صريح: فك الارتباط أحياناً
+        # مؤقت، والسوق يجبر العملة ترجع تتبع البيتكوين لاحقاً فتفشل الصفقة اللي
+        # أُنشئت بناءً على اتجاه العملة وحدها) — نلغي حالة is_decoupled بالكامل،
+        # وكل الصفقات تُقيَّم دايماً بالنسبة للاتجاه المتوقع من البيتكوين
+        # (expected_trend، بعد تصحيح إشارة الارتباط أعلاه)، بغض النظر عن قوة
+        # الارتباط اللحظية.
+        if not settings.get("is_btc_decoupling_exception_enabled", True):
+            is_decoupled = False
+
         if is_decoupled:
             from .analyzer import _get_bias as _get_coin_bias
             coin_trend = _get_coin_bias(k4h)
             if side_trend != coin_trend:
                 return False, f"العملة فكّت ارتباطها بالبيتكوين، لكن الصفقة تعاكس اتجاه العملة نفسها ({coin_trend})", "market_alignment_filter_decoupled_own_trend"
-        elif btc_trend and side_trend != btc_trend:
-            return False, f"الصفقة تعاكس اتجاه السوق العام (البيتكوين: {btc_trend})", "market_alignment_filter_btc"
+        elif expected_trend and side_trend != expected_trend:
+            return False, f"الصفقة تعاكس اتجاه السوق العام (البيتكوين: {btc_trend}, الاتجاه المتوقع للعملة بناءً على الارتباط: {expected_trend})", "market_alignment_filter_btc"
 
-        if (market_regime_er is not None and market_regime_er >= 0.4 and btc_trend and side_trend == btc_trend):
+        if (market_regime_er is not None and market_regime_er >= 0.4 and expected_trend and side_trend == expected_trend):
             boost = min(6, round(market_regime_er * 10))
             result.prob = min(96, result.prob + boost)
             result.signal_score = min(100.0, (getattr(result, "signal_score", 100.0) or 100.0) + boost)

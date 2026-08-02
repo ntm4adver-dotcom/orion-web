@@ -113,6 +113,17 @@
         الارتباط بالسوق العام ما يعني تجاهل اتجاه العملة بالكامل.
       </p>
 
+      <div class="switch" style="margin-top:8px;">
+        <input type="checkbox" name="is_btc_decoupling_exception_enabled" {{ 'checked' if s.is_btc_decoupling_exception_enabled }}>
+        <label style="margin:0;">السماح باستثناء "فك الارتباط" (صفقة تعاكس البيتكوين لو العملة فكّت ارتباطها)</label>
+      </div>
+      <p class="muted" style="margin-top:6px; font-size:12px; line-height:1.8;">
+        <b>لو ألغيته:</b> كل الصفقات تُقيَّم دايماً بالنسبة لاتجاه البيتكوين، حتى لو العملة تبدو حالياً
+        "فاكّة ارتباطها" — لأن فك الارتباط أحياناً يكون مؤقت بس، والسوق العام يجبر العملة ترجع تتبع
+        البيتكوين لاحقاً، فتفشل صفقة كانت مبنية على افتراض استقلالية مؤقتة. فعّله بس لو عندك ثقة إن
+        العملة فعلاً مستقلة بشكل دائم/طويل المدى عن حركة السوق العام.
+      </p>
+
       <div class="card" style="margin-top:14px; background:rgba(56,189,248,0.05);">
         <h3 style="margin-top:0; font-size:15px;">🌊 قوة نظام السوق العام (Market Regime)</h3>
         <p class="muted" style="font-size:12px; line-height:1.8;">
