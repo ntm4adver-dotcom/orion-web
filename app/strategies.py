@@ -20,6 +20,7 @@ from .mtf_fib_strategy import analyze_mtf_fib_trend
 from .crowd_trap_strategy import analyze_crowd_trap
 from .daily_breakout_strategy import analyze_daily_breakout
 from .climactic_reversal_strategy import analyze_climactic_reversal
+from .climactic_reversal_trend_strategy import analyze_climactic_reversal_trend
 
 # ⚠️ استراتيجيات أُزيلت من السجل (لسا موجودة كملفات، بس مو مسجّلة/مفعّلة):
 #  - confluence ("استراتيجية التوافق"): أُزيلت بطلب صريح، واستُبدلت بـ
@@ -74,6 +75,10 @@ STRATEGY_REGISTRY = {
     "climactic_reversal": {
         "label": "🌊 الارتداد بعد فوليوم التصريف/الاستنزاف (Selling/Buying Climax)",
         "fn": analyze_climactic_reversal,
+    },
+    "climactic_reversal_trend": {
+        "label": "🌊📈 الارتداد بعد فوليوم التصريف — مع اتجاه الترند (Trend-Aligned)",
+        "fn": analyze_climactic_reversal_trend,
     },
 }
 

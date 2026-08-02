@@ -24,8 +24,9 @@
   5. **رفض فوري** لو النمط أقرب لفخ اختراق (Fakeout) أو انعكاس فوري بعد سحب
      سيولة (نفس الفلترين المستخدَمين بالانفجار السعري).
 
-نقطة الدخول: مباشرة عند السعر الحالي (current_price) بمجرد تأكد الاختراق —
-بدون انتظار إعادة اختبار (Retest)، بطلب صريح ("مباشرة البحث عن صفقة").
+نقطة الدخول: عند مستوى الاختراق نفسه (قمة/قاع اليوم السابق) — دخول محدد
+(Limit) بانتظار إعادة اختبار المستوى، مو مطاردة السعر لحظياً بعد الاختراق —
+لتجنب الدخول وسط سحب سيولة أو ارتداد مؤقت (فخ اختراق قصير).
 """
 from typing import List, Optional
 
@@ -72,6 +73,17 @@ def analyze_daily_breakout(
         _log("عدد الشموع السابقة كافٍ لحساب متوسط الفوليوم", len(prior), False)
         return None
 
+    # 🔴 إصلاح خطأ حقيقي (بطلب صريح): كان الكود يتحقق بس "هل آخر شمعة مكتملة
+    # فوق/تحت المستوى؟" — بدون تأكد إنها *أول* شمعة تكسره. لو السعر كسر
+    # المستوى من ساعات وضل فوقه/تحته، كل دورة فحص كانت الشمعة الأخيرة تحقق
+    # الشرط برضه، فتطلع صفقة متأخرة بساعات عن لحظة الاختراق الفعلية. الحل:
+    # نتأكد إن الشمعة اللي *قبل* شمعة الاختراق المرشحة لم تكن هي نفسها كاسرة
+    # للمستوى أصلاً — يعني "closed" فعلاً أول شمعة انتقال (Transition Candle)،
+    # مو مجرد شمعة عشوائية لاحقة السعر فيها لسا فوق/تحت مستوى قديم.
+    prev_closed = prior[-1]
+    already_broken_up = prev_closed.close > prev_high
+    already_broken_down = prev_closed.close < prev_low
+
     last_price = current_price if current_price is not None else closed.close
     if last_price <= 0.0:
         return None
@@ -86,16 +98,17 @@ def analyze_daily_breakout(
     closes_near_low = rng > 0 and (closed.close - closed.low) / rng < 0.25
 
     side = ""
-    if closed.close > prev_high and body_ratio > 0.5 and closes_near_high:
+    if closed.close > prev_high and not already_broken_up and body_ratio > 0.5 and closes_near_high:
         side = "Long"
-    elif closed.close < prev_low and body_ratio > 0.5 and closes_near_low:
+    elif closed.close < prev_low and not already_broken_down and body_ratio > 0.5 and closes_near_low:
         side = "Short"
 
     _log("إغلاق شمعة 5د مكتملة فوق/تحت المستوى", f"إغلاق={closed.close:.6g}", bool(side))
+    _log("هذي أول شمعة تكسر المستوى (مو اختراق قديم)", f"مكسور مسبقاً فوق={already_broken_up}, تحت={already_broken_down}", not (already_broken_up or already_broken_down))
     _log("جسم شمعة الاختراق قوي وحاسم (>50% من المدى)", round(body_ratio, 2), body_ratio > 0.5)
 
     if not side:
-        _log("❌ القرار النهائي", "ما فيه إغلاق شمعة 5د كاملة مؤكِّد كسر قمة/قاع اليوم السابق بشكل حاسم", False)
+        _log("❌ القرار النهائي", "ما فيه إغلاق شمعة 5د كاملة مؤكِّد كسر قمة/قاع اليوم السابق بشكل حاسم لأول مرة", False)
         return None
 
     min_vol_ratio = 1.8
@@ -117,9 +130,15 @@ def analyze_daily_breakout(
     if atr5m <= 0:
         return None
 
-    # نقطة الدخول: مباشرة عند السعر الحالي بمجرد التأكد (بطلب صريح، بدون
-    # انتظار إعادة اختبار)
-    entry_price = last_price
+    # 🔴 تعديل جوهري (بطلب صريح): الدخول اللحظي عند current_price كان يخلي
+    # الصفقة تدخل بعد ما السعر يكون تحرك فعلاً — وهذا بالضبط الوقت اللي ممكن
+    # يصير فيه سحب سيولة أو ارتداد مؤقت (فخ اختراق قصير) بعد الكسر مباشرة.
+    # البديل (نفس منطق explosive_breakout المستخدم بالتطبيق أصلاً): دخول محدد
+    # (Limit) عند مستوى الاختراق نفسه (قمة/قاع اليوم السابق) — بانتظار إعادة
+    # اختبار المستوى، نقطة أدق ومخاطرة أقل من مطاردة السعر مباشرة بعد الكسر.
+    entry_price = prev_high if side == "Long" else prev_low
+    entry_note = f"دخول محدد (Limit) عند مستوى اليوم السابق المكسور {entry_price:.6g} — بانتظار إعادة اختبار (Retest)، بدل مطاردة السعر الحالي {last_price:.6g}"
+    _log("📍 منطق نقطة الدخول", entry_note)
     sl = structural_stop_loss(k5m, side, entry_price, atr5m, lookback=150)
     risk_distance = abs(entry_price - sl)
     if entry_price and risk_distance / entry_price < 0.0015:
@@ -183,6 +202,7 @@ def analyze_daily_breakout(
         f"كُسر مستوى {'القمة' if side == 'Long' else 'القاع'} السابق عند {(prev_high if side=='Long' else prev_low):.6g} بإغلاق شمعة 5د كاملة (مو فتيلة)",
         f"فوليوم شمعة الاختراق: {vol_ratio:.2f}× المتوسط",
         "✅ تم استبعاد احتمال فخ الاختراق والانعكاس الفوري بعد السحب",
+        entry_note,
     ]
     if taker_pressure is not None:
         parts.append(f"💥 ضغط المتداولين الفعليين: {taker_pressure:.2f}")
