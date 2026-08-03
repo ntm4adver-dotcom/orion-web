@@ -652,12 +652,32 @@ class ScannerState:
             )
 
         if settings["okx_is_auto_trading_enabled"]:
-            self._execute_auto_trade(settings, result, signal_id)
+            self._execute_auto_trade(settings, result, signal_id, current_live_price)
 
-    def _execute_auto_trade(self, settings: dict, result, signal_id: int):
+    def _execute_auto_trade(self, settings: dict, result, signal_id: int, current_live_price=None):
         side_text = "buy" if result.side == "Long" else "sell"
         db.add_log(f"🤖 [التداول الآلي] جاري إرسال أمر إلى OKX ({result.symbol} | {side_text})...")
         try:
+            # 🔴 إصلاح جذري (بطلب صريح، بعد تفعيل التداول الآلي الحقيقي): كان
+            # الكود يعتمد على إعداد عام واحد (is_instant_entry_enabled) لتحديد
+            # نوع الأمر (سوق/محدد) بغض النظر عن نقطة الدخول اللي حسبتها
+            # الاستراتيجية فعلياً. بعض الاستراتيجيات (زي مصيدة الحشد، اختراق
+            # اليوم السابق) تحسب نقطة دخول محدَّدة (إعادة اختبار مستوى) تختلف
+            # عن السعر اللحظي عمداً — تنفيذها كأمر سوق فوري يدخل الصفقة بسعر
+            # غلط تماماً (السعر الحالي، مو نقطة الدخول المحسوبة)، ويفتح مركز
+            # حقيقي فوراً حتى لو السعر لسا ما وصل لنقطة الدخول المقصودة أصلاً.
+            # الحل: لو نقطة الدخول تختلف فعلياً عن السعر اللحظي (فرق >0.15%)،
+            # **نلزم استخدام أمر Limit عند نقطة الدخول بالضبط** — بغض النظر عن
+            # إعداد "الدخول الفوري"، لأن هذي حالة "انتظار إعادة اختبار" مقصودة
+            # من الاستراتيجية نفسها، مو مجرد تفضيل عام.
+            price_gap_pct = 0.0
+            if current_live_price and current_live_price > 0:
+                price_gap_pct = abs(result.entry_price - current_live_price) / current_live_price
+            is_retest_entry = price_gap_pct > 0.0015
+            use_market_order = settings.get("is_instant_entry_enabled", True) and not is_retest_entry
+            if is_retest_entry:
+                db.add_log(f"⏳ [{result.symbol}] نقطة الدخول ({result.entry_price:.6g}) تختلف عن السعر الحالي ({current_live_price:.6g}) — سيُرسَل أمر Limit معلّق بانتظار إعادة الاختبار، مو أمر سوق فوري.")
+
             available_balance = None
             if settings.get("okx_volume_type") == "PERCENTAGE":
                 info = okx_client.fetch_account_info(
@@ -675,29 +695,36 @@ class ScannerState:
             # الكامل — يطابق التقسيم الداخلي المُتتبَّع بقاعدة البيانات تماماً.
             if settings.get("is_split_targets_enabled", False):
                 tp1_price = result.entry_price + (result.take_profit - result.entry_price) * 0.5
-                success, message = okx_client.place_split_orders(
+                success, message, order_ids = okx_client.place_split_orders(
                     symbol=result.symbol, side=side_text, quantity_usdt=quantity_usdt,
                     leverage=settings["okx_leverage"], margin_mode=settings["okx_margin_mode"],
                     stop_loss=result.stop_loss, tp1=tp1_price, tp2=result.take_profit,
                     api_key=settings["okx_api_key"], api_secret=settings["okx_api_secret"],
                     passphrase=settings["okx_passphrase"], is_testnet=settings["okx_is_testnet"],
-                    is_market_order=settings.get("is_instant_entry_enabled", True),
+                    is_market_order=use_market_order,
                     is_max_leverage_enabled=settings.get("okx_is_max_leverage_enabled", False),
                     entry_price=result.entry_price,
                 )
             else:
-                success, message = okx_client.place_order(
+                success, message, ord_id = okx_client.place_order(
                     symbol=result.symbol, side=side_text, quantity_usdt=quantity_usdt,
                     leverage=settings["okx_leverage"], margin_mode=settings["okx_margin_mode"],
                     stop_loss=result.stop_loss, take_profit=result.take_profit,
                     api_key=settings["okx_api_key"], api_secret=settings["okx_api_secret"],
                     passphrase=settings["okx_passphrase"], is_testnet=settings["okx_is_testnet"],
-                    is_market_order=settings.get("is_instant_entry_enabled", True),
+                    is_market_order=use_market_order,
                     is_max_leverage_enabled=settings.get("okx_is_max_leverage_enabled", False),
                     entry_price=result.entry_price,
                 )
+                order_ids = [ord_id] if ord_id else []
             if success:
                 db.add_log(f"✅ [التداول الآلي] تم تنفيذ الصفقة بنجاح: {message}")
+                if order_ids:
+                    # 🆕 نخزّن رقم الأمر الحقيقي — ضروري عشان نقدر نلغيه فعلياً
+                    # على OKX لاحقاً لو الإشارة اتلغت داخلياً قبل الامتلاء
+                    # (خصوصاً بحالة أمر Limit معلّق ينتظر إعادة الاختبار).
+                    inst_id = okx_client._to_inst_id(result.symbol)
+                    db.save_okx_order_ref(signal_id, inst_id, order_ids)
             else:
                 db.add_log(f"❌ [التداول الآلي] فشل تنفيذ الصفقة: {message}")
         except Exception as e:
@@ -731,6 +758,32 @@ class ScannerState:
                         new_status, changed = "ACTIVE", True
                     elif live_price <= signal["take_profit"] and settings["is_cancel_if_exceeds_target_enabled"]:
                         new_status, changed = "CANCELLED", True
+
+                # 🔴 إصلاح ثغرة حقيقية (بطلب صريح بعد تفعيل التداول الآلي): كان
+                # الإلغاء هنا داخلي بحت (قاعدة بيانات فقط) — لو أمر Limit حقيقي
+                # مُرسَل فعلاً على OKX (حالة "إعادة اختبار" لم تُملأ بعد)، يبقى
+                # معلّقاً فعلياً على المنصة رغم إن التطبيق يعرضه "ملغى". الآن،
+                # لما نلغي داخلياً، نلغي **فعلياً** نفس الأمر على OKX أيضاً —
+                # بنفس أسلوب وقف التعادل بالضبط (تحقق ثم نفّذ، مع تسجيل واضح).
+                if (new_status == "CANCELLED" and settings.get("okx_is_auto_trading_enabled")
+                        and settings.get("exchange") == "okx" and signal.get("okx_order_id")
+                        and signal.get("okx_inst_id")):
+                    for ord_id in str(signal["okx_order_id"]).split(","):
+                        ord_id = ord_id.strip()
+                        if not ord_id:
+                            continue
+                        try:
+                            ok, msg = okx_client.cancel_pending_order(
+                                signal["okx_inst_id"], ord_id,
+                                settings["okx_api_key"], settings["okx_api_secret"],
+                                settings["okx_passphrase"], settings["okx_is_testnet"],
+                            )
+                            if ok:
+                                db.add_log(f"✅ [{signal['symbol']}] تم إلغاء أمر Limit المعلّق فعلياً على OKX (وصل الهدف قبل الدخول).")
+                            else:
+                                db.add_log(f"⚠️ [{signal['symbol']}] الإشارة أُلغيت داخلياً، لكن فشل إلغاء الأمر على OKX: {msg}")
+                        except Exception as e:
+                            db.add_log(f"⚠️ [{signal['symbol']}] خطأ أثناء محاولة إلغاء الأمر على OKX: {e}")
             elif signal["status"] == "ACTIVE":
                 # قياس التراجع اللحظي من نقطة الدخول (مو الربح/الخسارة النهائي) —
                 # يقيس "كم رجع السعر ضدنا" أثناء الصفقة، مفيد لتقييم قوة نقطة الدخول

@@ -703,7 +703,7 @@ async def api_signals_execute(request: Request):
     quantity_usdt = okx_client.calculate_order_quantity_usdt(s, entry_price, stop_loss, available_balance)
 
     if is_split:
-        success, message = okx_client.place_split_orders(
+        success, message, order_ids = okx_client.place_split_orders(
             symbol=symbol, side=side_text, quantity_usdt=quantity_usdt,
             leverage=s["okx_leverage"], margin_mode=s["okx_margin_mode"],
             stop_loss=stop_loss, tp1=tp1_price, tp2=take_profit,
@@ -713,7 +713,7 @@ async def api_signals_execute(request: Request):
             entry_price=entry_price,
         )
     else:
-        success, message = okx_client.place_order(
+        success, message, ord_id = okx_client.place_order(
             symbol=symbol, side=side_text, quantity_usdt=quantity_usdt,
             leverage=s["okx_leverage"], margin_mode=s["okx_margin_mode"],
             stop_loss=stop_loss, take_profit=take_profit,
@@ -722,6 +722,10 @@ async def api_signals_execute(request: Request):
             is_max_leverage_enabled=s.get("okx_is_max_leverage_enabled", False),
             entry_price=entry_price,
         )
+        order_ids = [ord_id] if ord_id else []
+    if success and order_ids and body.get("signal_id"):
+        inst_id = okx_client._to_inst_id(symbol)
+        db.save_okx_order_ref(int(body["signal_id"]), inst_id, order_ids)
     db.add_log(f"{'✅' if success else '❌'} [أمر يدوي] إرسال صفقة {symbol} ({side}) - {message}")
     return {"success": success, "message": message}
 

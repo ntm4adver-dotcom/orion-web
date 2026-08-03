@@ -111,11 +111,20 @@ def analyze_crowd_trap(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     if side == "Long":
         min_stop_distance = entry_price * 0.008  # حد أدنى مطلق 0.8% وقائي
         stop_loss = min(recent_swing_low, entry_price - atr_val * 1.2, entry_price - min_stop_distance)
+        # 🔴 سقف أقصى (بطلب صريح، بعد ملاحظة إن الوقف والهدف بعيدة جداً أحياناً):
+        # نفس فئة الباق المكتشف بـstop_hunt — المستوى التاريخي (recent_swing_low
+        # على 400 ساعة ≈ 16 يوم) ممكن يكون بعيد جداً عن السعر الحالي، فيسحب الوقف
+        # (والهدف تبعاً له لأنه = risk × 2.5) لمسافة غير واقعية. نحدّ أقصى مسافة
+        # وقف مقبولة بمضاعف ATR معقول (3.5x)، بغض النظر عن بُعد المستوى التاريخي.
+        max_stop_distance = atr_val * 3.5
+        stop_loss = max(stop_loss, entry_price - max_stop_distance)
         risk = entry_price - stop_loss
         take_profit = entry_price + risk * 2.5
     else:
         min_stop_distance = entry_price * 0.008
         stop_loss = max(recent_swing_high, entry_price + atr_val * 1.2, entry_price + min_stop_distance)
+        max_stop_distance = atr_val * 3.5
+        stop_loss = min(stop_loss, entry_price + max_stop_distance)
         risk = stop_loss - entry_price
         take_profit = entry_price - risk * 2.5
 

@@ -138,7 +138,9 @@ def init_db():
                 tp1_hit INTEGER DEFAULT 0,
                 split_targets_used INTEGER DEFAULT 0,
                 actual_r_achieved REAL DEFAULT NULL,
-                partial_r_banked REAL DEFAULT 0
+                partial_r_banked REAL DEFAULT 0,
+                okx_order_id TEXT DEFAULT '',
+                okx_inst_id TEXT DEFAULT ''
             )
         """)
         # هجرة آمنة: إضافة عمود strategy لو قاعدة البيانات كانت موجودة قبل هذا التحديث
@@ -168,6 +170,10 @@ def init_db():
                 conn.execute("ALTER TABLE trade_signals ADD COLUMN actual_r_achieved REAL DEFAULT NULL")
             if "partial_r_banked" not in existing_cols:
                 conn.execute("ALTER TABLE trade_signals ADD COLUMN partial_r_banked REAL DEFAULT 0")
+            if "okx_order_id" not in existing_cols:
+                conn.execute("ALTER TABLE trade_signals ADD COLUMN okx_order_id TEXT DEFAULT ''")
+            if "okx_inst_id" not in existing_cols:
+                conn.execute("ALTER TABLE trade_signals ADD COLUMN okx_inst_id TEXT DEFAULT ''")
         except Exception:
             pass
         conn.execute("""
@@ -696,6 +702,22 @@ def update_max_drawdown_if_worse(signal_id: int, drawdown_pct: float):
         if drawdown_pct > current_max:
             conn.execute("UPDATE trade_signals SET max_drawdown_pct=? WHERE id=?", (drawdown_pct, signal_id))
             conn.commit()
+
+
+def save_okx_order_ref(signal_id: int, inst_id: str, order_ids) -> None:
+    """🆕 يخزّن رقم/أرقام الأمر الحقيقي على OKX لحظة تنفيذ التداول الآلي — ضروري
+    عشان نقدر نلغي الأمر فعلياً على المنصة لاحقاً لو الإشارة اتلغت داخلياً قبل
+    ما السعر يوصل نقطة الدخول الحقيقية (حالة Limit معلّق لم يُملَأ بعد)."""
+    if isinstance(order_ids, (list, tuple)):
+        joined = ",".join(str(x) for x in order_ids if x)
+    else:
+        joined = str(order_ids) if order_ids else ""
+    with _lock, _connect() as conn:
+        conn.execute(
+            "UPDATE trade_signals SET okx_order_id=?, okx_inst_id=? WHERE id=?",
+            (joined, inst_id, signal_id),
+        )
+        conn.commit()
 
 
 def activate_breakeven(signal_id: int, new_stop_loss: float):
