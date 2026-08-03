@@ -73,7 +73,7 @@ def _fetch_klines_cached(exchange, symbol: str, timeframe: str, target_count: in
 
 def evaluate_signal_filters(settings: dict, symbol: str, strategy_key: str, result,
                              k4h, k1h, k15m, k5m, btc_trend=None, btc_klines=None,
-                             market_regime_er=None) -> tuple:
+                             market_regime_er=None, micro=None) -> tuple:
     """🆕 دالة مشتركة نقية (بدون أي استدعاءات جانبية لقاعدة البيانات) تحتوي **كل**
     منطق الفلاتر بالضبط — يستخدمها الفحص الحي (scanner.py) **والاختبار الخلفي**
     (backtest.py) بنفس الطريقة تماماً، بنفس الإعدادات الفعلية، عشان الاختبار
@@ -98,6 +98,22 @@ def evaluate_signal_filters(settings: dict, symbol: str, strategy_key: str, resu
     reward = abs(result.take_profit - result.entry_price)
     if risk <= 0 or reward <= 0:
         return False, f"مخاطرة أو عائد صفري/سلبي (مخاطرة={risk:.6g}, عائد={reward:.6g})", "sequence_integrity_zero_risk_reward"
+
+    # 🆕 فلتر عام إلزامي (زر تفعيل/إلغاء، بطلب صريح): يُطبَّق على **كل**
+    # الاستراتيجيات بدون استثناء (حتى الارتدادية الثلاث المُعفاة من فلاتر
+    # تانية) — بناءً على مراجعة صفقات حقيقية مغلقة أظهرت فاصل واضح 100% بين
+    # الرابح والخاسر بـscalp_precision تحديداً: كل خسارة كانت بالضبط الحالة
+    # اللي غاب فيها تأكيد ضغط المتداولين الفعليين، وكل ربح كان فيه هذا
+    # التأكيد موجود ومتوافق مع اتجاه الصفقة.
+    # ملاحظة مهمة: بالاختبار الخلفي (backtest) `micro` دايماً None لأن بيانات
+    # ضغط المتداولين لحظية حية فقط، ما تُحفَظ تاريخياً — فالفلتر هنا **يتخطى
+    # بدون رفض** لو micro غير متوفرة (بدل ما يرفض كل شي بالباك-تست)، ويشتغل
+    # بصرامة فقط بالفحص الحي حيث البيانات دايماً متوفرة.
+    if settings.get("is_taker_pressure_filter_enabled", False) and micro is not None:
+        tp = micro.taker_pressure
+        aligned = tp is not None and ((result.side == "Long" and tp > 0.2) or (result.side == "Short" and tp < -0.2))
+        if not aligned:
+            return False, f"ضغط المتداولين الفعليين غير متوفر أو غير كافٍ لدعم اتجاه الصفقة ({tp if tp is not None else 'غير متوفر'})", "taker_pressure_filter"
 
     current_live_price = k5m[-1].close if k5m else None
 
@@ -498,7 +514,7 @@ class ScannerState:
                         continue
                     matched_any = True
                     self._process_signal(settings, symbol, strategy_key, result, k4h_confirmed, k1h_confirmed, k15m_confirmed, k5m_confirmed,
-                                          btc_trend, btc_klines, market_regime_er, current_live_price)
+                                          btc_trend, btc_klines, market_regime_er, current_live_price, micro)
 
                 if not matched_any:
                     db.add_log(f"▫️ {symbol}: ليس له اتجاه كافٍ حالياً.")
@@ -520,7 +536,7 @@ class ScannerState:
                 f"أو حصل خطأ أثناء التحليل:\n\n{body}",
             )
 
-    def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k15m, k5m, btc_trend=None, btc_klines=None, market_regime_er=None, current_live_price=None):
+    def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k15m, k5m, btc_trend=None, btc_klines=None, market_regime_er=None, current_live_price=None, micro=None):
         # 🆕 فرض عائد/مخاطرة ثابت (بطلب صريح): يتجاوز هدف الاستراتيجية المحسوب،
         # ويفرض R محدد يكتبه المستخدم بنفسه — لا يزيد ولا ينقص. يُطبَّق **أول شي**
         # (قبل الهيدج، الحارس، أي فلتر) عشان الوقف يبقى كما حسبته الاستراتيجية
@@ -581,7 +597,7 @@ class ScannerState:
             # نعالج النسخة المعكوسة بشكل مستقل تماماً (استدعاء منفصل، نفس كل الفلاتر)،
             # واللاحقة _REVERSED تمنع أي عودية لانهائية (ما يدخل هذا الشرط مرة ثانية)
             self._process_signal(settings, symbol, f"{strategy_key}_REVERSED", reversed_result,
-                                  k4h, k1h, k15m, k5m, btc_trend, btc_klines, market_regime_er, current_live_price)
+                                  k4h, k1h, k15m, k5m, btc_trend, btc_klines, market_regime_er, current_live_price, micro)
             # نكمل الآن معالجة الصفقة **الأصلية** بشكل طبيعي تماماً (بدون أي تعديل عليها)
 
 
@@ -590,7 +606,7 @@ class ScannerState:
         # الإعدادات الفعلية، عشان الاختبار الخلفي يعكس فعلياً سلوك التطبيق الحي.
         accepted, reason, counter_key = evaluate_signal_filters(
             settings, symbol, strategy_key, result, k4h, k1h, k15m, k5m,
-            btc_trend, btc_klines, market_regime_er,
+            btc_trend, btc_klines, market_regime_er, micro,
         )
         if not accepted:
             db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: {reason}.")
