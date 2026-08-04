@@ -125,6 +125,63 @@
       </p>
 
       <div class="card" style="margin-top:14px; background:rgba(56,189,248,0.05);">
+        <h3 style="margin-top:0; font-size:15px;">💥 ضغط المتداولين الفعليين (Taker Pressure) — شرط إلزامي</h3>
+        <div class="switch">
+          <input type="checkbox" name="is_taker_pressure_filter_enabled" {{ 'checked' if s.is_taker_pressure_filter_enabled }}>
+          <label style="margin:0;">رفض أي صفقة (بكل الاستراتيجيات بدون استثناء) بدون تأكيد ضغط متداولين فعلي واضح ومتوافق</label>
+        </div>
+        <p class="muted" style="font-size:12px; line-height:1.8; margin-top:8px;">
+          "ضغط المتداولين الفعليين" مقياس لحظي يوضح هل المتداولين الحقيقيين بالسوق يشترون أو يبيعون
+          بقوة <b>الآن فعلياً</b> (مو بس شكل الشمعة على الشارت). مبني على اكتشاف حقيقي من مراجعة صفقات
+          مغلقة: كل الصفقات اللي خسرت (بعينة استراتيجية "السكالب الدقيق") كانت بالضبط الحالات اللي غاب
+          فيها هذا التأكيد، وكل الصفقات اللي ربحت كان هذا التأكيد موجود ومتوافق مع اتجاه الصفقة فيها —
+          بدون أي استثناء بالعينة المتاحة.
+        </p>
+        <p class="muted" style="font-size:12px; line-height:1.8; margin-top:8px;">
+          <b>لو فعّلته:</b> يُطبَّق على <b>كل</b> الاستراتيجيات المفعّلة بدون استثناء (حتى الاستراتيجيات
+          الارتدادية الثلاث المُعفاة من فلاتر ثانية زي نظام السوق العام والتوافق مع البيتكوين). لو
+          البيانات اللحظية غير متوفرة أو الضغط غير كافٍ لدعم اتجاه الصفقة بوضوح، تُرفض الصفقة كليّاً.
+        </p>
+        <p class="muted" style="font-size:12px; line-height:1.8; margin-top:8px;">
+          ⚠️ <b>ملاحظة صادقة:</b> القرار مبني على عينة صغيرة (6 صفقات مغلقة بس لاستراتيجية وحدة وقت
+          الاكتشاف). راقب أداء الاستراتيجيات بعد التفعيل بالتصديرات الجاية للتأكد إن النمط يستمر مع
+          عينة أكبر، مو صدفة إحصائية.
+        </p>
+      </div>
+
+      <div class="card" style="margin-top:14px; background:rgba(56,189,248,0.05);">
+        <h3 style="margin-top:0; font-size:15px;">🚫 فلتر جودة العملة الاستباقي (Coin Tradability Gate)</h3>
+        <div class="switch">
+          <input type="checkbox" name="is_coin_quality_filter_enabled" {{ 'checked' if s.is_coin_quality_filter_enabled }}>
+          <label style="margin:0;">فحص سلوك سعر العملة نفسها قبل أي استراتيجية — رفض كامل لهذي الدورة لو العملة سيئة السلوك</label>
+        </div>
+        <p class="muted" style="font-size:12px; line-height:1.8; margin-top:8px;">
+          <b>الفرق الجوهري عن "التعلّم الذاتي" أعلاه:</b> ذاك يتعلم من صفقاتنا الفاشلة السابقة (يحتاج
+          نخسر عدة مرات أول)، وهذا يفحص <b>سلوك السعر الفعلي للعملة نفسها مباشرة</b> — بدون انتظار أي
+          تاريخ صفقات. لو عملة معينة تجيها إشارات من أكثر من استراتيجية وباتجاهات مختلفة، ومع ذلك كل
+          الصفقات تفشل — الأرجح المشكلة بالعملة نفسها (تذبذب عشوائي، شموع شاذة، سيولة ضعيفة)، مو باختيار
+          الاستراتيجية أو الاتجاه. هذا الفلتر يمسك هذا النمط <b>قبل</b> أي صفقة، مو بعدها.
+        </p>
+        <div class="row" style="margin-top:10px;">
+          <div>
+            <label>أقل كفاءة اتجاهية مقبولة (0 إلى 1)</label>
+            <input type="number" step="0.01" min="0" max="1" name="min_coin_efficiency_ratio" value="{{ s.min_coin_efficiency_ratio }}">
+            <p class="muted" style="font-size:11px; margin-top:4px;">حركة عشوائية/جانبية بلا معنى حقيقي (200 شمعة 15 دقيقة) — أقل من هذا الرقم يعني رفض العملة كاملة</p>
+          </div>
+          <div>
+            <label>أقصى نسبة شذوذ للشموع</label>
+            <input type="number" step="0.5" min="1" name="max_coin_wick_outlier_ratio" value="{{ s.max_coin_wick_outlier_ratio }}">
+            <p class="muted" style="font-size:11px; margin-top:4px;">أكبر شمعة (200 ساعة) مقارنة بالمدى المعتاد — أعلى من هذا الرقم يعني سلوك سعري غير طبيعي (فتيلات شاذة تشوّه حساب أي وقف)</p>
+          </div>
+          <div>
+            <label>أقصى تقلب مقبول (% من السعر)</label>
+            <input type="number" step="0.5" min="1" name="max_coin_atr_pct" value="{{ s.max_coin_atr_pct }}">
+            <p class="muted" style="font-size:11px; margin-top:4px;">ATR على فريم الساعة كنسبة من السعر — عملة "برية" جداً أعلى من هذا الرقم، أي وقف منطقي يصير واسع جداً لإدارة مخاطرة آمنة</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px; background:rgba(56,189,248,0.05);">
         <h3 style="margin-top:0; font-size:15px;">🌊 قوة نظام السوق العام (Market Regime)</h3>
         <p class="muted" style="font-size:12px; line-height:1.8;">
           مبني على اكتشاف حقيقي: فترة سوق بترند واضح وقوي أعطت 80% نجاح، بينما فترات السوق المتذبذب أعطت

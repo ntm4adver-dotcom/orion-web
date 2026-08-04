@@ -97,7 +97,8 @@ async def settings_save(request: Request):
                   "is_efficiency_filter_enabled", "is_market_alignment_filter_enabled",
                   "is_breakeven_stop_enabled", "is_auto_breakeven_half_target_enabled",
                   "is_split_targets_enabled", "is_market_regime_filter_enabled", "is_reverse_mode_enabled", "is_fixed_rr_enabled",
-                  "is_btc_decoupling_exception_enabled"]
+                  "is_btc_decoupling_exception_enabled", "is_taker_pressure_filter_enabled", "is_coin_hard_block_enabled",
+                  "is_coin_quality_filter_enabled"]
     updates = {}
     for key in db.DEFAULT_SETTINGS:
         if key in checkboxes:
@@ -363,6 +364,8 @@ async def api_learning_settings(request: Request):
         "strategy_learning_min_trades": body.get("strategy_learning_min_trades", 10),
         "strategy_learning_weak_threshold": body.get("strategy_learning_weak_threshold", 35),
         "strategy_learning_strong_threshold": body.get("strategy_learning_strong_threshold", 70),
+        "coin_overall_learning_min_trades": body.get("coin_overall_learning_min_trades", 6),
+        "is_coin_hard_block_enabled": 1 if body.get("is_coin_hard_block_enabled") else 0,
     }
     db.update_settings(updates)
     return {"ok": True}
@@ -703,7 +706,7 @@ async def api_signals_execute(request: Request):
     quantity_usdt = okx_client.calculate_order_quantity_usdt(s, entry_price, stop_loss, available_balance)
 
     if is_split:
-        success, message = okx_client.place_split_orders(
+        success, message, order_ids = okx_client.place_split_orders(
             symbol=symbol, side=side_text, quantity_usdt=quantity_usdt,
             leverage=s["okx_leverage"], margin_mode=s["okx_margin_mode"],
             stop_loss=stop_loss, tp1=tp1_price, tp2=take_profit,
@@ -713,7 +716,7 @@ async def api_signals_execute(request: Request):
             entry_price=entry_price,
         )
     else:
-        success, message = okx_client.place_order(
+        success, message, ord_id = okx_client.place_order(
             symbol=symbol, side=side_text, quantity_usdt=quantity_usdt,
             leverage=s["okx_leverage"], margin_mode=s["okx_margin_mode"],
             stop_loss=stop_loss, take_profit=take_profit,
@@ -722,6 +725,10 @@ async def api_signals_execute(request: Request):
             is_max_leverage_enabled=s.get("okx_is_max_leverage_enabled", False),
             entry_price=entry_price,
         )
+        order_ids = [ord_id] if ord_id else []
+    if success and order_ids and body.get("signal_id"):
+        inst_id = okx_client._to_inst_id(symbol)
+        db.save_okx_order_ref(int(body["signal_id"]), inst_id, order_ids)
     db.add_log(f"{'✅' if success else '❌'} [أمر يدوي] إرسال صفقة {symbol} ({side}) - {message}")
     return {"success": success, "message": message}
 

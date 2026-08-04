@@ -54,6 +54,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "is_efficiency_filter_enabled": 1,  # رفض العملات اللي تتحرك عشوائياً/جانبياً (نسبة الكفاءة الاتجاهية)
     "min_efficiency_ratio": 0.15,  # الحد الأدنى لنسبة الكفاءة الاتجاهية (0-1، كل ما زاد كل ما كان الاتجاه أنظف) — خُفّض من 0.28 بناءً على دليل رفض مفرط فعلي
     "is_market_alignment_filter_enabled": 1,  # رفض أي صفقة تعاكس اتجاه السوق العام (البيتكوين)
+    "is_taker_pressure_filter_enabled": 0,  # 🆕 شرط إلزامي عام (لكل الاستراتيجيات): رفض أي صفقة ما فيها تأكيد ضغط متداولين فعلي واضح ومتوافق مع الاتجاه — بناءً على مراجعة صفقات حقيقية أظهرت فاصل واضح بين الرابح والخاسر (scalp_precision تحديداً)
     "min_btc_correlation": 0.35,  # الحد الأدنى لمعامل الارتباط بالبيتكوين قبل اعتبار العملة "فكّت الارتباط"
     "is_btc_decoupling_exception_enabled": 1,  # 🆕 لو مفعّل: العملة اللي "فكّت ارتباطها" تُقيَّم بناءً على اتجاهها الخاص بدل البيتكوين. لو معطّل: كل الصفقات تُقيَّم دايماً بالنسبة لاتجاه البيتكوين، حتى لو الارتباط ضعيف مؤقتاً (بطلب صريح: فك الارتباط أحياناً مؤقت والسوق يجبر العملة ترجع تتبع البيتكوين لاحقاً)
     "is_breakeven_stop_enabled": 1,  # نقل الوقف لنقطة الدخول تلقائياً عند تحقيق ربح 1R
@@ -88,6 +89,12 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "coin_strategy_learning_min_trades": 8,  # 🆕 الحد الأدنى لتعلّم تركيبة (عملة+استراتيجية) تحديداً — أعلى من العام لأنه أدق ونحتاج ثقة أكبر
     "coin_learning_weak_threshold": 35,  # أقل من هذه النسبة % = سجل ضعيف، يرفع شرط الدخول
     "coin_learning_strong_threshold": 70,  # أعلى من هذه النسبة % = سجل قوي، يخفف شرط الدخول قليلاً
+    "coin_overall_learning_min_trades": 6,  # حد أدنى صفقات لتفعيل تعلّم "أداء العملة الكلي" (كل الاتجاهات والاستراتيجيات معاً)
+    "is_coin_hard_block_enabled": 0,  # رفض قاطع (مو بس رفع حد أدنى) لعملة سجلها الكلي كارثي على كل الاتجاهات والاستراتيجيات
+    "is_coin_quality_filter_enabled": 1,  # 🆕 فلتر جودة استباقي مستقل عن سجل صفقاتنا — يفحص سلوك سعر العملة نفسه (كفاءة اتجاهية، شموع شاذة، تقلب) قبل أي استراتيجية
+    "min_coin_efficiency_ratio": 0.05,  # 🆕 أقل كفاءة اتجاهية عامة مقبولة (200 شمعة 15د) — أقل من كذا = حركة عشوائية بلا معنى
+    "max_coin_wick_outlier_ratio": 6.0,  # 🆕 أقصى نسبة مقبولة لأكبر شمعة (200 ساعة) مقارنة بالمدى المعتاد — أعلى من كذا = شموع شاذة/سلوك غير طبيعي
+    "max_coin_atr_pct": 8.0,  # 🆕 أقصى تقلب مقبول (ATR كنسبة من السعر على فريم الساعة) — أعلى من كذا = عملة برية جداً
     "strategy_learning_min_trades": 10,   # نفس الفكرة لكن على مستوى الاستراتيجية ككل (كل العملات مجتمعة)
     "strategy_learning_weak_threshold": 35,
     "strategy_learning_strong_threshold": 70,
@@ -137,7 +144,9 @@ def init_db():
                 tp1_hit INTEGER DEFAULT 0,
                 split_targets_used INTEGER DEFAULT 0,
                 actual_r_achieved REAL DEFAULT NULL,
-                partial_r_banked REAL DEFAULT 0
+                partial_r_banked REAL DEFAULT 0,
+                okx_order_id TEXT DEFAULT '',
+                okx_inst_id TEXT DEFAULT ''
             )
         """)
         # هجرة آمنة: إضافة عمود strategy لو قاعدة البيانات كانت موجودة قبل هذا التحديث
@@ -167,6 +176,10 @@ def init_db():
                 conn.execute("ALTER TABLE trade_signals ADD COLUMN actual_r_achieved REAL DEFAULT NULL")
             if "partial_r_banked" not in existing_cols:
                 conn.execute("ALTER TABLE trade_signals ADD COLUMN partial_r_banked REAL DEFAULT 0")
+            if "okx_order_id" not in existing_cols:
+                conn.execute("ALTER TABLE trade_signals ADD COLUMN okx_order_id TEXT DEFAULT ''")
+            if "okx_inst_id" not in existing_cols:
+                conn.execute("ALTER TABLE trade_signals ADD COLUMN okx_inst_id TEXT DEFAULT ''")
         except Exception:
             pass
         conn.execute("""
@@ -241,7 +254,8 @@ def get_settings() -> Dict[str, Any]:
                  "is_efficiency_filter_enabled", "is_market_alignment_filter_enabled",
                  "is_breakeven_stop_enabled", "is_auto_breakeven_half_target_enabled",
                  "is_split_targets_enabled", "is_market_regime_filter_enabled", "is_reverse_mode_enabled", "is_fixed_rr_enabled",
-                 "is_btc_decoupling_exception_enabled"):
+                 "is_btc_decoupling_exception_enabled", "is_taker_pressure_filter_enabled", "is_coin_hard_block_enabled",
+                 "is_coin_quality_filter_enabled"):
         settings[bkey] = bool(int(settings.get(bkey, 0)))
     return settings
 
@@ -630,6 +644,32 @@ def get_coin_performance_for(symbol: str, side: str) -> Optional[Dict[str, Any]]
             "total": total, "win_rate": round((wins / total) * 100.0, 1)}
 
 
+def get_coin_overall_performance(symbol: str) -> Optional[Dict[str, Any]]:
+    """🆕 يجمع أداء العملة **كلياً** — كل الاتجاهات (Long+Short) وكل الاستراتيجيات
+    معاً بسجل واحد. يسد فجوة حقيقية بين get_coin_performance_for (مقسَّم حسب
+    الاتجاه) وget_coin_strategy_performance_for (مقسَّم حسب الاستراتيجية): عملة
+    ممكن تفشل 3 مرات Long و3 مرات Short (6 فشل حقيقي بمجموعها)، ومع كذا كل جانب
+    لحاله ما يوصل الحد الأدنى المطلوب لتفعيل أي تعديل — فالنمط الحقيقي (هذي
+    العملة نفسها متذبذبة/سيئة السلوك بغض النظر عن الاتجاه أو الاستراتيجية)
+    يضيع بين الشقوق. هذا المقياس يمسكه لأنه ما يفرّق بينهم إطلاقاً."""
+    with _lock, _connect() as conn:
+        cur = conn.execute("""
+            SELECT
+                SUM(CASE WHEN status='HIT_TP' THEN 1 ELSE 0 END) AS wins,
+                SUM(CASE WHEN status='HIT_SL' THEN 1 ELSE 0 END) AS losses
+            FROM trade_signals
+            WHERE status IN ('HIT_TP','HIT_SL') AND symbol=?
+        """, (symbol,))
+        row = cur.fetchone()
+    wins = row["wins"] or 0
+    losses = row["losses"] or 0
+    total = wins + losses
+    if total == 0:
+        return None
+    return {"symbol": symbol, "wins": wins, "losses": losses,
+            "total": total, "win_rate": round((wins / total) * 100.0, 1)}
+
+
 def get_recent_similar_signal(symbol: str, side: str, strategy: str, entry_price: float,
                                tolerance_pct: float = 0.002, since_hours: int = 6) -> Optional[Dict[str, Any]]:
     """يكشف لو نفس النمط (نفس الرمز/الاتجاه/الاستراتيجية/سعر دخول قريب جداً) تكرر بآخر
@@ -695,6 +735,22 @@ def update_max_drawdown_if_worse(signal_id: int, drawdown_pct: float):
         if drawdown_pct > current_max:
             conn.execute("UPDATE trade_signals SET max_drawdown_pct=? WHERE id=?", (drawdown_pct, signal_id))
             conn.commit()
+
+
+def save_okx_order_ref(signal_id: int, inst_id: str, order_ids) -> None:
+    """🆕 يخزّن رقم/أرقام الأمر الحقيقي على OKX لحظة تنفيذ التداول الآلي — ضروري
+    عشان نقدر نلغي الأمر فعلياً على المنصة لاحقاً لو الإشارة اتلغت داخلياً قبل
+    ما السعر يوصل نقطة الدخول الحقيقية (حالة Limit معلّق لم يُملَأ بعد)."""
+    if isinstance(order_ids, (list, tuple)):
+        joined = ",".join(str(x) for x in order_ids if x)
+    else:
+        joined = str(order_ids) if order_ids else ""
+    with _lock, _connect() as conn:
+        conn.execute(
+            "UPDATE trade_signals SET okx_order_id=?, okx_inst_id=? WHERE id=?",
+            (joined, inst_id, signal_id),
+        )
+        conn.commit()
 
 
 def activate_breakeven(signal_id: int, new_stop_loss: float):

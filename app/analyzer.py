@@ -9,7 +9,7 @@ as the sole strategy!"). هذا الملف يحافظ على نفس المعاد
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 
 @dataclass
@@ -291,6 +291,58 @@ def efficiency_ratio(klines: List[Kline], period: int = 20) -> float:
     if total_movement <= 0:
         return 0.0
     return net_change / total_movement
+
+
+def assess_coin_tradability(k1h: List[Kline], k15m: List[Kline], settings: dict) -> Tuple[bool, Optional[str], dict]:
+    """🆕 فلتر جودة استباقي على مستوى العملة نفسها (بطلب صريح: "حل جذري نفلتر
+    هذي العملات" — مو نظام تعلّم يعتمد على صفقاتنا الفاشلة السابقة). يفحص سلوك
+    السعر الفعلي للعملة **قبل** أي استراتيجية، ويرفضها كاملة لهذي الدورة لو
+    أظهرت خصائص تخليها غير قابلة للتداول بأمان بغض النظر عن الاستراتيجية أو
+    الاتجاه:
+
+    1) كفاءة اتجاهية عامة ضعيفة جداً (ER) — حركة عشوائية/جانبية بلا معنى حقيقي،
+       مو بس تراجع مؤقت داخل ترند.
+    2) فتيلة/شمعة شاذة متطرفة — مدى شمعة واحدة أكبر بكثير من المدى المعتاد
+       (نفس فئة الخلل المكتشف بـstop_hunt وcrowd_trap: عملة فيها شموع "قفزة"
+       غير طبيعية تخلي حساب أي وقف/هدف غير موثوق).
+    3) تقلب مفرط نسبة للسعر (ATR/السعر) — عملة "برية" جداً حتى لو حركتها نظيفة
+       اتجاهياً، المخاطرة بالتحكم بالوقف غير عملية.
+
+    يرجع (قابلة للتداول؟, سبب الرفض أو None, تفاصيل القياسات للتسجيل)."""
+    if not settings.get("is_coin_quality_filter_enabled", True):
+        return True, None, {}
+
+    metrics = {}
+    if len(k15m) >= 210:
+        er = efficiency_ratio(k15m, period=200)
+        metrics["efficiency_ratio_200"] = round(er, 3)
+        min_er = float(settings.get("min_coin_efficiency_ratio", 0.05))
+        if er < min_er:
+            return False, f"كفاءة اتجاهية عامة ضعيفة جداً ({er:.3f} < {min_er}) — حركة عشوائية/جانبية بلا معنى حقيقي، غير مناسبة لأي استراتيجية اتجاهية", metrics
+
+    if len(k1h) >= 200:
+        window = k1h[-200:]
+        ranges = sorted(k.high - k.low for k in window if (k.high - k.low) > 0)
+        if ranges:
+            median_range = ranges[len(ranges) // 2]
+            max_recent_range = max(k.high - k.low for k in window[-50:])
+            outlier_ratio = (max_recent_range / median_range) if median_range > 0 else 0
+            metrics["candle_outlier_ratio"] = round(outlier_ratio, 2)
+            max_outlier = float(settings.get("max_coin_wick_outlier_ratio", 6.0))
+            if outlier_ratio > max_outlier:
+                return False, f"شموع شاذة متطرفة مكتشفة (أكبر شمعة {outlier_ratio:.1f}× المدى المعتاد، الحد {max_outlier}×) — سلوك سعري غير طبيعي يخلي حساب أي وقف/هدف غير موثوق", metrics
+
+    if len(k1h) >= 20:
+        atr_val = atr(k1h, 14)
+        last_price = k1h[-1].close
+        if last_price > 0:
+            atr_pct = (atr_val / last_price) * 100
+            metrics["atr_pct_1h"] = round(atr_pct, 2)
+            max_atr_pct = float(settings.get("max_coin_atr_pct", 8.0))
+            if atr_pct > max_atr_pct:
+                return False, f"تقلب مفرط جداً نسبة للسعر (ATR = {atr_pct:.1f}% من السعر، الحد {max_atr_pct}%) — عملة برية جداً، أي وقف منطقي يصير واسع جداً لإدارة مخاطرة آمنة", metrics
+
+    return True, None, metrics
 
 
 def find_significant_swing(klines: List[Kline], atr_val: float, min_move_atr: float = 3.0,
