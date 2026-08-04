@@ -359,7 +359,7 @@ def get_scanned_symbols_list() -> List[Dict[str, Any]]:
         return [dict(row) for row in cur.fetchall()]
 
 
-
+def increment_rejection_counter(filter_name: str):
     """يزيد عدّاد رفض فلتر معيّن — يبقى متراكم دائم (مو محدود بعدد صفوف زي سجل
     الفحص)، عشان نقدر نقيس فعلياً كم مرة رفض كل فلتر إشارة، ونعرف هل الحدود
     الحالية متشددة أو متساهلة بناءً على بيانات حقيقية."""
