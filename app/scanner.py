@@ -73,7 +73,7 @@ def _fetch_klines_cached(exchange, symbol: str, timeframe: str, target_count: in
 
 def evaluate_signal_filters(settings: dict, symbol: str, strategy_key: str, result,
                              k4h, k1h, k15m, k5m, btc_trend=None, btc_klines=None,
-                             market_regime_er=None, micro=None) -> tuple:
+                             market_regime_er=None, micro=None, current_live_price=None) -> tuple:
     """🆕 دالة مشتركة نقية (بدون أي استدعاءات جانبية لقاعدة البيانات) تحتوي **كل**
     منطق الفلاتر بالضبط — يستخدمها الفحص الحي (scanner.py) **والاختبار الخلفي**
     (backtest.py) بنفس الطريقة تماماً، بنفس الإعدادات الفعلية، عشان الاختبار
@@ -115,7 +115,17 @@ def evaluate_signal_filters(settings: dict, symbol: str, strategy_key: str, resu
         if not aligned:
             return False, f"ضغط المتداولين الفعليين غير متوفر أو غير كافٍ لدعم اتجاه الصفقة ({tp if tp is not None else 'غير متوفر'})", "taker_pressure_filter"
 
-    current_live_price = k5m[-1].close if k5m else None
+    # 🔴 إصلاح باق حقيقي (بطلب صريح، بعد ملاحظة daily_breakout ما جابت ولا صفقة):
+    # كان الكود يعيد حساب "السعر الحالي" من k5m[-1] — لكن k5m المُمرَّرة هنا هي
+    # النسخة **المؤكَّدة** (تستبعد الشمعة الحيّة قيد التكوين)، يعني السعر المحسوب
+    # فعلياً متأخر بشمعة كاملة (5 دقايق) عن السعر اللحظي الحقيقي. لأغلب
+    # الاستراتيجيات (دخول فوري قريب من السعر الحالي) الفرق ما يُلاحَظ غالباً،
+    # لكن daily_breakout بالذات دخولها Limit عند مستوى محدَّد (إعادة اختبار) —
+    # حساسة جداً لدقة السعر اللحظي، فأي تأخر بالسعر يخلي فلتر "اتجاه الدخول"
+    # يرفضها بالخطأ رغم إن الدخول منطقي فعلياً. الآن نستخدم السعر اللحظي
+    # الحقيقي الممرَّر من حلقة الفحص الرئيسية (current_live_price) لو متوفر،
+    # بدل إعادة حسابه من بيانات متأخرة.
+    current_live_price = current_live_price if current_live_price else (k5m[-1].close if k5m else None)
 
     if current_live_price and current_live_price > 0:
         tolerance = current_live_price * 0.0005
@@ -622,7 +632,7 @@ class ScannerState:
         # الإعدادات الفعلية، عشان الاختبار الخلفي يعكس فعلياً سلوك التطبيق الحي.
         accepted, reason, counter_key = evaluate_signal_filters(
             settings, symbol, strategy_key, result, k4h, k1h, k15m, k5m,
-            btc_trend, btc_klines, market_regime_er, micro,
+            btc_trend, btc_klines, market_regime_er, micro, current_live_price,
         )
         if not accepted:
             db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: {reason}.")
