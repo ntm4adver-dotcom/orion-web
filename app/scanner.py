@@ -15,6 +15,28 @@ from .analyzer import MarketMicrostructure, Kline, assess_coin_tradability
 from .strategies import get_active_strategies, strategy_label
 
 
+_INTERVAL_MS = {"5m": 300_000, "15m": 900_000, "1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000}
+
+
+def _find_candle_gaps(klines: list, timeframe: str) -> list:
+    """🆕 يفحص **الأرشيف الكامل** المخزَّن (مو بس حافة الجلب الجديد) عن أي فجوات
+    زمنية داخلية — شموع مفقودة بمنتصف السلسلة (عطل مؤقت بالمنصة، عملة انحذفت
+    وارتجعت، إلخ). المؤشرات كلها (ATR, HMA, Efficiency Ratio, سوينق ZigZag)
+    تفترض ضمنياً تباعد زمني منتظم بين الشموع — فجوة داخلية غير مكتشفة ممكن تفسد
+    حسابها بصمت (مثلاً: تُحسب كـ'شمعة ضخمة شاذة' وهمية). يرجع قائمة فجوات
+    (كل عنصر: وقت البداية، وقت النهاية، عدد الشموع الناقصة تقريباً)."""
+    interval_ms = _INTERVAL_MS.get(timeframe)
+    if not interval_ms or len(klines) < 2:
+        return []
+    gaps = []
+    for i in range(1, len(klines)):
+        delta = klines[i].open_time - klines[i - 1].open_time
+        if delta > interval_ms * 1.5:  # هامش بسيط فوق الفترة الطبيعية (تذبذب توقيت طفيف مقبول)
+            missing = round(delta / interval_ms) - 1
+            gaps.append({"from": klines[i - 1].open_time, "to": klines[i].open_time, "missing_candles": missing})
+    return gaps
+
+
 def _fetch_klines_cached(exchange, symbol: str, timeframe: str, target_count: int) -> list:
     """🆕 جلب ذكي تراكمي (بطلب صريح — 'عمارة طوبة فوق طوبة'): بدل إعادة جلب
     1000 شمعة من الصفر كل دورة فحص (بطيء جداً وضغط كبير على المنصة)، نبني أرشيف
@@ -67,8 +89,35 @@ def _fetch_klines_cached(exchange, symbol: str, timeframe: str, target_count: in
         ], keep_latest=target_count + 200)
 
     cached = db.get_cached_candles(symbol, timeframe)
-    return [Kline(open_time=c["open_time"], open=c["open"], high=c["high"], low=c["low"],
-                   close=c["close"], volume=c["volume"], close_time=c["close_time"]) for c in cached][-target_count:]
+    result_klines = [Kline(open_time=c["open_time"], open=c["open"], high=c["high"], low=c["low"],
+                            close=c["close"], volume=c["volume"], close_time=c["close_time"]) for c in cached][-target_count:]
+
+    # 🔴 إصلاح فجوة حقيقية (بطلب صريح: فحص شامل لتكاملية الشموع): الفحص السابق
+    # كان يتحقق بس من فجوة عند **حافة** الجلب الجديد (بين آخر شمعة مخزَّنة وأول
+    # شمعة جديدة) — أي ثقب **داخل** الأرشيف نفسه (منتصف السلسلة) كان يمر بدون
+    # أي كشف، ويفسد بصمت حسابات المؤشرات (ATR, HMA, Efficiency Ratio, السوينق)
+    # اللي تفترض تباعد زمني منتظم. نفحص الآن السلسلة **الكاملة الراجعة فعلياً**
+    # للاستراتيجيات، ولو فيه فجوة حقيقية، نسوي تعبئة كاملة تلقائية (إعادة جلب
+    # بالترقيم من الصفر) بدل تمرير بيانات فيها ثقب صامت.
+    gaps = _find_candle_gaps(result_klines, timeframe)
+    if gaps:
+        total_missing = sum(g["missing_candles"] for g in gaps)
+        db.add_log(f"⚠️ [{symbol}/{timeframe}] فجوة داخلية حقيقية بأرشيف الشموع ({len(gaps)} فجوة، ~{total_missing} شمعة مفقودة تقريباً) — تعبئة كاملة تلقائية")
+        if hasattr(exchange, "fetch_historical_klines"):
+            fresh = exchange.fetch_historical_klines(symbol, timeframe, target_count)
+            if fresh:
+                db.save_candles(symbol, timeframe, [
+                    {"open_time": k.open_time, "open": k.open, "high": k.high, "low": k.low,
+                     "close": k.close, "volume": k.volume, "close_time": k.close_time} for k in fresh
+                ], keep_latest=target_count + 200)
+                # نتحقق مرة ثانية بعد التعبئة — لو الفجوة حقيقية بجانب المنصة نفسها
+                # (بيانات ناقصة فعلياً عندها، مو مشكلة عندنا)، نسجّلها كتحذير نهائي
+                # بدل محاولة إصلاح لا نهائية
+                remaining_gaps = _find_candle_gaps(fresh, timeframe)
+                if remaining_gaps:
+                    db.add_log(f"⚠️ [{symbol}/{timeframe}] الفجوة موجودة حتى بعد التعبئة الكاملة — على الأغلب نقص حقيقي ببيانات المنصة نفسها لهذي الفترة، مو خطأ بالأرشيف المحلي")
+                return fresh
+    return result_klines
 
 
 def evaluate_signal_filters(settings: dict, symbol: str, strategy_key: str, result,
