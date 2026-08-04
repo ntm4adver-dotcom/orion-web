@@ -1,14 +1,12 @@
 import os
 import time
-from fastapi import FastAPI, Request, Form, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, Form
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse, Response
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import db
 from . import okx_client
-from . import okx_websocket
-import asyncio
 from . import learning
 from . import backup_scheduler
 from . import gdrive_backup
@@ -113,10 +111,6 @@ async def settings_save(request: Request):
     updates["combined_enabled_strategies"] = ",".join(checked_strategies)
 
     db.update_settings(updates)
-    # 🆕 بطلب صريح: قائمة العملات المعروضة تتحدث فوراً لحظة تغيير الإعداد
-    # (عدد العملات، معيار الاختيار top_volume/OI/إلخ) — بدون انتظار دورة الفحص
-    # القادمة، بالضبط زي منصة تداول حقيقية.
-    scanner_state.refresh_scanned_symbols_now()
     return templates.TemplateResponse("settings.html", {"request": request, "active": "settings", "s": db.get_settings(), "saved": True})
 
 
@@ -176,84 +170,6 @@ def diagnose_page(request: Request):
     if g:
         return g
     return templates.TemplateResponse("diagnose.html", {"request": request, "active": "diagnose", "s": db.get_settings()})
-
-
-@app.get("/api/scanned-symbols")
-def api_scanned_symbols(request: Request):
-    if not is_logged_in(request):
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
-    return db.get_scanned_symbols_list()
-
-
-@app.websocket("/ws/chart/{symbol}/{interval}")
-async def ws_chart_stream(websocket: WebSocket, symbol: str, interval: str):
-    """🆕 بث حي حقيقي (WebSocket) لشموع عملة معينة — بديل عن استعلام /api/chart-data
-    كل 20 ثانية. يفتح اتصال OKX WebSocket مخصَّص لهذا الاتصال، ويمرر كل تحديث
-    شمعة (سواء قيد التكوين أو مغلقة فعلياً) للمتصفح فوراً لحظة وصولها."""
-    await websocket.accept()
-    symbol = symbol.upper().strip()
-    loop = asyncio.get_event_loop()
-    queue: asyncio.Queue = asyncio.Queue()
-
-    def on_candle_update(sym: str, itv: str, kline, is_closed: bool):
-        if sym != symbol or itv != interval:
-            return
-        payload = {
-            "time": kline.open_time // 1000, "open": kline.open, "high": kline.high,
-            "low": kline.low, "close": kline.close, "volume": kline.volume, "is_closed": is_closed,
-        }
-        loop.call_soon_threadsafe(queue.put_nowait, payload)
-
-    stream = None
-    try:
-        stream = okx_websocket.OKXPublicStream(on_candle_update)
-        stream.start()
-        stream.subscribe(symbol, interval)
-        while True:
-            payload = await queue.get()
-            await websocket.send_json(payload)
-    except (WebSocketDisconnect, RuntimeError):
-        pass
-    except Exception:
-        pass
-    finally:
-        if stream:
-            stream.stop()
-
-
-@app.get("/chart")
-def chart_page(request: Request):
-    g = _guard(request)
-    if g:
-        return g
-    return templates.TemplateResponse("chart.html", {"request": request, "active": "chart"})
-
-
-@app.get("/api/chart-data")
-def api_chart_data(request: Request, symbol: str, interval: str = "15m", limit: int = 200):
-    if not is_logged_in(request):
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
-    symbol = symbol.upper().strip()
-    try:
-        klines = okx_client.fetch_klines(symbol, interval, limit=min(limit, 1000))
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
-    candles = [
-        {"time": k.open_time // 1000, "open": k.open, "high": k.high, "low": k.low, "close": k.close, "volume": k.volume}
-        for k in klines
-    ]
-    open_signals = [
-        s for s in db.get_open_signals()
-        if s["symbol"].upper() == symbol
-    ]
-    levels = [
-        {
-            "id": s["id"], "strategy": s["strategy"], "side": s["side"], "status": s["status"],
-            "entry_price": s["entry_price"], "stop_loss": s["stop_loss"], "take_profit": s["take_profit"],
-        }
-        for s in open_signals
-    ]
-    return {"symbol": symbol, "interval": interval, "candles": candles, "signals": levels}
 
 
 @app.get("/api/liquidation-heatmap")

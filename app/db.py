@@ -195,16 +195,6 @@ def init_db():
                 count INTEGER DEFAULT 0
             )
         """)
-        # 🆕 قائمة العملات المفحوصة حالياً (بطلب صريح: شفافية حقيقية — يعرض
-        # بالضبط وش الفاحص يحلل الآن، ومصدر مباشر للوحة القيادة لعرضها كعمود
-        # قابل للنقر يفتح شارت العملة). تُستبدل بالكامل كل دورة فحص (مو تراكمية).
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS scanned_symbols_cache (
-                symbol TEXT PRIMARY KEY,
-                position INTEGER DEFAULT 0,
-                updated_at INTEGER DEFAULT 0
-            )
-        """)
         # 🆕 جدول تخزين الشموع التراكمي (بطلب صريح): بدل إعادة جلب 1000 شمعة من
         # الصفر كل دورة فحص (بطيء وضغط كبير على المنصة)، نبني الأرشيف "طوبة فوق
         # طوبة" — أول جلب يخزّن الألف شمعة كاملة، وكل دورة لاحقة تجلب بس الشموع
@@ -336,27 +326,6 @@ def close_signal_with_actual_r(signal_id: int, status: str, current_price: float
             (status, current_price, int(time.time() * 1000), last_notified_status, actual_r, signal_id),
         )
         conn.commit()
-
-
-def save_scanned_symbols_list(symbols: List[str]) -> None:
-    """🆕 يستبدل قائمة العملات المفحوصة حالياً بالكامل (تُنادى مرة كل دورة فحص
-    بعد ما يتحدد النطاق النهائي — top_volume/big_movers/إلخ). الاستبدال الكامل
-    (مو الإضافة) يضمن إن القائمة تعكس دايماً آخر معيار اختيار فعلي، بدون تراكم
-    عملات قديمة ما عادت جزء من النطاق الحالي."""
-    now = int(time.time() * 1000)
-    with _lock, _connect() as conn:
-        conn.execute("DELETE FROM scanned_symbols_cache")
-        conn.executemany(
-            "INSERT INTO scanned_symbols_cache (symbol, position, updated_at) VALUES (?, ?, ?)",
-            [(sym, i, now) for i, sym in enumerate(symbols)],
-        )
-        conn.commit()
-
-
-def get_scanned_symbols_list() -> List[Dict[str, Any]]:
-    with _lock, _connect() as conn:
-        cur = conn.execute("SELECT symbol, position, updated_at FROM scanned_symbols_cache ORDER BY position ASC")
-        return [dict(row) for row in cur.fetchall()]
 
 
 def increment_rejection_counter(filter_name: str):

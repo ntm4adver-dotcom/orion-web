@@ -32,20 +32,6 @@
 </div>
 
 <div class="card">
-  <div class="flex-between">
-    <h3 style="margin:0;">🔎 العملات قيد الفحص الآن <span id="scanned-count" class="muted"></span></h3>
-    <span class="muted" style="cursor:pointer;" onclick="loadScannedSymbols()">🔄 تحديث</span>
-  </div>
-  <p class="muted" style="font-size:12px; margin:6px 0 10px;">
-    نفس القائمة اللي الفاحص يحلّلها فعلياً هالدورة (حسب معيار اختيار العملات بالإعدادات) — اضغط أي
-    عملة عشان يفتح شارتها الحي مباشرة.
-  </p>
-  <div id="scanned-symbols-grid" style="display:flex; flex-wrap:wrap; gap:8px;">
-    <span class="muted">جاري التحميل...</span>
-  </div>
-</div>
-
-<div class="card">
   <h3>الإشارات الأخيرة</h3>
   <table id="signals-table">
     <thead>
@@ -99,33 +85,8 @@ async function toggleScan(){
 async function triggerScan(){ await fetch('/api/scan/trigger', {method:'POST'}); }
 async function clearLogs(){ await fetch('/api/logs/clear', {method:'POST'}); fetchLogs(); }
 
-async function loadScannedSymbols(){
-  try {
-    const r = await fetch('/api/scanned-symbols');
-    const list = await r.json();
-    const grid = document.getElementById('scanned-symbols-grid');
-    const countEl = document.getElementById('scanned-count');
-    if (!list.length){
-      grid.innerHTML = '<span class="muted">ما فيه عملات محدَّدة بعد — بتظهر بعد أول دورة فحص.</span>';
-      countEl.innerText = '';
-      return;
-    }
-    countEl.innerText = `(${list.length})`;
-    grid.innerHTML = list.map(item => `
-      <a href="/chart?symbol=${encodeURIComponent(item.symbol)}"
-         style="display:inline-block; padding:6px 12px; border-radius:8px; background:var(--dark-accent);
-                color:var(--cyan); text-decoration:none; font-size:13px; font-weight:600;">
-        ${item.symbol}
-      </a>`).join('');
-  } catch (e) { /* تجاهل بصمت */ }
-}
-
 function refreshAll(){ fetchStatus(); fetchLogs(); fetchSignals(); }
 refreshAll();
-loadScannedSymbols();
 setInterval(refreshAll, 3000);
-// قائمة العملات المفحوصة تتحدث مرة كل دورة فحص فقط (300 ثانية افتراضياً) — تحديثها
-// كل 3 ثواني زي الباقي بلا فايدة ويثقل السيرفر بدون داعٍ
-setInterval(loadScannedSymbols, 30000);
 </script>
 {% endblock %}
