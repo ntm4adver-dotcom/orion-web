@@ -108,6 +108,34 @@ function renderTradeSummary(){
     </div>`;
 }
 
+let liveSocket = null;
+
+function closeLiveSocket(){
+  if (liveSocket){
+    try { liveSocket.close(); } catch(e){}
+    liveSocket = null;
+  }
+}
+
+function connectLiveSocket(symbol, interval){
+  closeLiveSocket();
+  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const url = `${proto}://${window.location.host}/ws/chart/${encodeURIComponent(symbol)}/${interval}`;
+  try {
+    liveSocket = new WebSocket(url);
+    liveSocket.onmessage = (ev) => {
+      try {
+        const c = JSON.parse(ev.data);
+        candleSeries.update({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close });
+      } catch(e){}
+    };
+    liveSocket.onerror = () => { closeLiveSocket(); };
+    liveSocket.onclose = () => { liveSocket = null; };
+  } catch (e) {
+    liveSocket = null; // بث حي غير متاح — الاعتماد على السحب الدوري كل 20 ثانية فقط
+  }
+}
+
 async function loadChart(){
   const symbol = document.getElementById('symbol-input').value.trim().toUpperCase();
   if (!symbol) return;
@@ -152,6 +180,7 @@ async function loadChart(){
       levelsDiv.innerHTML = '';
     }
     chart.timeScale().fitContent();
+    connectLiveSocket(symbol, currentInterval);  // 🆕 بث حي بعد نجاح تحميل البيانات التاريخية
   } catch (e) {
     document.getElementById('signal-levels').innerHTML = `<p class="muted">خطأ: ${e}</p>`;
   }
@@ -177,8 +206,9 @@ const symbolFromUrl = urlParams.get('symbol');
 if (symbolFromUrl) document.getElementById('symbol-input').value = symbolFromUrl.toUpperCase();
 loadChart();
 loadOpenSymbolsBar();
-// تحديث شبه حي — كل 20 ثانية (بدون WebSocket، يكفي لمتابعة الحركة بدون إثقال المنصة)
-setInterval(loadChart, 20000);
+// السحب الدوري الآن بس شبكة أمان احتياطية (تحديث خطوط الصفقات ونحوها) — البث
+// الحي (WebSocket) هو المسؤول عن تحديث الشموع لحظياً
+setInterval(loadChart, 45000);
 </script>
 
 {% endblock %}

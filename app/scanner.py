@@ -11,6 +11,7 @@ from . import binance_client
 from . import okx_client
 from . import telegram_alert
 from . import learning
+from . import okx_websocket
 from .analyzer import MarketMicrostructure, Kline, assess_coin_tradability
 from .strategies import get_active_strategies, strategy_label
 
@@ -316,6 +317,7 @@ class ScannerState:
         self._stop_flag = threading.Event()
         self._trigger_immediate = threading.Event()
         self._notified_transitions = set()
+        self._private_stream = None  # 🆕 بث خاص لحظي (WebSocket) — إشعار فوري بس، ما يغيّر منطق حالة الإشارات
 
     def start(self):
         if self._thread and self._thread.is_alive():
@@ -330,9 +332,37 @@ class ScannerState:
             self._price_thread = threading.Thread(target=self._price_update_loop, daemon=True)
             self._price_thread.start()
 
+        # 🆕 بث خاص لحظي (بطلب صريح): إشعار فوري لحظة تنفيذ وقف/هدف حقيقي على
+        # OKX نفسها — بس إشعار (Telegram/لوق)، ما يغيّر آلية تحديد حالة الإشارة
+        # (PENDING/ACTIVE/HIT_SL/HIT_TP) اللي تبقى بالكامل على السحب الدوري
+        # المُختبر طوال هذي الجلسة. عمداً منفصل، عشان ما نلمس منطق قرار مُجرَّب.
+        settings = db.get_settings()
+        if settings.get("okx_is_auto_trading_enabled") and settings.get("exchange") == "okx" and settings.get("okx_api_key"):
+            try:
+                def _on_position(pos):
+                    inst_id = pos.get("instId", "")
+                    upl = pos.get("upl", "?")
+                    db.add_log(f"📡 [بث لحظي] تحديث مركز حقيقي على OKX: {inst_id} — ربح/خسارة عائم: {upl}")
+
+                def _on_order(order):
+                    if order.get("state") in ("filled", "canceled"):
+                        db.add_log(f"📡 [بث لحظي] أمر {order.get('instId','')} تغيّرت حالته إلى: {order.get('state')} (ordId={order.get('ordId','')})")
+
+                self._private_stream = okx_websocket.OKXPrivateStream(
+                    settings["okx_api_key"], settings["okx_api_secret"], settings["okx_passphrase"],
+                    settings["okx_is_testnet"], on_position_update=_on_position, on_order_update=_on_order,
+                )
+                self._private_stream.start()
+                db.add_log("📡 [بث لحظي] اتصال WebSocket الخاص بـOKX بدأ — إشعارات فورية لتحديثات المراكز والأوامر.")
+            except RuntimeError as e:
+                db.add_log(f"⚠️ [بث لحظي] تعذر بدء البث الخاص: {e}")
+
     def stop(self):
         self.is_scanning_active = False
         self._stop_flag.set()
+        if self._private_stream:
+            self._private_stream.stop()
+            self._private_stream = None
         db.add_log("تم إيقاف الفحص التلقائي.")
 
     def trigger_immediate_scan(self):
