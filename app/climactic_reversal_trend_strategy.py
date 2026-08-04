@@ -95,10 +95,11 @@ def analyze_climactic_reversal_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     # وإلا نرفضها — حتى لو كل شروط الاستنزاف الأصلية متحققة. هذا يمنع
     # بالضبط سيناريو "الدخول عكس اتجاه العملة الأكبر" اللي كان عيب النسخة
     # الأصلية.
-    if side != overall_trend:
-        _log("❌ فلتر التوافق مع الترند اليومي", f"الصفقة {side} تعاكس الترند اليومي العام ({overall_trend}) — رفض", False)
+    side_ar = "صاعد" if side == "Long" else "هابط"
+    if side_ar != overall_trend:
+        _log("❌ فلتر التوافق مع الترند اليومي", f"الصفقة {side} ({side_ar}) تعاكس الترند اليومي العام ({overall_trend}) — رفض", False)
         return None
-    _log("✅ الصفقة متوافقة مع الترند اليومي العام", f"{side} == {overall_trend}", True)
+    _log("✅ الصفقة متوافقة مع الترند اليومي العام", f"{side} ({side_ar}) == {overall_trend}", True)
 
     # 🔴 نفس السعر الحي الحقيقي المُمرَّر من السكانر لو متوفر
     current_price = current_price if current_price is not None else (k5m[-1].close if k5m else last.close)
