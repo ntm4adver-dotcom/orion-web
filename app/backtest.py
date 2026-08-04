@@ -18,7 +18,7 @@ Direction) لن تولّد أي إشارة بالاختبار الخلفي — �
 import threading
 import time
 from typing import List, Dict, Any, Optional
-from .analyzer import Kline, efficiency_ratio, _get_bias
+from .analyzer import Kline, efficiency_ratio, _get_bias, assess_coin_tradability
 from .strategies import STRATEGY_REGISTRY
 from . import db
 
@@ -294,7 +294,7 @@ def run_symbol_backtest(symbol: str, days_back: int, exchange,
     if not data:
         return []
 
-    strategy_keys = strategy_keys or [k for k in STRATEGY_REGISTRY if k != "confluence"]
+    strategy_keys = strategy_keys or list(STRATEGY_REGISTRY.keys())
     decision_klines = data[decision_interval]
     if len(decision_klines) < 60:
         return []
@@ -338,6 +338,15 @@ def run_symbol_backtest(symbol: str, days_back: int, exchange,
         k_daily_asof = cursors["1d"].advance_to(current_time)
 
         if len(k4h_asof) < 30 or len(k1h_asof) < 30 or len(k15m_asof) < 30 or len(k_fine_asof) < 30:
+            continue
+
+        # 🔴 إصلاح ثغرة حقيقية (اكتُشفت بفحص شامل للمشروع): فلتر جودة العملة
+        # الاستباقي (assess_coin_tradability) كان مُطبَّق بالفحص الحي بس (داخل
+        # حلقة scanner.py الرئيسية)، مو هنا — يعني نتائج الباك-تست كانت أفضل
+        # بشكل وهمي من الواقع الحي (تُحلل عملات كان الفحص الحي يرفضها من الأساس).
+        # نطبّق نفس الفحص بالضبط هنا، عشان الباك-تست يعكس فعلياً سلوك الفحص الحي.
+        is_tradable, _reason, _metrics = assess_coin_tradability(k1h_asof, k15m_asof, settings)
+        if not is_tradable:
             continue
 
         # حساب اتجاه البيتكوين وقوة نظام السوق "حتى هذي اللحظة بالضبط" — نفس

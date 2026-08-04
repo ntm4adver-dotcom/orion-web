@@ -791,8 +791,16 @@ class ScannerState:
                 # معلّقاً فعلياً على المنصة رغم إن التطبيق يعرضه "ملغى". الآن،
                 # لما نلغي داخلياً، نلغي **فعلياً** نفس الأمر على OKX أيضاً —
                 # بنفس أسلوب وقف التعادل بالضبط (تحقق ثم نفّذ، مع تسجيل واضح).
+                # 🔴 إصلاح إضافي (اكتُشف بفحص شامل للمشروع): الشرط كان يتحقق أيضاً
+                # من settings["exchange"]=="okx" — لكن هذا الإعداد يتحكم بـ**مصدر
+                # بيانات الفحص فقط** (ممكن يكون Binance)، بينما التداول الحقيقي
+                # دايماً على OKX بغض النظر عنه (_execute_auto_trade ما يتحقق من
+                # exchange إطلاقاً). لو المستخدم يستخدم Binance كمصدر بيانات مع
+                # تفعيل تداول OKX، الشرط القديم كان يمنع الإلغاء التلقائي هنا
+                # بصمت رغم وجود أمر حقيقي معلّق فعلاً. أزلته، وأبقيت بس التحقق من
+                # وجود مفتاح API فعلي.
                 if (new_status == "CANCELLED" and settings.get("okx_is_auto_trading_enabled")
-                        and settings.get("exchange") == "okx" and signal.get("okx_order_id")
+                        and settings.get("okx_api_key") and signal.get("okx_order_id")
                         and signal.get("okx_inst_id")):
                     for ord_id in str(signal["okx_order_id"]).split(","):
                         ord_id = ord_id.strip()
@@ -846,7 +854,7 @@ class ScannerState:
                         # فيه مركز مفتوح فعلياً لهذي العملة بالذات (ما نرسل أمر عبثاً
                         # لو المستخدم ما نفّذ هذي الإشارة فعلياً على المنصة). الدالة
                         # نفسها تتحقق من وجود المركز أولاً قبل أي محاولة تعديل.
-                        if settings.get("exchange") == "okx" and settings.get("okx_api_key"):
+                        if settings.get("okx_api_key"):
                             try:
                                 ok, msg = okx_client.amend_position_stop_loss(
                                     signal["symbol"], entry_price,
@@ -890,7 +898,7 @@ class ScannerState:
                             signal["breakeven_activated"] = 1
                             signal["stop_loss"] = entry_price
                             db.add_log(f"🎯 [{signal['symbol']}] انتقل وقف النصف الباقي لنقطة الدخول تلقائياً (مرتبط بتحقق الهدف الأول).")
-                            if settings.get("exchange") == "okx" and settings.get("okx_api_key"):
+                            if settings.get("okx_api_key"):
                                 try:
                                     ok, msg = okx_client.amend_position_stop_loss(
                                         signal["symbol"], entry_price,
