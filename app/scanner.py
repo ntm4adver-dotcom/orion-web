@@ -73,7 +73,7 @@ def _fetch_klines_cached(exchange, symbol: str, timeframe: str, target_count: in
 
 def evaluate_signal_filters(settings: dict, symbol: str, strategy_key: str, result,
                              k4h, k1h, k15m, k5m, btc_trend=None, btc_klines=None,
-                             market_regime_er=None, micro=None) -> tuple:
+                             market_regime_er=None) -> tuple:
     """🆕 دالة مشتركة نقية (بدون أي استدعاءات جانبية لقاعدة البيانات) تحتوي **كل**
     منطق الفلاتر بالضبط — يستخدمها الفحص الحي (scanner.py) **والاختبار الخلفي**
     (backtest.py) بنفس الطريقة تماماً، بنفس الإعدادات الفعلية، عشان الاختبار
@@ -98,22 +98,6 @@ def evaluate_signal_filters(settings: dict, symbol: str, strategy_key: str, resu
     reward = abs(result.take_profit - result.entry_price)
     if risk <= 0 or reward <= 0:
         return False, f"مخاطرة أو عائد صفري/سلبي (مخاطرة={risk:.6g}, عائد={reward:.6g})", "sequence_integrity_zero_risk_reward"
-
-    # 🆕 فلتر عام إلزامي (زر تفعيل/إلغاء، بطلب صريح): يُطبَّق على **كل**
-    # الاستراتيجيات بدون استثناء (حتى الارتدادية الثلاث المُعفاة من فلاتر
-    # تانية) — بناءً على مراجعة صفقات حقيقية مغلقة أظهرت فاصل واضح 100% بين
-    # الرابح والخاسر بـscalp_precision تحديداً: كل خسارة كانت بالضبط الحالة
-    # اللي غاب فيها تأكيد ضغط المتداولين الفعليين، وكل ربح كان فيه هذا
-    # التأكيد موجود ومتوافق مع اتجاه الصفقة.
-    # ملاحظة مهمة: بالاختبار الخلفي (backtest) `micro` دايماً None لأن بيانات
-    # ضغط المتداولين لحظية حية فقط، ما تُحفَظ تاريخياً — فالفلتر هنا **يتخطى
-    # بدون رفض** لو micro غير متوفرة (بدل ما يرفض كل شي بالباك-تست)، ويشتغل
-    # بصرامة فقط بالفحص الحي حيث البيانات دايماً متوفرة.
-    if settings.get("is_taker_pressure_filter_enabled", False) and micro is not None:
-        tp = micro.taker_pressure
-        aligned = tp is not None and ((result.side == "Long" and tp > 0.2) or (result.side == "Short" and tp < -0.2))
-        if not aligned:
-            return False, f"ضغط المتداولين الفعليين غير متوفر أو غير كافٍ لدعم اتجاه الصفقة ({tp if tp is not None else 'غير متوفر'})", "taker_pressure_filter"
 
     current_live_price = k5m[-1].close if k5m else None
 
@@ -514,7 +498,7 @@ class ScannerState:
                         continue
                     matched_any = True
                     self._process_signal(settings, symbol, strategy_key, result, k4h_confirmed, k1h_confirmed, k15m_confirmed, k5m_confirmed,
-                                          btc_trend, btc_klines, market_regime_er, current_live_price, micro)
+                                          btc_trend, btc_klines, market_regime_er, current_live_price)
 
                 if not matched_any:
                     db.add_log(f"▫️ {symbol}: ليس له اتجاه كافٍ حالياً.")
@@ -536,7 +520,7 @@ class ScannerState:
                 f"أو حصل خطأ أثناء التحليل:\n\n{body}",
             )
 
-    def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k15m, k5m, btc_trend=None, btc_klines=None, market_regime_er=None, current_live_price=None, micro=None):
+    def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k15m, k5m, btc_trend=None, btc_klines=None, market_regime_er=None, current_live_price=None):
         # 🆕 فرض عائد/مخاطرة ثابت (بطلب صريح): يتجاوز هدف الاستراتيجية المحسوب،
         # ويفرض R محدد يكتبه المستخدم بنفسه — لا يزيد ولا ينقص. يُطبَّق **أول شي**
         # (قبل الهيدج، الحارس، أي فلتر) عشان الوقف يبقى كما حسبته الاستراتيجية
@@ -597,7 +581,7 @@ class ScannerState:
             # نعالج النسخة المعكوسة بشكل مستقل تماماً (استدعاء منفصل، نفس كل الفلاتر)،
             # واللاحقة _REVERSED تمنع أي عودية لانهائية (ما يدخل هذا الشرط مرة ثانية)
             self._process_signal(settings, symbol, f"{strategy_key}_REVERSED", reversed_result,
-                                  k4h, k1h, k15m, k5m, btc_trend, btc_klines, market_regime_er, current_live_price, micro)
+                                  k4h, k1h, k15m, k5m, btc_trend, btc_klines, market_regime_er, current_live_price)
             # نكمل الآن معالجة الصفقة **الأصلية** بشكل طبيعي تماماً (بدون أي تعديل عليها)
 
 
@@ -606,7 +590,7 @@ class ScannerState:
         # الإعدادات الفعلية، عشان الاختبار الخلفي يعكس فعلياً سلوك التطبيق الحي.
         accepted, reason, counter_key = evaluate_signal_filters(
             settings, symbol, strategy_key, result, k4h, k1h, k15m, k5m,
-            btc_trend, btc_klines, market_regime_er, micro,
+            btc_trend, btc_klines, market_regime_er,
         )
         if not accepted:
             db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: {reason}.")
@@ -652,32 +636,12 @@ class ScannerState:
             )
 
         if settings["okx_is_auto_trading_enabled"]:
-            self._execute_auto_trade(settings, result, signal_id, current_live_price)
+            self._execute_auto_trade(settings, result, signal_id)
 
-    def _execute_auto_trade(self, settings: dict, result, signal_id: int, current_live_price=None):
+    def _execute_auto_trade(self, settings: dict, result, signal_id: int):
         side_text = "buy" if result.side == "Long" else "sell"
         db.add_log(f"🤖 [التداول الآلي] جاري إرسال أمر إلى OKX ({result.symbol} | {side_text})...")
         try:
-            # 🔴 إصلاح جذري (بطلب صريح، بعد تفعيل التداول الآلي الحقيقي): كان
-            # الكود يعتمد على إعداد عام واحد (is_instant_entry_enabled) لتحديد
-            # نوع الأمر (سوق/محدد) بغض النظر عن نقطة الدخول اللي حسبتها
-            # الاستراتيجية فعلياً. بعض الاستراتيجيات (زي مصيدة الحشد، اختراق
-            # اليوم السابق) تحسب نقطة دخول محدَّدة (إعادة اختبار مستوى) تختلف
-            # عن السعر اللحظي عمداً — تنفيذها كأمر سوق فوري يدخل الصفقة بسعر
-            # غلط تماماً (السعر الحالي، مو نقطة الدخول المحسوبة)، ويفتح مركز
-            # حقيقي فوراً حتى لو السعر لسا ما وصل لنقطة الدخول المقصودة أصلاً.
-            # الحل: لو نقطة الدخول تختلف فعلياً عن السعر اللحظي (فرق >0.15%)،
-            # **نلزم استخدام أمر Limit عند نقطة الدخول بالضبط** — بغض النظر عن
-            # إعداد "الدخول الفوري"، لأن هذي حالة "انتظار إعادة اختبار" مقصودة
-            # من الاستراتيجية نفسها، مو مجرد تفضيل عام.
-            price_gap_pct = 0.0
-            if current_live_price and current_live_price > 0:
-                price_gap_pct = abs(result.entry_price - current_live_price) / current_live_price
-            is_retest_entry = price_gap_pct > 0.0015
-            use_market_order = settings.get("is_instant_entry_enabled", True) and not is_retest_entry
-            if is_retest_entry:
-                db.add_log(f"⏳ [{result.symbol}] نقطة الدخول ({result.entry_price:.6g}) تختلف عن السعر الحالي ({current_live_price:.6g}) — سيُرسَل أمر Limit معلّق بانتظار إعادة الاختبار، مو أمر سوق فوري.")
-
             available_balance = None
             if settings.get("okx_volume_type") == "PERCENTAGE":
                 info = okx_client.fetch_account_info(
@@ -695,36 +659,29 @@ class ScannerState:
             # الكامل — يطابق التقسيم الداخلي المُتتبَّع بقاعدة البيانات تماماً.
             if settings.get("is_split_targets_enabled", False):
                 tp1_price = result.entry_price + (result.take_profit - result.entry_price) * 0.5
-                success, message, order_ids = okx_client.place_split_orders(
+                success, message = okx_client.place_split_orders(
                     symbol=result.symbol, side=side_text, quantity_usdt=quantity_usdt,
                     leverage=settings["okx_leverage"], margin_mode=settings["okx_margin_mode"],
                     stop_loss=result.stop_loss, tp1=tp1_price, tp2=result.take_profit,
                     api_key=settings["okx_api_key"], api_secret=settings["okx_api_secret"],
                     passphrase=settings["okx_passphrase"], is_testnet=settings["okx_is_testnet"],
-                    is_market_order=use_market_order,
+                    is_market_order=settings.get("is_instant_entry_enabled", True),
                     is_max_leverage_enabled=settings.get("okx_is_max_leverage_enabled", False),
                     entry_price=result.entry_price,
                 )
             else:
-                success, message, ord_id = okx_client.place_order(
+                success, message = okx_client.place_order(
                     symbol=result.symbol, side=side_text, quantity_usdt=quantity_usdt,
                     leverage=settings["okx_leverage"], margin_mode=settings["okx_margin_mode"],
                     stop_loss=result.stop_loss, take_profit=result.take_profit,
                     api_key=settings["okx_api_key"], api_secret=settings["okx_api_secret"],
                     passphrase=settings["okx_passphrase"], is_testnet=settings["okx_is_testnet"],
-                    is_market_order=use_market_order,
+                    is_market_order=settings.get("is_instant_entry_enabled", True),
                     is_max_leverage_enabled=settings.get("okx_is_max_leverage_enabled", False),
                     entry_price=result.entry_price,
                 )
-                order_ids = [ord_id] if ord_id else []
             if success:
                 db.add_log(f"✅ [التداول الآلي] تم تنفيذ الصفقة بنجاح: {message}")
-                if order_ids:
-                    # 🆕 نخزّن رقم الأمر الحقيقي — ضروري عشان نقدر نلغيه فعلياً
-                    # على OKX لاحقاً لو الإشارة اتلغت داخلياً قبل الامتلاء
-                    # (خصوصاً بحالة أمر Limit معلّق ينتظر إعادة الاختبار).
-                    inst_id = okx_client._to_inst_id(result.symbol)
-                    db.save_okx_order_ref(signal_id, inst_id, order_ids)
             else:
                 db.add_log(f"❌ [التداول الآلي] فشل تنفيذ الصفقة: {message}")
         except Exception as e:
@@ -758,32 +715,6 @@ class ScannerState:
                         new_status, changed = "ACTIVE", True
                     elif live_price <= signal["take_profit"] and settings["is_cancel_if_exceeds_target_enabled"]:
                         new_status, changed = "CANCELLED", True
-
-                # 🔴 إصلاح ثغرة حقيقية (بطلب صريح بعد تفعيل التداول الآلي): كان
-                # الإلغاء هنا داخلي بحت (قاعدة بيانات فقط) — لو أمر Limit حقيقي
-                # مُرسَل فعلاً على OKX (حالة "إعادة اختبار" لم تُملأ بعد)، يبقى
-                # معلّقاً فعلياً على المنصة رغم إن التطبيق يعرضه "ملغى". الآن،
-                # لما نلغي داخلياً، نلغي **فعلياً** نفس الأمر على OKX أيضاً —
-                # بنفس أسلوب وقف التعادل بالضبط (تحقق ثم نفّذ، مع تسجيل واضح).
-                if (new_status == "CANCELLED" and settings.get("okx_is_auto_trading_enabled")
-                        and settings.get("exchange") == "okx" and signal.get("okx_order_id")
-                        and signal.get("okx_inst_id")):
-                    for ord_id in str(signal["okx_order_id"]).split(","):
-                        ord_id = ord_id.strip()
-                        if not ord_id:
-                            continue
-                        try:
-                            ok, msg = okx_client.cancel_pending_order(
-                                signal["okx_inst_id"], ord_id,
-                                settings["okx_api_key"], settings["okx_api_secret"],
-                                settings["okx_passphrase"], settings["okx_is_testnet"],
-                            )
-                            if ok:
-                                db.add_log(f"✅ [{signal['symbol']}] تم إلغاء أمر Limit المعلّق فعلياً على OKX (وصل الهدف قبل الدخول).")
-                            else:
-                                db.add_log(f"⚠️ [{signal['symbol']}] الإشارة أُلغيت داخلياً، لكن فشل إلغاء الأمر على OKX: {msg}")
-                        except Exception as e:
-                            db.add_log(f"⚠️ [{signal['symbol']}] خطأ أثناء محاولة إلغاء الأمر على OKX: {e}")
             elif signal["status"] == "ACTIVE":
                 # قياس التراجع اللحظي من نقطة الدخول (مو الربح/الخسارة النهائي) —
                 # يقيس "كم رجع السعر ضدنا" أثناء الصفقة، مفيد لتقييم قوة نقطة الدخول

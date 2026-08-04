@@ -54,7 +54,6 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "is_efficiency_filter_enabled": 1,  # رفض العملات اللي تتحرك عشوائياً/جانبياً (نسبة الكفاءة الاتجاهية)
     "min_efficiency_ratio": 0.15,  # الحد الأدنى لنسبة الكفاءة الاتجاهية (0-1، كل ما زاد كل ما كان الاتجاه أنظف) — خُفّض من 0.28 بناءً على دليل رفض مفرط فعلي
     "is_market_alignment_filter_enabled": 1,  # رفض أي صفقة تعاكس اتجاه السوق العام (البيتكوين)
-    "is_taker_pressure_filter_enabled": 0,  # 🆕 شرط إلزامي عام (لكل الاستراتيجيات): رفض أي صفقة ما فيها تأكيد ضغط متداولين فعلي واضح ومتوافق مع الاتجاه — بناءً على مراجعة صفقات حقيقية أظهرت فاصل واضح بين الرابح والخاسر (scalp_precision تحديداً)
     "min_btc_correlation": 0.35,  # الحد الأدنى لمعامل الارتباط بالبيتكوين قبل اعتبار العملة "فكّت الارتباط"
     "is_btc_decoupling_exception_enabled": 1,  # 🆕 لو مفعّل: العملة اللي "فكّت ارتباطها" تُقيَّم بناءً على اتجاهها الخاص بدل البيتكوين. لو معطّل: كل الصفقات تُقيَّم دايماً بالنسبة لاتجاه البيتكوين، حتى لو الارتباط ضعيف مؤقتاً (بطلب صريح: فك الارتباط أحياناً مؤقت والسوق يجبر العملة ترجع تتبع البيتكوين لاحقاً)
     "is_breakeven_stop_enabled": 1,  # نقل الوقف لنقطة الدخول تلقائياً عند تحقيق ربح 1R
@@ -138,9 +137,7 @@ def init_db():
                 tp1_hit INTEGER DEFAULT 0,
                 split_targets_used INTEGER DEFAULT 0,
                 actual_r_achieved REAL DEFAULT NULL,
-                partial_r_banked REAL DEFAULT 0,
-                okx_order_id TEXT DEFAULT '',
-                okx_inst_id TEXT DEFAULT ''
+                partial_r_banked REAL DEFAULT 0
             )
         """)
         # هجرة آمنة: إضافة عمود strategy لو قاعدة البيانات كانت موجودة قبل هذا التحديث
@@ -170,10 +167,6 @@ def init_db():
                 conn.execute("ALTER TABLE trade_signals ADD COLUMN actual_r_achieved REAL DEFAULT NULL")
             if "partial_r_banked" not in existing_cols:
                 conn.execute("ALTER TABLE trade_signals ADD COLUMN partial_r_banked REAL DEFAULT 0")
-            if "okx_order_id" not in existing_cols:
-                conn.execute("ALTER TABLE trade_signals ADD COLUMN okx_order_id TEXT DEFAULT ''")
-            if "okx_inst_id" not in existing_cols:
-                conn.execute("ALTER TABLE trade_signals ADD COLUMN okx_inst_id TEXT DEFAULT ''")
         except Exception:
             pass
         conn.execute("""
@@ -248,7 +241,7 @@ def get_settings() -> Dict[str, Any]:
                  "is_efficiency_filter_enabled", "is_market_alignment_filter_enabled",
                  "is_breakeven_stop_enabled", "is_auto_breakeven_half_target_enabled",
                  "is_split_targets_enabled", "is_market_regime_filter_enabled", "is_reverse_mode_enabled", "is_fixed_rr_enabled",
-                 "is_btc_decoupling_exception_enabled", "is_taker_pressure_filter_enabled"):
+                 "is_btc_decoupling_exception_enabled"):
         settings[bkey] = bool(int(settings.get(bkey, 0)))
     return settings
 
@@ -702,22 +695,6 @@ def update_max_drawdown_if_worse(signal_id: int, drawdown_pct: float):
         if drawdown_pct > current_max:
             conn.execute("UPDATE trade_signals SET max_drawdown_pct=? WHERE id=?", (drawdown_pct, signal_id))
             conn.commit()
-
-
-def save_okx_order_ref(signal_id: int, inst_id: str, order_ids) -> None:
-    """🆕 يخزّن رقم/أرقام الأمر الحقيقي على OKX لحظة تنفيذ التداول الآلي — ضروري
-    عشان نقدر نلغي الأمر فعلياً على المنصة لاحقاً لو الإشارة اتلغت داخلياً قبل
-    ما السعر يوصل نقطة الدخول الحقيقية (حالة Limit معلّق لم يُملَأ بعد)."""
-    if isinstance(order_ids, (list, tuple)):
-        joined = ",".join(str(x) for x in order_ids if x)
-    else:
-        joined = str(order_ids) if order_ids else ""
-    with _lock, _connect() as conn:
-        conn.execute(
-            "UPDATE trade_signals SET okx_order_id=?, okx_inst_id=? WHERE id=?",
-            (joined, inst_id, signal_id),
-        )
-        conn.commit()
 
 
 def activate_breakeven(signal_id: int, new_stop_loss: float):

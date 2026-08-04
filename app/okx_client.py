@@ -332,42 +332,38 @@ def calculate_order_quantity_usdt(settings: dict, entry_price: float, stop_loss:
 def place_split_orders(symbol: str, side: str, quantity_usdt: float, leverage: int, margin_mode: str,
                         stop_loss: float, tp1: float, tp2: float, api_key: str, api_secret: str,
                         passphrase: str, is_testnet: bool, is_market_order: bool = True,
-                        is_max_leverage_enabled: bool = False, entry_price: float = 0.0) -> Tuple[bool, str, List[str]]:
+                        is_max_leverage_enabled: bool = False, entry_price: float = 0.0) -> Tuple[bool, str]:
     """ينفّذ صفقة مقسّمة الأهداف كأمرين منفصلين حقيقيين على OKX — كل وحدة بنصف
     الكمية، بنفس الدخول والوقف، لكن بهدف مختلف (tp1 للأمر الأول، tp2 للثاني).
-    هذا يطابق تماماً منطق تقسيم الأهداف الداخلي (نصف الكمية عند كل هدف).
-    🆕 يرجع أيضاً قائمة أرقام الأوامر الحقيقية (لإلغائهم لاحقاً لو لزم)."""
+    هذا يطابق تماماً منطق تقسيم الأهداف الداخلي (نصف الكمية عند كل هدف)."""
     half_usdt = quantity_usdt / 2.0
 
-    ok1, msg1, ord_id1 = place_order(
+    ok1, msg1 = place_order(
         symbol=symbol, side=side, quantity_usdt=half_usdt, leverage=leverage, margin_mode=margin_mode,
         stop_loss=stop_loss, take_profit=tp1, api_key=api_key, api_secret=api_secret, passphrase=passphrase,
         is_testnet=is_testnet, is_market_order=is_market_order, is_max_leverage_enabled=is_max_leverage_enabled,
         entry_price=entry_price,
     )
-    ok2, msg2, ord_id2 = place_order(
+    ok2, msg2 = place_order(
         symbol=symbol, side=side, quantity_usdt=half_usdt, leverage=leverage, margin_mode=margin_mode,
         stop_loss=stop_loss, take_profit=tp2, api_key=api_key, api_secret=api_secret, passphrase=passphrase,
         is_testnet=is_testnet, is_market_order=is_market_order, is_max_leverage_enabled=is_max_leverage_enabled,
         entry_price=entry_price,
     )
-    order_ids = [oid for oid in (ord_id1, ord_id2) if oid]
     if ok1 and ok2:
-        return True, f"تم تنفيذ الصفقة المقسّمة بنجاح — نصف الكمية بهدف {tp1:.6g}، والنصف الثاني بهدف {tp2:.6g}", order_ids
+        return True, f"تم تنفيذ الصفقة المقسّمة بنجاح — نصف الكمية بهدف {tp1:.6g}، والنصف الثاني بهدف {tp2:.6g}"
     if ok1 and not ok2:
-        return False, f"تم تنفيذ نصف الصفقة الأول بنجاح، لكن فشل النصف الثاني: {msg2}", order_ids
+        return False, f"تم تنفيذ نصف الصفقة الأول بنجاح، لكن فشل النصف الثاني: {msg2}"
     if not ok1 and ok2:
-        return False, f"تم تنفيذ نصف الصفقة الثاني بنجاح، لكن فشل النصف الأول: {msg1}", order_ids
-    return False, f"فشل تنفيذ الصفقة المقسّمة بالكامل: {msg1} / {msg2}", order_ids
+        return False, f"تم تنفيذ نصف الصفقة الثاني بنجاح، لكن فشل النصف الأول: {msg1}"
+    return False, f"فشل تنفيذ الصفقة المقسّمة بالكامل: {msg1} / {msg2}"
 
 
 def place_order(symbol: str, side: str, quantity_usdt: float, leverage: int, margin_mode: str,
                  stop_loss: float, take_profit: float, api_key: str, api_secret: str,
                  passphrase: str, is_testnet: bool, is_market_order: bool = True,
-                 is_max_leverage_enabled: bool = False, entry_price: float = 0.0) -> Tuple[bool, str, Optional[str]]:
-    """side: 'buy' أو 'sell'. ينفذ أمر سوق فوري أو محدد بحجم quantity_usdt دولار مع ربط SL/TP اختيارياً.
-    🆕 يرجع الآن (نجاح, رسالة, رقم الأمر الحقيقي على OKX) — رقم الأمر ضروري لإلغاء
-    أمر Limit معلّق فعلياً لاحقاً لو الإشارة أُلغيت داخلياً قبل التنفيذ."""
+                 is_max_leverage_enabled: bool = False, entry_price: float = 0.0) -> Tuple[bool, str]:
+    """side: 'buy' أو 'sell'. ينفذ أمر سوق فوري أو محدد بحجم quantity_usdt دولار مع ربط SL/TP اختيارياً."""
     inst_id = _to_inst_id(symbol)
 
     final_leverage = leverage
@@ -381,9 +377,9 @@ def place_order(symbol: str, side: str, quantity_usdt: float, leverage: int, mar
     try:
         last_price = float(px_resp["data"][0]["last"])
     except Exception:
-        return False, "تعذر جلب السعر الحالي لحساب الكمية", None
+        return False, "تعذر جلب السعر الحالي لحساب الكمية"
     if last_price <= 0:
-        return False, "سعر غير صالح", None
+        return False, "سعر غير صالح"
 
     specs = fetch_instrument_specs(inst_id)
     ct_val = specs["ct_val"]
@@ -394,7 +390,7 @@ def place_order(symbol: str, side: str, quantity_usdt: float, leverage: int, mar
     # OKX برسالة "Order quantity must be a multiple of the lot size".
     final_sz = round_to_lot_size(raw_sz, specs["lot_sz"], specs["min_sz"])
     if final_sz <= 0:
-        return False, "حجم الصفقة المحسوب أقل من الحد الأدنى المسموح لهذا الرمز على OKX", None
+        return False, "حجم الصفقة المحسوب أقل من الحد الأدنى المسموح لهذا الرمز على OKX"
     # صيغة نص دقيقة بدون أصفار عشرية زايدة أو تمثيل عائم غير دقيق (زي 0.30000000004)
     sz = f"{final_sz:.8f}".rstrip("0").rstrip(".") or "0"
 
@@ -437,7 +433,7 @@ def place_order(symbol: str, side: str, quantity_usdt: float, leverage: int, mar
     # عند نقطة الدخول المحسوبة من الاستراتيجية بالضبط، مو سعر السوق اللحظي).
     if not is_market_order:
         if not entry_price or entry_price <= 0:
-            return False, "أمر Limit يتطلب سعر دخول صالح، لكن لم يُستلَم أي سعر — تأكد من تفعيل الدخول الفوري أو إرسال سعر دخول صحيح", None
+            return False, "أمر Limit يتطلب سعر دخول صالح، لكن لم يُستلَم أي سعر — تأكد من تفعيل الدخول الفوري أو إرسال سعر دخول صحيح"
         body["px"] = str(entry_price)
 
     # 🔴 إصلاح حرج: OKX ألغت دعم إرسال وقف الخسارة/الهدف كحقول مباشرة (slTriggerPx/
@@ -455,15 +451,13 @@ def place_order(symbol: str, side: str, quantity_usdt: float, leverage: int, mar
 
     resp = _request("POST", "/api/v5/trade/order", body, api_key, api_secret, passphrase, is_testnet)
     if not resp:
-        return False, "فشل الاتصال بمنصة OKX", None
+        return False, "فشل الاتصال بمنصة OKX"
     if resp.get("code") == "0":
         order_type_txt = "بسعر السوق" if is_market_order else f"Limit عند {entry_price}"
-        data = resp.get("data") or [{}]
-        ord_id = data[0].get("ordId") if data else None
-        return True, f"تم تنفيذ الأمر بنجاح ({sz} عقد {order_type_txt}) برافعة x{leverage} ({margin_mode})", ord_id
+        return True, f"تم تنفيذ الأمر بنجاح ({sz} عقد {order_type_txt}) برافعة x{leverage} ({margin_mode})"
     detail = resp.get("data", [{}])
     msg = detail[0].get("sMsg") if detail else resp.get("msg", "خطأ غير معروف")
-    return False, msg or resp.get("msg", "خطأ غير معروف"), None
+    return False, msg or resp.get("msg", "خطأ غير معروف")
 
 
 def fetch_historical_klines(symbol: str, interval: str, total_needed: int) -> List[Kline]:

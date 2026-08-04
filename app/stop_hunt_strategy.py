@@ -29,7 +29,7 @@
 """
 from typing import List, Optional
 
-from .analyzer import Kline, AnalysisResult, MarketMicrostructure, build_score_breakdown, atr
+from .analyzer import Kline, AnalysisResult, MarketMicrostructure, build_score_breakdown
 
 
 def _detect_stop_hunt(klines: List[Kline], lookback: int = 50, vol_period: int = 20,
@@ -42,15 +42,6 @@ def _detect_stop_hunt(klines: List[Kline], lookback: int = 50, vol_period: int =
 
     recent_vol_all = [k.volume for k in klines[-vol_period:]]
     avg_volume = sum(recent_vol_all) / len(recent_vol_all) if recent_vol_all else 0.0
-
-    # 🔴 إصلاح باق حقيقي مكتشف بمراجعة صفقات حية (UBUSDT: وقف 42.7% وهدف بقيمة
-    # سالبة! BICOUSDT: وقف 35.4%): كان الهامش (buffer) يُحسب بس من مدى شمعة
-    # السحب نفسها (candle_range * 0.4) بدون أي سقف — لو شمعة السحب كانت شاذة
-    # (فولتيليتي هائلة لحظية بعملة قليلة السيولة)، الهامش يصير ضخم بلا معنى.
-    # نحسب ATR مستقر (14 فترة) كمرجع تقلب طبيعي، ونستخدمه كسقف أقصى للهامش —
-    # نفس فلسفة `structural_stop_loss` المستخدمة ببقية الاستراتيجيات (حدود
-    # ATR بدل الاعتماد الأعمى على شمعة واحدة قد تكون شاذة).
-    atr_ref = atr(klines[-(lookback + vol_period):], 14)
 
     # نفحص من الأحدث للأقدم داخل نافذة recent_window، ونرجع أول تطابق (الأحدث)
     for offset in range(1, recent_window + 1):
@@ -66,17 +57,6 @@ def _detect_stop_hunt(klines: List[Kline], lookback: int = 50, vol_period: int =
         # هامش وقف واقعي: الأكبر بين 40% من مدى الشمعة أو 0.4% من السعر — كان 10%
         # بس (ضيق جداً)، يخلي الوقف يُضرب بضوضاء عادية قبل ما تتضح الحركة الحقيقية
         buffer = max(candle_range * 0.4, current.close * 0.004)
-        # 🔴 سقف أقصى (بطلب صريح): لو شمعة السحب شاذة (مدى ضخم غير طبيعي)، ما
-        # نخلي الهامش يتضخم معها بلا حدود — نحدّه بمضاعف ATR معقول (2.5x)، يحفظ
-        # نفس فلسفة "وقف هيكلي واقعي" بدون فتحه على مصراعيه لشمعة شاذة وحدة.
-        # 🔴 حد أدنى أيضاً (بطلب صريح، بعد مراجعة بيانات حقيقية): كل الصفقات
-        # الخاسرة المسجَّلة كان وقفها ضيق جداً (1.2-1.9% من السعر)، بينما
-        # الصفقات اللي تحركت لصالحها بقوة كان وقفها أوسع بكثير (5.5-6.5%) —
-        # نمط واضح يوحي إن الوقف الضيق يُضرب بضوضاء عادية قبل ما الحركة
-        # الحقيقية تاخذ فرصتها. نفرض حد أدنى نصف ATR على الأقل.
-        if atr_ref > 0:
-            buffer = min(buffer, atr_ref * 2.5)
-            buffer = max(buffer, atr_ref * 0.5)
 
         # صيد استوبات صاعد (سحب سيولة القيعان)
         if current.low < lowest_low and current.close > lowest_low:
@@ -207,17 +187,6 @@ def analyze_stop_hunt(symbol: str, k4h, k1h, k15m, k5m, k_daily,
 
     risk = abs(entry_price - sl)
     if risk <= 0:
-        return None
-
-    # 🔴 سقف أمان أخير (بطلب صريح، بعد اكتشاف حالات حقيقية: UBUSDT وقف 42.7%
-    # بهدف بقيمة سالبة، BICOUSDT وقف 35.4%): حتى بعد تحديد الهامش بسقف ATR
-    # أعلاه، ممكن يبقى الوقف بعيد جداً عن سعر الدخول لسبب مختلف كليّاً — المستوى
-    # التاريخي المسحوب نفسه (أعلى قمة/أدنى قاع خلال 400 ساعة ≈ 16-17 يوم) قد
-    # يكون بعيد جداً عن السعر الحالي وقت الدخول (تحرك السعر ابتعد كثير منذ ذاك
-    # المستوى، مو سحب سيولة "طازج" فعلياً رغم إنه اجتاز الرقم تقنياً). هذا سقف
-    # حماية شامل يمسك أي سبب يخلي مسافة الوقف غير منطقية، بغض النظر عن مصدره:
-    if risk / entry_price > 0.08:
-        _log("❌ سقف أمان أقصى لمسافة الوقف (8% من السعر)", f"{risk/entry_price*100:.2f}% — المستوى التاريخي المسحوب بعيد جداً عن السعر الحالي، سحب سيولة غير طازج فعلياً — رفض", False)
         return None
 
     # فلتر OI اختياري (نفس أسلوب بقية الاستراتيجيات): سيولة تخرج بقوة = إشارة ضعف حقيقي
