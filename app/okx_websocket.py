@@ -42,6 +42,80 @@ def _to_inst_id(symbol: str) -> str:
     return f"{base}-USDT-SWAP"
 
 
+class LiveKlineFeed:
+    """🆕 مدير البث الحي المركزي — بديل عن تكرار طلب REST كل دورة فحص (بطلب
+    صريح: "كل شي حي زي المنصة، الفاحص بس يروح يحلل من البيانات الجاهزة").
+
+    الفكرة: بث WebSocket واحد يغذّي **نفس أرشيف قاعدة البيانات** (`candle_cache`)
+    المستخدَم أصلاً بكل مكان بالتطبيق (فحص، شارت، باك-تست) — مو ذاكرة منفصلة.
+    كل ما توصل شمعة **مغلقة فعلياً** من البث الحي، تُحفَظ فوراً بالأرشيف. الفاحص
+    (`_fetch_klines_cached`) يتحقق أول شي: "هل البث الحي غذّى هذي التركيبة
+    (عملة+فريم) حديثاً؟" — لو نعم، يقرأ من الأرشيف مباشرة بدون أي طلب REST
+    جديد. لو لأ (بث منقطع، أو تركيبة جديدة لسا ما اشتُرك فيها)، يرجع تلقائياً
+    لطلب REST القديم كشبكة أمان — عشان قرار تداول حقيقي ما يعتمد على بيانات
+    قديمة لو الاتصال الحي فشل مؤقتاً."""
+
+    def __init__(self, db_module):
+        self.db = db_module
+        self.stream: Optional[OKXPublicStream] = None
+        self._subscribed: set = set()  # {(symbol, interval)}
+        self._last_update_ts: Dict[Tuple[str, str], float] = {}
+        self._lock = threading.Lock()
+
+    def start(self):
+        if self.stream is not None:
+            return
+        try:
+            self.stream = OKXPublicStream(self._on_update)
+            self.stream.start()
+        except RuntimeError:
+            self.stream = None  # مكتبة websocket-client غير مثبَّتة — يبقى الفاحص يعتمد على REST بالكامل بأمان
+
+    def stop(self):
+        if self.stream:
+            self.stream.stop()
+            self.stream = None
+        with self._lock:
+            self._subscribed.clear()
+            self._last_update_ts.clear()
+
+    def sync_subscriptions(self, symbols: List[str], intervals: List[str]):
+        """يشترك بأي تركيبة (عملة+فريم) جديدة مو مشترك فيها بعد. لا نلغي اشتراك
+        القديم (تبسيط متعمَّد — تكلفته زيادة بسيطة بعرض النطاق، بلا مخاطرة)."""
+        if not self.stream:
+            return
+        with self._lock:
+            for symbol in symbols:
+                for interval in intervals:
+                    key = (symbol, interval)
+                    if key not in self._subscribed:
+                        self._subscribed.add(key)
+                        self.stream.subscribe(symbol, interval)
+
+    def is_fresh(self, symbol: str, interval: str, max_age_seconds: float) -> bool:
+        """هل البث الحي غذّى هذي التركيبة خلال آخر max_age_seconds؟ لو لأ (أو
+        ما اشتركنا فيها أصلاً)، الفاحص يرجع لـREST كشبكة أمان."""
+        if not self.stream:
+            return False
+        last = self._last_update_ts.get((symbol, interval))
+        if last is None:
+            return False
+        return (time.time() - last) <= max_age_seconds
+
+    def _on_update(self, symbol: str, interval: str, kline: Kline, is_closed: bool):
+        self._last_update_ts[(symbol, interval)] = time.time()
+        if not is_closed:
+            return  # نحفظ بالأرشيف الدائم بس الشموع المغلقة فعلياً (نفس فلسفة الاستراتيجيات: نستبعد الشمعة الحيّة)
+        try:
+            self.db.save_candles(symbol, interval, [{
+                "open_time": kline.open_time, "open": kline.open, "high": kline.high,
+                "low": kline.low, "close": kline.close, "volume": kline.volume,
+                "close_time": kline.close_time,
+            }], keep_latest=1200)
+        except Exception:
+            pass  # فشل حفظ لحظي واحد ما يوقف البث — REST هيغطي أي فجوة لاحقاً
+
+
 class OKXPublicStream:
     """يفتح اتصال WebSocket واحد يدعم اشتراكات متعددة (رمز+فريم)، مع إعادة
     اتصال تلقائية عند الانقطاع. يستدعي `on_candle_update` لكل تحديث (سواء

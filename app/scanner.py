@@ -38,7 +38,7 @@ def _find_candle_gaps(klines: list, timeframe: str) -> list:
     return gaps
 
 
-def _fetch_klines_cached(exchange, symbol: str, timeframe: str, target_count: int) -> list:
+def _fetch_klines_cached(exchange, symbol: str, timeframe: str, target_count: int, live_feed=None) -> list:
     """🆕 جلب ذكي تراكمي (بطلب صريح — 'عمارة طوبة فوق طوبة'): بدل إعادة جلب
     1000 شمعة من الصفر كل دورة فحص (بطيء جداً وضغط كبير على المنصة)، نبني أرشيف
     محلي دائم لكل (عملة+فريم) بشكل مستقل تماماً عن الباقي:
@@ -46,11 +46,18 @@ def _fetch_klines_cached(exchange, symbol: str, timeframe: str, target_count: in
       - كل مرة بعدها: جلب "خفيف" بس (آخر شموع قليلة عبر fetch_klines العادية
         الأسرع بكثير)، نضيف بس الجديد فعلاً (بمقارنة الوقت)، ونحدّث الشمعة
         الأخيرة لو كانت "حيّة" وقت آخر حفظ وصارت مؤكَّدة الآن — ثم نقرأ الأرشيف
-        الكامل المحدَّث من قاعدة البيانات (سريع جداً، بدون انتظار شبكة)."""
+        الكامل المحدَّث من قاعدة البيانات (سريع جداً، بدون انتظار شبكة).
+      - 🆕 (بطلب صريح: "كل شي حي زي المنصة") — لو البث الحي (live_feed) يغذّي
+        هذي التركيبة فعلياً بشكل حديث (شموع تصل مباشرة وتُحفَظ بالأرشيف تلقائياً
+        عبر WebSocket)، **نتجاوز طلب REST الخفيف كليّاً** ونقرأ من الأرشيف
+        مباشرة — صفر طلبات شبكة متكررة. لو البث غير متوفر/منقطع/حديث العهد
+        بهذي التركيبة، نرجع تلقائياً لأسلوب REST القديم (شبكة أمان، مهم جداً
+        بما إن قرار تداول حقيقي يعتمد على هذي البيانات)."""
     latest_cached = db.get_latest_cached_open_time(symbol, timeframe)
 
     if latest_cached is None:
-        # أول مرة لهذي التركيبة — جلب كامل بالترقيم
+        # أول مرة لهذي التركيبة — جلب كامل بالترقيم (لازم REST دايماً هنا، البث
+        # الحي يعطي تحديثات مستقبلية بس، مو تاريخ سابق)
         if hasattr(exchange, "fetch_historical_klines"):
             fresh = exchange.fetch_historical_klines(symbol, timeframe, target_count)
         else:
@@ -61,6 +68,15 @@ def _fetch_klines_cached(exchange, symbol: str, timeframe: str, target_count: in
                  "close": k.close, "volume": k.volume, "close_time": k.close_time} for k in fresh
             ], keep_latest=target_count + 200)
         return fresh
+
+    interval_ms_map = {"5m": 300_000, "15m": 900_000, "1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000}
+    interval_seconds = interval_ms_map.get(timeframe, 300_000) / 1000
+
+    if live_feed is not None and live_feed.is_fresh(symbol, timeframe, max_age_seconds=interval_seconds * 3):
+        # البث الحي فعّال ويغذّي الأرشيف تلقائياً — نقرأ منه مباشرة، صفر REST
+        cached = db.get_cached_candles(symbol, timeframe)
+        return [Kline(open_time=c["open_time"], open=c["open"], high=c["high"], low=c["low"],
+                       close=c["close"], volume=c["volume"], close_time=c["close_time"]) for c in cached][-target_count:]
 
     # فيه أرشيف سابق — جلب خفيف بس (آخر شموع قليلة تكفي لتغطية الفجوة منذ آخر فحص)
     light_fetch_count = 300  # هامش أمان كبير يغطي أي فجوة زمنية معقولة بين دورات الفحص
@@ -318,6 +334,7 @@ class ScannerState:
         self._trigger_immediate = threading.Event()
         self._notified_transitions = set()
         self._private_stream = None  # 🆕 بث خاص لحظي (WebSocket) — إشعار فوري بس، ما يغيّر منطق حالة الإشارات
+        self.live_feed = okx_websocket.LiveKlineFeed(db)  # 🆕 بث عام لحظي يغذّي أرشيف الشموع مباشرة — يقلل REST بشكل كبير
 
     def start(self):
         if self._thread and self._thread.is_alive():
@@ -331,6 +348,8 @@ class ScannerState:
         if not (self._price_thread and self._price_thread.is_alive()):
             self._price_thread = threading.Thread(target=self._price_update_loop, daemon=True)
             self._price_thread.start()
+
+        self.live_feed.start()  # 🆕 يبدأ البث العام الحي (شموع لحظية تغذّي الأرشيف مباشرة)
 
         # 🆕 بث خاص لحظي (بطلب صريح): إشعار فوري لحظة تنفيذ وقف/هدف حقيقي على
         # OKX نفسها — بس إشعار (Telegram/لوق)، ما يغيّر آلية تحديد حالة الإشارة
@@ -363,6 +382,7 @@ class ScannerState:
         if self._private_stream:
             self._private_stream.stop()
             self._private_stream = None
+        self.live_feed.stop()
         db.add_log("تم إيقاف الفحص التلقائي.")
 
     def trigger_immediate_scan(self):
@@ -453,6 +473,8 @@ class ScannerState:
     def _run_scan_cycle(self, settings: dict):
         symbols = self._resolve_symbols(settings)
         db.save_scanned_symbols_list(symbols)  # 🆕 لعرضها بلوحة القيادة كقائمة قابلة للنقر
+        if settings["exchange"] == "okx":
+            self.live_feed.sync_subscriptions(symbols, ["5m", "15m", "1h", "4h", "1d"])  # 🆕 بث حي لكل عملة قيد الفحص فعلياً
         exchange = okx_client if settings["exchange"] == "okx" else binance_client
         db.add_log(f"[{time.strftime('%H:%M:%S')}] بدء فحص حزمة الأزواج الذكية المكتشفة...")
         incomplete_data_notes = []  # نجمّع كل نقص بيانات بالدورة، ونرسل تنبيه تيليجرام واحد بالنهاية بدل إغراق المستخدم برسائل
@@ -531,7 +553,7 @@ class ScannerState:
                 # المبنية أصلاً لنظام الاختبار الخلفي، تتجاوز الحد عبر عدة طلبات
                 # متتالية) بدل fetch_klines المحدودة، لكل فريم بالفحص الحي أيضاً.
                 def _fetch(interval: str, count: int, fallback_count: int):
-                    return _fetch_klines_cached(exchange, symbol, interval, count)
+                    return _fetch_klines_cached(exchange, symbol, interval, count, live_feed=self.live_feed)
 
                 k4h = _fetch("4h", 1000, 100)      # 1000 شمعة 4 ساعات ≈ 5.5 شهر
                 time.sleep(0.15)
