@@ -470,6 +470,18 @@ class ScannerState:
         db.add_log(f"✅ تم العثور على {len(symbols)} زوج: {', '.join(symbols)}")
         return symbols
 
+    def refresh_scanned_symbols_now(self):
+        """🆕 يعيد تحديد قائمة العملات المفحوصة فوراً (بدون انتظار دورة الفحص
+        القادمة) — يُنادى مباشرة لحظة ما المستخدم يغيّر إعداد يأثر على القائمة
+        (عدد العملات، معيار الاختيار top_volume/OI/إلخ)، عشان صفحة الشارت تعكس
+        التغيير حالاً، مطابق تماماً لسلوك منصة تداول حقيقية."""
+        try:
+            settings = db.get_settings()
+            symbols = self._resolve_symbols(settings)
+            db.save_scanned_symbols_list(symbols)
+        except Exception as e:
+            db.add_log(f"⚠️ تعذر تحديث قائمة العملات فوراً: {e}")
+
     def _run_scan_cycle(self, settings: dict):
         symbols = self._resolve_symbols(settings)
         db.save_scanned_symbols_list(symbols)  # 🆕 لعرضها بلوحة القيادة كقائمة قابلة للنقر

@@ -2,39 +2,59 @@
 {% block title %}الشارت - Orion{% endblock %}
 {% block content %}
 
-<div class="flex-between" style="margin-bottom:10px; flex-wrap:wrap; gap:10px;">
-  <h2 style="margin:0;">📊 الشارت الحي — <span id="chart-symbol-title">—</span></h2>
-  <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-    <input id="symbol-input" type="text" placeholder="مثال: BTCUSDT" value="BTCUSDT"
-           style="width:150px; padding:8px 10px; border-radius:8px; border:1px solid var(--dark-accent); background:var(--card); color:var(--text);">
-    <button class="btn secondary" style="padding:8px 14px;" onclick="loadChart()">🔍 تحميل</button>
+<div id="symbols-view">
+  <div class="flex-between" style="margin-bottom:10px; flex-wrap:wrap; gap:10px;">
+    <h2 style="margin:0;">📊 العملات الحية <span id="scanned-count" class="muted"></span></h2>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <input id="manual-symbol-input" type="text" placeholder="بحث بعملة معينة..."
+             style="width:160px; padding:8px 10px; border-radius:8px; border:1px solid var(--dark-accent); background:var(--card); color:var(--text);"
+             onkeydown="if(event.key==='Enter') openChartFor(this.value.trim().toUpperCase())">
+      <span class="muted" style="cursor:pointer;" onclick="loadScannedSymbols()">🔄 تحديث</span>
+    </div>
   </div>
+  <p class="muted" style="font-size:12px; margin:0 0 12px;">
+    نفس قائمة العملات اللي التطبيق يحلّلها فعلياً الآن (حسب معيار الاختيار وعدد العملات بالإعدادات) — تتحدث
+    تلقائياً لحظة ما تغيّر أي إعداد، بدون ما تحتاج تنتظر دورة فحص. اضغط أي عملة عشان يفتح شارتها الحي.
+  </p>
+  <div id="symbols-grid" class="card" style="display:flex; flex-wrap:wrap; gap:10px; min-height:80px;">
+    <span class="muted">جاري التحميل...</span>
+  </div>
+
+  <div id="open-trades-section" style="margin-top:16px;"></div>
 </div>
 
-<div class="card" style="padding:10px; margin-bottom:10px;">
-  <div id="tf-buttons" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
+<div id="chart-view" style="display:none;">
+  <div class="flex-between" style="margin-bottom:10px; flex-wrap:wrap; gap:10px;">
+    <div style="display:flex; align-items:center; gap:10px;">
+      <span class="muted" style="cursor:pointer; font-size:20px;" onclick="showSymbolsView()">◀</span>
+      <h2 style="margin:0;">📊 <span id="chart-symbol-title">—</span></h2>
+    </div>
+  </div>
+
+  <div class="card" style="padding:10px; margin-bottom:10px;">
+    <div id="tf-buttons" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
+  </div>
+
+  <div id="trade-summary" class="card" style="display:none; margin-bottom:10px;"></div>
+
+  <div class="card" style="padding:8px;">
+    <div id="chart-container" style="width:100%; height:560px;"></div>
+  </div>
+
+  <div id="signal-levels" class="card" style="margin-top:12px;"></div>
 </div>
-
-<div id="trade-summary" class="card" style="display:none; margin-bottom:10px;"></div>
-
-<div id="open-symbols-bar" class="muted" style="margin-bottom:10px; font-size:13px; line-height:2;"></div>
-
-<div class="card" style="padding:8px;">
-  <div id="chart-container" style="width:100%; height:560px;"></div>
-</div>
-
-<div id="signal-levels" class="card" style="margin-top:12px;"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lightweight-charts/4.1.3/lightweight-charts.standalone.production.js"></script>
 <script>
 let chart, candleSeries, priceLines = [];
 let currentInterval = '15m';
+let currentSymbol = null;
+let liveSocket = null;
+let chartInitialized = false;
 const TIMEFRAMES = [
   {v:'5m', l:'5د'}, {v:'15m', l:'15د'}, {v:'1h', l:'1س'}, {v:'4h', l:'4س'}, {v:'1d', l:'يومي'},
 ];
 
-// صفقة محددة جاية من صفحة الإشارات (زر "عرض الشارت") — لو موجودة نعرضها ونبرزها
-// حتى لو ما عادت ضمن الصفقات المفتوحة حالياً (صفقة مقفولة تاريخياً مثلاً)
 const urlParams = new URLSearchParams(window.location.search);
 const linkedTrade = {
   id: urlParams.get('id'),
@@ -42,8 +62,77 @@ const linkedTrade = {
   sl: parseFloat(urlParams.get('sl')),
   tp: parseFloat(urlParams.get('tp')),
 };
-const hasLinkedTrade = linkedTrade.id && !isNaN(linkedTrade.entry);
+let hasLinkedTrade = linkedTrade.id && !isNaN(linkedTrade.entry);
 
+// ============ عرض قائمة العملات (الصفحة الرئيسية) ============
+async function loadScannedSymbols(){
+  try {
+    const r = await fetch('/api/scanned-symbols');
+    const list = await r.json();
+    const grid = document.getElementById('symbols-grid');
+    const countEl = document.getElementById('scanned-count');
+    if (!list.length){
+      grid.innerHTML = '<span class="muted">ما فيه عملات محدَّدة بعد — بتظهر بعد أول دورة فحص أو أول حفظ إعدادات.</span>';
+      countEl.innerText = '';
+      return;
+    }
+    countEl.innerText = `(${list.length})`;
+    grid.innerHTML = list.map(item => `
+      <div onclick="openChartFor('${item.symbol}')"
+         style="cursor:pointer; padding:10px 16px; border-radius:10px; background:var(--dark-accent);
+                color:var(--cyan); font-size:14px; font-weight:700; transition:transform .1s;"
+         onmouseover="this.style.transform='scale(1.04)'" onmouseout="this.style.transform='scale(1)'">
+        ${item.symbol}
+      </div>`).join('');
+  } catch (e) { /* تجاهل بصمت */ }
+}
+
+async function loadOpenTradesSection(){
+  try {
+    const r = await fetch('/api/signals');
+    const signals = await r.json();
+    const open = signals.filter(s => s.status === 'PENDING' || s.status === 'ACTIVE');
+    const section = document.getElementById('open-trades-section');
+    if (!open.length){ section.innerHTML = ''; return; }
+    section.innerHTML = '<h3 style="font-size:15px;">🎯 صفقات مفتوحة حالياً</h3><div style="display:flex; flex-wrap:wrap; gap:8px;">' +
+      open.map(s => `
+        <div onclick="openChartFor('${s.symbol}', ${s.id}, ${s.entry_price}, ${s.stop_loss}, ${s.take_profit})"
+             style="cursor:pointer; padding:8px 14px; border-radius:8px; background:${s.side==='Long'?'rgba(34,197,94,.12)':'rgba(239,68,68,.12)'};
+                    color:${s.side==='Long'?'var(--green)':'var(--red)'}; font-size:13px; font-weight:700;">
+          ${s.symbol} — ${s.side==='Long'?'شراء':'بيع'} #${s.id}
+        </div>`).join('') + '</div>';
+  } catch (e) { /* تجاهل بصمت */ }
+}
+
+// ============ التبديل بين العرضين ============
+function showSymbolsView(){
+  document.getElementById('chart-view').style.display = 'none';
+  document.getElementById('symbols-view').style.display = 'block';
+  closeLiveSocket();
+  history.replaceState(null, '', '/chart');
+}
+
+function openChartFor(symbol, id, entry, sl, tp){
+  if (!symbol) return;
+  symbol = symbol.toUpperCase();
+  if (id){
+    hasLinkedTrade = true;
+    linkedTrade.id = id; linkedTrade.entry = entry; linkedTrade.sl = sl; linkedTrade.tp = tp;
+  } else {
+    hasLinkedTrade = false;
+  }
+  document.getElementById('symbols-view').style.display = 'none';
+  document.getElementById('chart-view').style.display = 'block';
+  document.getElementById('trade-summary').style.display = 'none';
+  currentSymbol = symbol;
+  if (!chartInitialized){ initChart(); chartInitialized = true; }
+  renderTfButtons();
+  loadChart();
+  const newUrl = id ? `/chart?symbol=${symbol}&id=${id}&entry=${entry}&sl=${sl}&tp=${tp}` : `/chart?symbol=${symbol}`;
+  history.replaceState(null, '', newUrl);
+}
+
+// ============ منطق الشارت (زي المنصة) ============
 function renderTfButtons(){
   const wrap = document.getElementById('tf-buttons');
   wrap.innerHTML = TIMEFRAMES.map(tf => `
@@ -108,13 +197,8 @@ function renderTradeSummary(){
     </div>`;
 }
 
-let liveSocket = null;
-
 function closeLiveSocket(){
-  if (liveSocket){
-    try { liveSocket.close(); } catch(e){}
-    liveSocket = null;
-  }
+  if (liveSocket){ try { liveSocket.close(); } catch(e){} liveSocket = null; }
 }
 
 function connectLiveSocket(symbol, interval){
@@ -131,28 +215,22 @@ function connectLiveSocket(symbol, interval){
     };
     liveSocket.onerror = () => { closeLiveSocket(); };
     liveSocket.onclose = () => { liveSocket = null; };
-  } catch (e) {
-    liveSocket = null; // بث حي غير متاح — الاعتماد على السحب الدوري كل 20 ثانية فقط
-  }
+  } catch (e) { liveSocket = null; }
 }
 
 async function loadChart(){
-  const symbol = document.getElementById('symbol-input').value.trim().toUpperCase();
-  if (!symbol) return;
-  document.getElementById('chart-symbol-title').innerText = symbol;
+  if (!currentSymbol) return;
+  document.getElementById('chart-symbol-title').innerText = currentSymbol;
   try {
-    const r = await fetch(`/api/chart-data?symbol=${encodeURIComponent(symbol)}&interval=${currentInterval}&limit=250`);
+    const r = await fetch(`/api/chart-data?symbol=${encodeURIComponent(currentSymbol)}&interval=${currentInterval}&limit=250`);
     const data = await r.json();
     if (data.error){
-      document.getElementById('signal-levels').innerHTML = `<p class="muted">تعذر تحميل بيانات ${symbol}: ${data.error}</p>`;
+      document.getElementById('signal-levels').innerHTML = `<p class="muted">تعذر تحميل بيانات ${currentSymbol}: ${data.error}</p>`;
       return;
     }
-    candleSeries.setData(data.candles.map(c => ({
-      time: c.time, open: c.open, high: c.high, low: c.low, close: c.close,
-    })));
+    candleSeries.setData(data.candles.map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
     clearPriceLines();
 
-    // الصفقة المحددة (جاية من صفحة الإشارات) تُبرَز بخطوط أوضح وأعرض
     if (hasLinkedTrade){
       addLevel(linkedTrade.entry, '#38bdf8', `دخول #${linkedTrade.id}`, 3);
       addLevel(linkedTrade.sl, '#ef4444', `وقف #${linkedTrade.id}`, 3);
@@ -163,7 +241,7 @@ async function loadChart(){
     const levelsDiv = document.getElementById('signal-levels');
     const otherSignals = data.signals.filter(s => String(s.id) !== String(linkedTrade.id));
     if (!otherSignals.length && !hasLinkedTrade){
-      levelsDiv.innerHTML = `<p class="muted">ما فيه صفقة مفتوحة حالياً على ${symbol}.</p>`;
+      levelsDiv.innerHTML = `<p class="muted">ما فيه صفقة مفتوحة حالياً على ${currentSymbol}.</p>`;
     } else if (otherSignals.length) {
       levelsDiv.innerHTML = '<h3 style="margin-top:0; font-size:15px;">🎯 صفقات مفتوحة أخرى على هذي العملة</h3>' +
         otherSignals.map(s => {
@@ -180,35 +258,25 @@ async function loadChart(){
       levelsDiv.innerHTML = '';
     }
     chart.timeScale().fitContent();
-    connectLiveSocket(symbol, currentInterval);  // 🆕 بث حي بعد نجاح تحميل البيانات التاريخية
+    connectLiveSocket(currentSymbol, currentInterval);
   } catch (e) {
     document.getElementById('signal-levels').innerHTML = `<p class="muted">خطأ: ${e}</p>`;
   }
 }
 
-async function loadOpenSymbolsBar(){
-  try {
-    const r = await fetch('/api/signals');
-    const signals = await r.json();
-    const open = signals.filter(s => s.status === 'PENDING' || s.status === 'ACTIVE');
-    const uniqueSymbols = [...new Set(open.map(s => s.symbol))];
-    const bar = document.getElementById('open-symbols-bar');
-    if (!uniqueSymbols.length){ bar.innerHTML = ''; return; }
-    bar.innerHTML = 'صفقات مفتوحة حالياً: ' + uniqueSymbols.map(sym =>
-      `<a href="#" onclick="document.getElementById('symbol-input').value='${sym}'; loadChart(); return false;" style="color:var(--cyan); margin-left:10px;">${sym}</a>`
-    ).join(' ');
-  } catch (e) { /* تجاهل بصمت */ }
-}
+// ============ بداية التشغيل ============
+loadScannedSymbols();
+loadOpenTradesSection();
+setInterval(loadScannedSymbols, 20000);   // القائمة تتحدث كل 20 ثانية (تلقائياً فوراً برضه لحظة حفظ إعداد)
+setInterval(loadOpenTradesSection, 20000);
 
-initChart();
-renderTfButtons();
 const symbolFromUrl = urlParams.get('symbol');
-if (symbolFromUrl) document.getElementById('symbol-input').value = symbolFromUrl.toUpperCase();
-loadChart();
-loadOpenSymbolsBar();
-// السحب الدوري الآن بس شبكة أمان احتياطية (تحديث خطوط الصفقات ونحوها) — البث
-// الحي (WebSocket) هو المسؤول عن تحديث الشموع لحظياً
-setInterval(loadChart, 45000);
+if (symbolFromUrl){
+  openChartFor(symbolFromUrl, urlParams.get('id'),
+    parseFloat(urlParams.get('entry')), parseFloat(urlParams.get('sl')), parseFloat(urlParams.get('tp')));
+}
+// شبكة أمان احتياطية لتحديث خطوط الصفقات لو كنا بعرض الشارت
+setInterval(() => { if (currentSymbol && document.getElementById('chart-view').style.display !== 'none') loadChart(); }, 45000);
 </script>
 
 {% endblock %}

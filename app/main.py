@@ -113,6 +113,10 @@ async def settings_save(request: Request):
     updates["combined_enabled_strategies"] = ",".join(checked_strategies)
 
     db.update_settings(updates)
+    # 🆕 بطلب صريح: قائمة العملات المعروضة تتحدث فوراً لحظة تغيير الإعداد
+    # (عدد العملات، معيار الاختيار top_volume/OI/إلخ) — بدون انتظار دورة الفحص
+    # القادمة، بالضبط زي منصة تداول حقيقية.
+    scanner_state.refresh_scanned_symbols_now()
     return templates.TemplateResponse("settings.html", {"request": request, "active": "settings", "s": db.get_settings(), "saved": True})
 
 
