@@ -172,6 +172,48 @@ def diagnose_page(request: Request):
     return templates.TemplateResponse("diagnose.html", {"request": request, "active": "diagnose", "s": db.get_settings()})
 
 
+@app.get("/api/scanned-symbols")
+def api_scanned_symbols(request: Request):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return db.get_scanned_symbols_list()
+
+
+@app.get("/chart")
+def chart_page(request: Request):
+    g = _guard(request)
+    if g:
+        return g
+    return templates.TemplateResponse("chart.html", {"request": request, "active": "chart"})
+
+
+@app.get("/api/chart-data")
+def api_chart_data(request: Request, symbol: str, interval: str = "15m", limit: int = 200):
+    if not is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    symbol = symbol.upper().strip()
+    try:
+        klines = okx_client.fetch_klines(symbol, interval, limit=min(limit, 1000))
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    candles = [
+        {"time": k.open_time // 1000, "open": k.open, "high": k.high, "low": k.low, "close": k.close, "volume": k.volume}
+        for k in klines
+    ]
+    open_signals = [
+        s for s in db.get_open_signals()
+        if s["symbol"].upper() == symbol
+    ]
+    levels = [
+        {
+            "id": s["id"], "strategy": s["strategy"], "side": s["side"], "status": s["status"],
+            "entry_price": s["entry_price"], "stop_loss": s["stop_loss"], "take_profit": s["take_profit"],
+        }
+        for s in open_signals
+    ]
+    return {"symbol": symbol, "interval": interval, "candles": candles, "signals": levels}
+
+
 @app.get("/api/liquidation-heatmap")
 def api_liquidation_heatmap(request: Request, symbol: str):
     if not is_logged_in(request):

@@ -102,7 +102,7 @@
 .bar-seg{ position:absolute; top:0; height:100%; border-radius:8px; }
 .bar-line{ position:absolute; top:-3px; bottom:-3px; width:3px; border-radius:2px; }
 .sig-caption{ font-size:11px; color:var(--text-sec); margin:8px 0; text-align:center; }
-.sig-actions{ display:flex; justify-content:space-between; align-items:center; margin-top:10px; gap:10px; }
+.sig-actions{ display:flex; justify-content:space-between; align-items:center; margin-top:10px; gap:10px; flex-wrap:wrap; }
 .details-box{ display:none; margin-top:10px; padding:10px; background:#0f1320; border-radius:10px; font-size:12px; color:var(--text-sec); line-height:1.8; }
 </style>
 
@@ -403,6 +403,8 @@ function renderSignals(){
       </div>` : ''}
       <div class="sig-actions">
         ${canExecute ? `<button class="btn" style="font-size:12px; padding:8px 14px;" onclick='executeSignal(${JSON.stringify(sig)})'>⚡ تنفيذ على OKX</button>` : '<span></span>'}
+        <a href="/chart?symbol=${encodeURIComponent(sig.symbol)}&entry=${sig.entry_price}&sl=${sig.stop_loss}&tp=${sig.take_profit}&id=${sig.id}"
+           class="btn secondary" style="font-size:12px; padding:8px 14px; text-decoration:none;">📊 عرض الشارت</a>
         <span class="muted" style="cursor:pointer;" onclick="toggleDetails(this, ${sig.id})">ℹ️ تفاصيل التحليل</span>
       </div>
       ${['HIT_TP','HIT_SL'].includes(sig.status) && (sig.max_drawdown_pct > 0 || sig.max_favorable_pct > 0) ? `

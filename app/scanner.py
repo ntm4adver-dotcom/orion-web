@@ -422,6 +422,7 @@ class ScannerState:
 
     def _run_scan_cycle(self, settings: dict):
         symbols = self._resolve_symbols(settings)
+        db.save_scanned_symbols_list(symbols)  # 🆕 لعرضها بلوحة القيادة كقائمة قابلة للنقر
         exchange = okx_client if settings["exchange"] == "okx" else binance_client
         db.add_log(f"[{time.strftime('%H:%M:%S')}] بدء فحص حزمة الأزواج الذكية المكتشفة...")
         incomplete_data_notes = []  # نجمّع كل نقص بيانات بالدورة، ونرسل تنبيه تيليجرام واحد بالنهاية بدل إغراق المستخدم برسائل
