@@ -173,6 +173,16 @@ def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
     else:
         stop_loss = max(prev.high, confirm_candle.high, last.high) + safe_buffer
 
+    # 🆕 سقف احترازي (تناسق مع stop_hunt وcrowd_trap): حتى لو النافذة صغيرة (3
+    # شموع بس)، شمعة شاذة وحدة منهم (فتيلة استثنائية) ممكن تبعد الوقف بشكل غير
+    # متناسب. نحد أقصى مسافة وقف مقبولة بـ3×ATR — بغض النظر عن مصدرها.
+    if atr5m > 0:
+        max_stop_distance = atr5m * 3.0
+        if side == "Long":
+            stop_loss = max(stop_loss, entry_price - max_stop_distance)
+        else:
+            stop_loss = min(stop_loss, entry_price + max_stop_distance)
+
     risk = abs(entry_price - stop_loss)
     if risk <= 0:
         return None

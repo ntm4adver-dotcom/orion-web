@@ -82,6 +82,13 @@ def build_score_breakdown(factors: list) -> tuple:
 # ---------------------------------------------------------------------------
 
 def atr(klines: List[Kline], period: int = 14) -> float:
+    """متوسط المدى الحقيقي (ATR) — بتنعيم وايلدر (Wilder's Smoothing / RMA)، نفس
+    الطريقة القياسية المستخدَمة بأغلب منصات التداول الحقيقية (TradingView الافتراضي
+    مثلاً). 🔴 تحسين (بطلب صريح): الحساب القديم كان متوسط بسيط لآخر `period` مدى
+    حقيقي فقط — يعني شمعة شاذة وحدة ضمن آخر 14 فترة تؤثر بوزن كامل ومباشر على
+    القيمة. تنعيم وايلدر يعطي "ذاكرة" تراكمية من كل التاريخ المتوفر، فيمتص تأثير
+    شمعة شاذة واحدة تدريجياً بدل ما تسيطر على القيمة فوراً — نفس فلسفة الأسقف
+    الاحترازية المضافة اليوم بالاستراتيجيات، بس هنا بمصدر الحساب نفسه."""
     if len(klines) <= period:
         return 0.0
     tr_list = []
@@ -93,7 +100,36 @@ def atr(klines: List[Kline], period: int = 14) -> float:
         tr_list.append(max(tr1, tr2, tr3))
     if len(tr_list) < period:
         return 0.0
-    return sum(tr_list[-period:]) / period
+    atr_val = sum(tr_list[:period]) / period  # البذرة: متوسط بسيط لأول `period` مدى حقيقي متوفر
+    for tr in tr_list[period:]:
+        atr_val = (atr_val * (period - 1) + tr) / period  # تنعيم وايلدر: وزن تراكمي متناقص أسّياً
+    return atr_val
+
+
+def atr_series(klines: List[Kline], period: int = 14) -> List[float]:
+    """🆕 نسخة متسلسلة من atr() — ترجع قيمة ATR (بتنعيم وايلدر، نفس المنهجية
+    بالضبط) لكل نقطة زمنية متاحة، مو رقم أخير واحد بس. أُضيفت لحل ازدواجية
+    حقيقية كانت موجودة بـanalyze_explosive_breakout: حساب يدوي منفصل لسلسلة ATR
+    بمتوسط بسيط قديم (غير متسق مع atr() المركزية بعد تحديثها لتنعيم وايلدر) —
+    الآن كلا القيمتين (اللحظية والسلسلة) تُحسبان بنفس المنهجية بالضبط."""
+    if len(klines) <= period:
+        return []
+    tr_list = []
+    for i in range(1, len(klines)):
+        cur, prev = klines[i], klines[i - 1]
+        tr1 = cur.high - cur.low
+        tr2 = abs(cur.high - prev.close)
+        tr3 = abs(cur.low - prev.close)
+        tr_list.append(max(tr1, tr2, tr3))
+    if len(tr_list) < period:
+        return []
+    series = []
+    atr_val = sum(tr_list[:period]) / period
+    series.append(atr_val)
+    for tr in tr_list[period:]:
+        atr_val = (atr_val * (period - 1) + tr) / period
+        series.append(atr_val)
+    return series
 
 
 def bollinger_bands(closes: List[float], period: int = 20, num_std: float = 2.0):
@@ -236,9 +272,14 @@ def check_irrational_market(k5m: List[Kline], k15m: List[Kline], k1h: List[Kline
             return True
     if len(k15m) >= 40:
         recent15m = k15m[-14:]
-        older15m = k15m[:20][-14:]
+        # 🔴 إصلاح خلل تصميمي (اكتُشف بمراجعة عميقة): كانت "الفترة الأقدم للمقارنة"
+        # ثابتة على أول 20 شمعة بكل المصفوفة المجلوبة (k15m[:20]) — لو محفوظ 400+
+        # شمعة، هذا يعني مقارنة "الآن" بـ"قبل ~4 أيام"، مو "قبل بضع ساعات" كما يوحي
+        # الاسم. الآن نستخدم نافذة نسبية للحاضر (آخر 14 قبل الـ14 الأحدث مباشرة) —
+        # مقارنة ثابتة المعنى بغض النظر عن عمق البيانات المحفوظة كلياً.
+        older15m = k15m[-40:-14]
         recent_atr = sum(k.high - k.low for k in recent15m) / len(recent15m)
-        older_atr = sum(k.high - k.low for k in older15m) / len(older15m)
+        older_atr = sum(k.high - k.low for k in older15m) / len(older15m) if older15m else 0
         if older_atr > 0 and recent_atr > older_atr * 2.8:
             return True
     latest15m = k15m[-1]
@@ -555,27 +596,11 @@ def analyze_explosive_breakout(
 
     atr5m = atr(k5m, 14)
 
-    if len(k5m) < 16:
-        avg_atr20 = atr5m
-    else:
-        tr_all = []
-        for i in range(1, len(k5m)):
-            cur, prev = k5m[i], k5m[i - 1]
-            tr1 = cur.high - cur.low
-            tr2 = abs(cur.high - prev.close)
-            tr3 = abs(cur.low - prev.close)
-            tr_all.append(max(tr1, tr2, tr3))
-        if len(tr_all) < 14:
-            avg_atr20 = atr5m
-        else:
-            atr_series = []
-            window_sum = sum(tr_all[:14])
-            atr_series.append(window_sum / 14)
-            for i in range(14, len(tr_all)):
-                window_sum += tr_all[i] - tr_all[i - 14]
-                atr_series.append(window_sum / 14)
-            last20 = atr_series[-20:]
-            avg_atr20 = sum(last20) / len(last20)
+    # 🔴 إصلاح ازدواجية حقيقية (اكتُشفت بمراجعة شاملة): كان فيه حساب يدوي منفصل
+    # لسلسلة ATR بمتوسط بسيط قديم — غير متسق مع atr() أعلاه بعد تحديثها لتنعيم
+    # وايلدر. الآن نستخدم atr_series() المشتركة، بنفس المنهجية بالضبط.
+    series = atr_series(k5m, 14)
+    avg_atr20 = (sum(series[-20:]) / len(series[-20:])) if series else atr5m
 
     effective_atr = max(atr5m, avg_atr20 * 0.75)
 

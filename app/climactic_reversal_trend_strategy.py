@@ -77,18 +77,22 @@ def analyze_climactic_reversal_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         return None
     _log("✅ شمعة تصريف/استنزاف مكتشفة", f"فوليوم {climax_vol_ratio:.1f}x المتوسط", True)
 
-    # تأكيد الانعكاس: آخر شمعة تغلق بعكس اتجاه شمعة التصريف
+    # 🔴 نفس إصلاح النسخة الأصلية (بعد اكتشافه بصفقات حقيقية): هامش حقيقي
+    # (ATR) بدل أي تجاوز تافه لإغلاق شمعة التصريف
+    atr_val = atr(k15m, 14)
+    confirm_margin = atr_val * 0.3 if atr_val > 0 else 0.0
+
     last = k15m[-1]
     if established_direction_down:
-        reversal_confirmed = last.close > climax_candle.close
+        reversal_confirmed = last.close > climax_candle.close + confirm_margin
         side = "Long"
     else:
-        reversal_confirmed = last.close < climax_candle.close
+        reversal_confirmed = last.close < climax_candle.close - confirm_margin
         side = "Short"
 
-    _log("تأكيد الانعكاس (إغلاق بعكس شمعة التصريف)", reversal_confirmed, reversal_confirmed)
+    _log("تأكيد الانعكاس (إغلاق بعكس شمعة التصريف بهامش ≥0.3×ATR)", reversal_confirmed, reversal_confirmed)
     if not reversal_confirmed:
-        _log("❌ القرار النهائي", "الانعكاس لسا ما تأكد — ننتظر", False)
+        _log("❌ القرار النهائي", "الانعكاس لسا ما تأكد بهامش كافٍ — ننتظر", False)
         return None
 
     # 🆕 الفحص الجوهري لهذي النسخة: الصفقة لازم تطابق الترند اليومي العام،
@@ -103,7 +107,6 @@ def analyze_climactic_reversal_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
 
     # 🔴 نفس السعر الحي الحقيقي المُمرَّر من السكانر لو متوفر
     current_price = current_price if current_price is not None else (k5m[-1].close if k5m else last.close)
-    atr_val = atr(k15m, 14)
     if atr_val <= 0:
         return None
 

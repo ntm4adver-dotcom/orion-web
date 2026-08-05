@@ -33,10 +33,22 @@ def analyze_liquidation_hunter(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})
 
+    # 🔴 إصلاح باق حقيقي (اكتُشف بفحص تكاملي شامل): لو current_price غير متوفر
+    # **و** k5m فاضية، كان يحاول ياخذ k1h[-1] بدون تحقق — لو k1h فاضية برضه
+    # (بيانات غير متوفرة كلياً لهذي العملة)، يطيح باستثناء IndexError حقيقي
+    # يوقف دورة الفحص كاملة بدل ما يتجاوز هذي العملة بأمان زي بقية الاستراتيجيات.
+    if current_price is None:
+        if k5m:
+            current_price = k5m[-1].close
+        elif k1h:
+            current_price = k1h[-1].close
+        else:
+            _log("❌ بيانات سعر غير متوفرة كليّاً (k5m وk1h فاضيين)", "رفض آمن", False)
+            return None
+
     # 🔴 إصلاح جوهري: نستخدم السعر الحي الحقيقي المُمرَّر من السكانر لو متوفر،
     # ونحسبه **أولاً** قبل تمريره للانفجار السعري المُستدعى داخلياً — عشان تناسق
     # كامل (نفس السعر بالضبط يُستخدم بكل مراحل التحليل، مو قيم مختلفة قليلاً)
-    current_price = current_price if current_price is not None else (k5m[-1].close if k5m else k1h[-1].close)
 
     # الخطوة 1: الانفجار السعري كمُطلِق
     breakout_trace: list = []

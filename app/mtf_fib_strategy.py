@@ -109,6 +109,11 @@ def analyze_mtf_fib_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     _log("🆕 تأكيد سحب سيولة حقيقي (اختراق مستوى هيكلي سابق)", liquidity_swept)
 
     last_close = window[-1].close
+    # 🔴 إصلاح خطأ حقيقي (نفس فئة الباق المكتشف بـclimactic_reversal بعد
+    # مراجعة صفقات مغلقة فعلية): "الكسر الحقيقي (CHoCH)" كان يتفعّل بأي تجاوز
+    # تافه لقمة/قاع التعافي، حتى لو 0.001% بس — يشعل صفقة على استراحة عابرة
+    # تُبتلع فوراً بمواصلة التراجع، بدل انعكاس حقيقي. نشترط هامش حقيقي (ATR).
+    atr_break_margin = atr(k5m, 14) * 0.25
     entry_price = None
     stop_loss = None
     take_profit = None
@@ -126,8 +131,8 @@ def analyze_mtf_fib_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
             _log("❌ كسر حقيقي (CHoCH)", "لسا ما فيه شموع كافية بعد القاع للتأكد من الكسر — مبكر", False)
             return None
         recent_peak_after_low = max(k.high for k in post_low[:-1])
-        genuine_break = last_close > recent_peak_after_low
-        _log("كسر حقيقي (CHoCH) صاعد يؤكد انتهاء التراجع", f"إغلاق={last_close:.6g} مقابل قمة تعافي={recent_peak_after_low:.6g}", genuine_break)
+        genuine_break = last_close > recent_peak_after_low + atr_break_margin
+        _log("كسر حقيقي (CHoCH) صاعد يؤكد انتهاء التراجع (بهامش ≥0.25×ATR)", f"إغلاق={last_close:.6g} مقابل قمة تعافي={recent_peak_after_low:.6g}", genuine_break)
         if not genuine_break:
             _log("❌ القرار النهائي", "التراجع لسا ما انكسر كسراً حقيقياً — ننتظر", False)
             return None
@@ -166,8 +171,8 @@ def analyze_mtf_fib_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
             _log("❌ كسر حقيقي (CHoCH)", "لسا ما فيه شموع كافية بعد القمة للتأكد من الكسر — مبكر", False)
             return None
         recent_trough_after_high = min(k.low for k in post_high[:-1])
-        genuine_break = last_close < recent_trough_after_high
-        _log("كسر حقيقي (CHoCH) هابط يؤكد انتهاء التراجع", f"إغلاق={last_close:.6g} مقابل قاع تعافي={recent_trough_after_high:.6g}", genuine_break)
+        genuine_break = last_close < recent_trough_after_high - atr_break_margin
+        _log("كسر حقيقي (CHoCH) هابط يؤكد انتهاء التراجع (بهامش ≥0.25×ATR)", f"إغلاق={last_close:.6g} مقابل قاع تعافي={recent_trough_after_high:.6g}", genuine_break)
         if not genuine_break:
             _log("❌ القرار النهائي", "التراجع لسا ما انكسر كسراً حقيقياً — ننتظر", False)
             return None
