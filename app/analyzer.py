@@ -567,6 +567,7 @@ def analyze_explosive_breakout(
     micro: Optional[MarketMicrostructure] = None,
     trace: Optional[list] = None,
     current_price: Optional[float] = None,
+    **kwargs,
 ) -> Optional[AnalysisResult]:
     def _log(label, value, ok=None):
         if trace is not None:
@@ -889,6 +890,6 @@ def analyze_explosive_breakout(
     )
 
 
-def analyze(symbol: str, k4h, k1h, k15m, k5m, k_daily, micro=None, trace=None, current_price=None) -> Optional[AnalysisResult]:
+def analyze(symbol: str, k4h, k1h, k15m, k5m, k_daily, micro=None, trace=None, current_price=None, **kwargs) -> Optional[AnalysisResult]:
     """نقطة الدخول الرئيسية — تعادل OrionAnalyzer.analyze في الأصل (استراتيجية واحدة فقط)."""
-    return analyze_explosive_breakout(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro, trace=trace, current_price=current_price)
+    return analyze_explosive_breakout(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro, trace=trace, current_price=current_price, **kwargs)

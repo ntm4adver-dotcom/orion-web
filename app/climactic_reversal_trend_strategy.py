@@ -27,13 +27,19 @@ from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, build_sc
 def analyze_climactic_reversal_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
                                        micro: Optional[MarketMicrostructure] = None,
                                        trace: Optional[list] = None,
-                                       current_price: Optional[float] = None) -> Optional[AnalysisResult]:
+                                       current_price: Optional[float] = None,
+                                       settings: Optional[dict] = None, **kwargs) -> Optional[AnalysisResult]:
     def _log(label, value, ok=None):
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})
 
     if len(k15m) < 900:
         return None
+
+    # 🆕 نفس عتبتي النسخة الأصلية، قابلتان للتعديل من الإعدادات (بطلب صريح)
+    settings = settings or {}
+    min_extended_move_pct = float(settings.get("climactic_min_extended_move_pct", 5.0))
+    min_climax_volume_ratio = float(settings.get("climactic_min_volume_ratio", 8.0))
 
     # 🆕 الشرط الإضافي الوحيد مقارنة بالنسخة الأصلية: اتجاه الترند اليومي —
     # نطاق زمني أطول بكثير من الحركة الممتدة (400 شمعة 15د ≈ 4 أيام) اللي
@@ -50,8 +56,8 @@ def analyze_climactic_reversal_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     net_change_pct = (window[-1].close - swing_start_price) / swing_start_price * 100
     _log("صافي التغيّر خلال آخر 4 أيام (فحص حركة ممتدة/تصحيح)", f"{net_change_pct:.2f}%")
 
-    if abs(net_change_pct) < 5.0:
-        _log("❌ فلتر الحركة الممتدة (يحتاج ≥5% تغيّر صافٍ)", f"{net_change_pct:.2f}% غير كافٍ — رفض", False)
+    if abs(net_change_pct) < min_extended_move_pct:
+        _log(f"❌ فلتر الحركة الممتدة (يحتاج ≥{min_extended_move_pct}% تغيّر صافٍ)", f"{net_change_pct:.2f}% غير كافٍ — رفض", False)
         return None
 
     established_direction_down = net_change_pct < 0
@@ -67,20 +73,21 @@ def analyze_climactic_reversal_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     for k in recent_candles:
         is_same_direction = (k.close < k.open) if established_direction_down else (k.close > k.open)
         vr = k.volume / avg_vol
-        if vr > 8.0 and is_same_direction:
+        if vr > min_climax_volume_ratio and is_same_direction:
             climax_candle = k
             climax_vol_ratio = vr
             break
 
     if climax_candle is None:
-        _log("❌ شمعة تصريف/استنزاف", "ما فيه شمعة فوليوم متطرف (>8x) بنفس اتجاه الحركة الممتدة — رفض", False)
+        _log("❌ شمعة تصريف/استنزاف", f"ما فيه شمعة فوليوم متطرف (>{min_climax_volume_ratio}x) بنفس اتجاه الحركة الممتدة — رفض", False)
         return None
     _log("✅ شمعة تصريف/استنزاف مكتشفة", f"فوليوم {climax_vol_ratio:.1f}x المتوسط", True)
 
     # 🔴 نفس إصلاح النسخة الأصلية (بعد اكتشافه بصفقات حقيقية): هامش حقيقي
     # (ATR) بدل أي تجاوز تافه لإغلاق شمعة التصريف
     atr_val = atr(k15m, 14)
-    confirm_margin = atr_val * 0.3 if atr_val > 0 else 0.0
+    confirm_margin_atr_mult = float(settings.get("climactic_confirm_margin_atr", 0.3))
+    confirm_margin = atr_val * confirm_margin_atr_mult if atr_val > 0 else 0.0
 
     last = k15m[-1]
     if established_direction_down:

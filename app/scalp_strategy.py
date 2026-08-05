@@ -31,7 +31,7 @@ def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
                              k5m: List[Kline], k_daily: List[Kline],
                              micro: Optional[MarketMicrostructure] = None,
                              trace: Optional[list] = None,
-                             current_price: Optional[float] = None) -> Optional[AnalysisResult]:
+                             current_price: Optional[float] = None, **kwargs) -> Optional[AnalysisResult]:
     def _log(label, value, ok=None):
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})

@@ -48,6 +48,7 @@ def analyze_daily_breakout(
     micro: Optional[MarketMicrostructure] = None,
     trace: Optional[list] = None,
     current_price: Optional[float] = None,
+    **kwargs,
 ) -> Optional[AnalysisResult]:
     def _log(label, value, ok=None):
         if trace is not None:

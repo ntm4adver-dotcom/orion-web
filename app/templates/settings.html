@@ -150,6 +150,32 @@
       </div>
 
       <div class="card" style="margin-top:14px; background:rgba(56,189,248,0.05);">
+        <h3 style="margin-top:0; font-size:15px;">🌊 عتبات "الحركة الحاسمة" — ارتداد فوليوم التصريف</h3>
+        <p class="muted" style="font-size:12px; line-height:1.8;">
+          كانت هذي الأرقام ثابتة بالكود، صارت إعدادات قابلة للتعديل (بطلب صريح بعد مراجعة فترة نتائجها كانت
+          قوية — العينة كانت صغيرة جداً نحدد رقم مثالي بثقة، فبدل التخمين، جرّبها بنفسك وراقب الفرق). ارفع
+          الأرقام الثلاثة لتفضيل حركات أقوى وأحسم (MFE فوري أعلى)، على حساب عدد إشارات أقل.
+        </p>
+        <div class="row" style="margin-top:10px;">
+          <div>
+            <label>أقل حركة ممتدة مقبولة (%)</label>
+            <input type="number" step="0.5" min="1" name="climactic_min_extended_move_pct" value="{{ s.climactic_min_extended_move_pct }}">
+            <p class="muted" style="font-size:11px; margin-top:4px;">صافي التغيّر خلال آخر 4 أيام قبل شمعة التصريف — الافتراضي 5%، وقت "النتائج القوية" كانت أغلب الصفقات فعلياً 12%-19%</p>
+          </div>
+          <div>
+            <label>أقل نسبة فوليوم لشمعة التصريف</label>
+            <input type="number" step="0.5" min="2" name="climactic_min_volume_ratio" value="{{ s.climactic_min_volume_ratio }}">
+            <p class="muted" style="font-size:11px; margin-top:4px;">مضاعف متوسط الفوليوم — الافتراضي 8×</p>
+          </div>
+          <div>
+            <label>هامش تأكيد الانعكاس (مضاعف ATR)</label>
+            <input type="number" step="0.05" min="0" name="climactic_confirm_margin_atr" value="{{ s.climactic_confirm_margin_atr }}">
+            <p class="muted" style="font-size:11px; margin-top:4px;">أعلى من كذا يرفض الارتدادات الهامشية اللي تُبتلع فوراً بمواصلة الحركة الأصلية — الافتراضي 0.3×</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px; background:rgba(56,189,248,0.05);">
         <h3 style="margin-top:0; font-size:15px;">🚫 فلتر جودة العملة الاستباقي (Coin Tradability Gate)</h3>
         <div class="switch">
           <input type="checkbox" name="is_coin_quality_filter_enabled" {{ 'checked' if s.is_coin_quality_filter_enabled }}>

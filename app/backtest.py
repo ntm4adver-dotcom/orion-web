@@ -369,7 +369,7 @@ def run_symbol_backtest(symbol: str, days_back: int, exchange,
             fn = STRATEGY_REGISTRY[strategy_key]["fn"]
             try:
                 # نمرّر الفريم الدقيق المتدرّج بمكان k5m — أدق فريم متاح لهذي الفترة
-                result = fn(symbol, k4h_asof, k1h_asof, k15m_asof, k_fine_asof, k_daily_asof, micro=None, trace=None)
+                result = fn(symbol, k4h_asof, k1h_asof, k15m_asof, k_fine_asof, k_daily_asof, micro=None, trace=None, settings=settings)
             except Exception:
                 continue
             if not result:

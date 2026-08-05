@@ -28,7 +28,7 @@ from .liquidation_heatmap import estimate_liquidation_heatmap
 def analyze_liquidation_hunter(symbol: str, k4h, k1h, k15m, k5m, k_daily,
                                 micro: Optional[MarketMicrostructure] = None,
                                 trace: Optional[list] = None,
-                                current_price: Optional[float] = None) -> Optional[AnalysisResult]:
+                                current_price: Optional[float] = None, **kwargs) -> Optional[AnalysisResult]:
     def _log(label, value, ok=None):
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})

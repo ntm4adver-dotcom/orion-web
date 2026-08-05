@@ -26,7 +26,8 @@ from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, build_sc
 def analyze_climactic_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
                                  micro: Optional[MarketMicrostructure] = None,
                                  trace: Optional[list] = None,
-                                 current_price: Optional[float] = None) -> Optional[AnalysisResult]:
+                                 current_price: Optional[float] = None,
+                                 settings: Optional[dict] = None, **kwargs) -> Optional[AnalysisResult]:
     def _log(label, value, ok=None):
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})
@@ -34,13 +35,22 @@ def analyze_climactic_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     if len(k15m) < 900:
         return None
 
+    # 🆕 عتبتان قابلتان للتعديل من الإعدادات (بطلب صريح، بعد مراجعة صفقات
+    # فترة كانت نتائجها قوية — العينة صغيرة جداً (6 صفقات) وما قدرت ألقى رقم
+    # واحد يفصل "الحركة الحاسمة" عن الهامشية بثقة كافية. بدل ما أفرض رقم
+    # تخميني، حوّلت العتبتين الأساسيتين (كانتا ثابتتين بالكود) لإعدادات تقدر
+    # تجرّبها وترفعها بنفسك، وتراقب هل ترفع نسبة الصفقات "الحاسمة" فعلياً.
+    settings = settings or {}
+    min_extended_move_pct = float(settings.get("climactic_min_extended_move_pct", 5.0))
+    min_climax_volume_ratio = float(settings.get("climactic_min_volume_ratio", 8.0))
+
     window = k15m[-400:]
     swing_start_price = window[0].close
     net_change_pct = (window[-1].close - swing_start_price) / swing_start_price * 100
     _log("صافي التغيّر خلال آخر 4 أيام (فحص حركة ممتدة)", f"{net_change_pct:.2f}%")
 
-    if abs(net_change_pct) < 5.0:
-        _log("❌ فلتر الحركة الممتدة (يحتاج ≥5% تغيّر صافٍ)", f"{net_change_pct:.2f}% غير كافٍ — رفض", False)
+    if abs(net_change_pct) < min_extended_move_pct:
+        _log(f"❌ فلتر الحركة الممتدة (يحتاج ≥{min_extended_move_pct}% تغيّر صافٍ)", f"{net_change_pct:.2f}% غير كافٍ — رفض", False)
         return None
 
     established_direction_down = net_change_pct < 0
@@ -56,13 +66,13 @@ def analyze_climactic_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     for k in recent_candles:
         is_same_direction = (k.close < k.open) if established_direction_down else (k.close > k.open)
         vr = k.volume / avg_vol
-        if vr > 8.0 and is_same_direction:
+        if vr > min_climax_volume_ratio and is_same_direction:
             climax_candle = k
             climax_vol_ratio = vr
             break
 
     if climax_candle is None:
-        _log("❌ شمعة تصريف/استنزاف", "ما فيه شمعة فوليوم متطرف (>8x) بنفس اتجاه الحركة الممتدة — رفض", False)
+        _log("❌ شمعة تصريف/استنزاف", f"ما فيه شمعة فوليوم متطرف (>{min_climax_volume_ratio}x) بنفس اتجاه الحركة الممتدة — رفض", False)
         return None
     _log("✅ شمعة تصريف/استنزاف مكتشفة", f"فوليوم {climax_vol_ratio:.1f}x المتوسط", True)
 
@@ -72,7 +82,8 @@ def analyze_climactic_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     # الآن نشترط هامش حقيقي (ATR) بدل أي تجاوز مهما كان صغيراً — يميّز انعكاس
     # فعلي عن ضجيج عابر يُبتلع فوراً بمواصلة الحركة الأصلية.
     atr_val = atr(k15m, 14)
-    confirm_margin = atr_val * 0.3 if atr_val > 0 else 0.0
+    confirm_margin_atr_mult = float(settings.get("climactic_confirm_margin_atr", 0.3))
+    confirm_margin = atr_val * confirm_margin_atr_mult if atr_val > 0 else 0.0
 
     # تأكيد الانعكاس: آخر شمعة تغلق بعكس اتجاه شمعة التصريف بهامش حقيقي (مو أي تجاوز تافه)
     last = k15m[-1]

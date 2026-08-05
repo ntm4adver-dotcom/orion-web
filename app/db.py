@@ -95,6 +95,9 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "min_coin_efficiency_ratio": 0.05,  # 🆕 أقل كفاءة اتجاهية عامة مقبولة (200 شمعة 15د) — أقل من كذا = حركة عشوائية بلا معنى
     "max_coin_wick_outlier_ratio": 6.0,  # 🆕 أقصى نسبة مقبولة لأكبر شمعة (200 ساعة) مقارنة بالمدى المعتاد — أعلى من كذا = شموع شاذة/سلوك غير طبيعي
     "max_coin_atr_pct": 8.0,  # 🆕 أقصى تقلب مقبول (ATR كنسبة من السعر على فريم الساعة) — أعلى من كذا = عملة برية جداً
+    "climactic_min_extended_move_pct": 5.0,  # 🆕 أقل حركة ممتدة (%) قبل قبول ارتداد فوليوم التصريف — ارفعه لتفضيل حركات أقوى/أحسم
+    "climactic_min_volume_ratio": 8.0,  # 🆕 أقل نسبة فوليوم لشمعة التصريف (مضاعف المتوسط) — ارفعه لتفضيل استنزاف أوضح
+    "climactic_confirm_margin_atr": 0.3,  # 🆕 هامش تأكيد الانعكاس (مضاعف ATR) — ارفعه لرفض الارتدادات الهامشية بشكل أشد
     "strategy_learning_min_trades": 10,   # نفس الفكرة لكن على مستوى الاستراتيجية ككل (كل العملات مجتمعة)
     "strategy_learning_weak_threshold": 35,
     "strategy_learning_strong_threshold": 70,

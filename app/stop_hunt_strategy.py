@@ -156,7 +156,7 @@ def _detect_stop_hunt(klines: List[Kline], lookback: int = 50, vol_period: int =
 def analyze_stop_hunt(symbol: str, k4h, k1h, k15m, k5m, k_daily,
                        micro: Optional[MarketMicrostructure] = None,
                        trace: Optional[list] = None,
-                       current_price: Optional[float] = None) -> Optional[AnalysisResult]:
+                       current_price: Optional[float] = None, **kwargs) -> Optional[AnalysisResult]:
     def _log(label, value, ok=None):
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})
