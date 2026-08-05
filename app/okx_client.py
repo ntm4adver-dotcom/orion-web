@@ -807,11 +807,6 @@ def fetch_order_book_imbalance(symbol: str, depth: int = 20) -> Optional[float]:
         return None
 
 
-_cvd_history: Dict[str, list] = {}
-CVD_HISTORY_MAX_AGE_MS = 24 * 60 * 60 * 1000  # نافذة تراكمية 24 ساعة
-CVD_HISTORY_MAX_POINTS = 500  # سقف حماية من تضخم الذاكرة
-
-
 def fetch_large_order_pressure(symbol: str, limit: int = 100, size_multiple: float = 3.0) -> Optional[float]:
     """🆕 Order Flow متقدم: يكتشف الصفقات "الكبيرة" (أضخم من size_multiple×متوسط
     حجم الصفقة) من نفس بيانات آخر الصفقات المنفَّذة فعلياً (بدون أي طلب API
@@ -854,8 +849,7 @@ def fetch_taker_pressure(symbol: str, limit: int = 100) -> Optional[float]:
     فعلياً بالسوق (مو مجرد أوامر معلّقة بالـ order book) ويحسب هل الأغلبية اشترت
     بأوامر سوق (taker buy) أو باعت (taker sell). إشارة أقوى وأدق من فوليوم الشمعة
     العادي لتأكيد إن الاختراق مدعوم بضغط شراء/بيع حقيقي، وليس مجرد تقلب عابر.
-    ترجع رقم بين -1 (ضغط بيع كامل) و 1 (ضغط شراء كامل).
-    كل استدعاء لهذي الدالة يغذّي أيضاً متتبع CVD التراكمي (انظر get_cvd_24h_pct)."""
+    ترجع رقم بين -1 (ضغط بيع كامل) و 1 (ضغط شراء كامل)."""
     inst_id = _to_inst_id(symbol)
     error_key = f"taker_pressure:{symbol}"
     resp = _public_get(f"/api/v5/market/trades?instId={inst_id}&limit={limit}", error_key=error_key)
@@ -873,7 +867,6 @@ def fetch_taker_pressure(symbol: str, limit: int = 100) -> Optional[float]:
                 buy_vol += sz
             elif t.get("side") == "sell":
                 sell_vol += sz
-        _record_cvd_sample(symbol, buy_vol, sell_vol)
         total = buy_vol + sell_vol
         if total <= 0:
             last_error[error_key] = "إجمالي حجم الصفقات المسحوبة صفر (بيانات غير صالحة من المنصة)"
@@ -885,34 +878,43 @@ def fetch_taker_pressure(symbol: str, limit: int = 100) -> Optional[float]:
         return None
 
 
-def _record_cvd_sample(symbol: str, buy_vol: float, sell_vol: float):
-    now = int(time.time() * 1000)
-    history = _cvd_history.setdefault(symbol, [])
-    history.append((now, buy_vol, sell_vol))
-    cutoff = now - CVD_HISTORY_MAX_AGE_MS
-    history[:] = [h for h in history if h[0] >= cutoff]
-    if len(history) > CVD_HISTORY_MAX_POINTS:
-        del history[: len(history) - CVD_HISTORY_MAX_POINTS]
+def get_cvd_24h_pct(symbol: str, min_periods: int = 3) -> Optional[float]:
+    """🔴 إعادة بناء كاملة (بطلب صريح، بعد اكتشاف باق تكرار عد حقيقي): كانت
+    الدالة القديمة تجمع "عيّنات" يدوية من آخر 100 صفقة بكل استدعاء لـ
+    fetch_taker_pressure، وتراكمها بذاكرة محلية على مدى 24 ساعة — بدون أي
+    تحقق إن الصفقات بعيّنة جديدة **مختلفة فعلاً** عن العيّنة اللي قبلها. لعملة
+    قليلة السيولة (أقل من 100 صفقة كل 5 دقايق، وهو حال أغلب العملات المتداوَلة
+    بالتطبيق)، نفس الصفقات كانت تُعاد وتُحسب عشرات المرات، فتضخّم أي انحياز
+    شراء/بيع بشكل مصطنع وتعطي رقم CVD غير موثوق.
 
-
-def get_cvd_24h_pct(symbol: str, min_samples: int = 3) -> Optional[float]:
-    """CVD تراكمي (Cumulative Volume Delta) على مدى 24 ساعة — نسبة هيمنة الشراء الفعلي
-    من إجمالي حجم التداول المُعايَن. مبني على عيّنات دورية من صفقات فعلية (مو تخمين)،
-    تتجمّع تلقائياً كل ما اشتغل الفحص. القيمة تصير أدق كل ما اشتغل البوت لفترة أطول
-    (تحتاج 24 ساعة تشغيل متواصل لتغطية كاملة للنافذة الزمنية).
+    الحل الجذري: بدل أي تراكم يدوي، نجيب البيانات **جاهزة ومحسوبة رسمياً من
+    OKX نفسها** عبر endpoint مخصَّص لحجم الشراء/البيع الفعلي مقسَّم لفترات
+    زمنية — صفر خطر تكرار، صفر منطق تراكم بالكود.
     القيمة: 0% = بيع كامل، 50% = تعادل، 100% = شراء كامل."""
-    history = _cvd_history.get(symbol, [])
-    now = int(time.time() * 1000)
-    cutoff = now - CVD_HISTORY_MAX_AGE_MS
-    recent = [h for h in history if h[0] >= cutoff]
-    if len(recent) < min_samples:
+    inst_id = _to_inst_id(symbol)
+    error_key = f"cvd_24h:{symbol}"
+    resp = _public_get(
+        f"/api/v5/rubik/stat/taker-volume-contract?instId={inst_id}&period=1H&limit=24",
+        error_key=error_key,
+    )
+    if not resp or resp.get("code") != "0" or not resp.get("data"):
         return None
-    total_buy = sum(h[1] for h in recent)
-    total_sell = sum(h[2] for h in recent)
-    total = total_buy + total_sell
-    if total <= 0:
+    try:
+        periods = resp["data"]
+        if len(periods) < min_periods:
+            return None
+        # صيغة الاستجابة: [ts, sellVol, buyVol] لكل فترة (ساعة هنا)، محسوبة من OKX مباشرة
+        total_sell = sum(float(p[1]) for p in periods)
+        total_buy = sum(float(p[2]) for p in periods)
+        total = total_buy + total_sell
+        if total <= 0:
+            return None
+        last_error.pop(error_key, None)
+        return (total_buy / total) * 100.0
+    except Exception as e:
+        last_error[error_key] = f"خطأ أثناء معالجة بيانات حجم التداول: {type(e).__name__}: {e}"
         return None
-    return (total_buy / total) * 100.0
+
 
 
 def fetch_long_short_ratio(symbol: str) -> Optional[float]:
