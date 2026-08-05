@@ -21,6 +21,7 @@
 """
 from typing import Optional, List
 
+from . import db
 from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, build_score_breakdown, daily_trend
 
 
@@ -34,6 +35,7 @@ def analyze_climactic_reversal_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
             trace.append({"check": label, "value": value, "ok": ok})
 
     if len(k15m) < 900:
+        db.increment_rejection_counter("climactic_trend_insufficient_history")
         return None
 
     # 🆕 نفس عتبتي النسخة الأصلية، قابلتان للتعديل من الإعدادات (بطلب صريح)
@@ -47,6 +49,7 @@ def analyze_climactic_reversal_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     # ترند حقيقي".
     if len(k_daily) < 15:
         _log("عدد الشموع اليومية كافٍ لتحديد الترند العام (يحتاج ≥15 يوم)", len(k_daily), False)
+        db.increment_rejection_counter("climactic_trend_insufficient_daily_history")
         return None
     overall_trend = daily_trend(k_daily)
     _log("اتجاه الترند اليومي العام للعملة", overall_trend)
@@ -58,6 +61,7 @@ def analyze_climactic_reversal_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
 
     if abs(net_change_pct) < min_extended_move_pct:
         _log(f"❌ فلتر الحركة الممتدة (يحتاج ≥{min_extended_move_pct}% تغيّر صافٍ)", f"{net_change_pct:.2f}% غير كافٍ — رفض", False)
+        db.increment_rejection_counter("climactic_trend_extended_move_filter")
         return None
 
     established_direction_down = net_change_pct < 0
@@ -80,6 +84,7 @@ def analyze_climactic_reversal_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
 
     if climax_candle is None:
         _log("❌ شمعة تصريف/استنزاف", f"ما فيه شمعة فوليوم متطرف (>{min_climax_volume_ratio}x) بنفس اتجاه الحركة الممتدة — رفض", False)
+        db.increment_rejection_counter("climactic_trend_no_exhaustion_candle")
         return None
     _log("✅ شمعة تصريف/استنزاف مكتشفة", f"فوليوم {climax_vol_ratio:.1f}x المتوسط", True)
 
@@ -100,6 +105,7 @@ def analyze_climactic_reversal_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     _log("تأكيد الانعكاس (إغلاق بعكس شمعة التصريف بهامش ≥0.3×ATR)", reversal_confirmed, reversal_confirmed)
     if not reversal_confirmed:
         _log("❌ القرار النهائي", "الانعكاس لسا ما تأكد بهامش كافٍ — ننتظر", False)
+        db.increment_rejection_counter("climactic_trend_reversal_not_confirmed")
         return None
 
     # 🆕 الفحص الجوهري لهذي النسخة: الصفقة لازم تطابق الترند اليومي العام،
@@ -109,6 +115,7 @@ def analyze_climactic_reversal_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     side_ar = "صاعد" if side == "Long" else "هابط"
     if side_ar != overall_trend:
         _log("❌ فلتر التوافق مع الترند اليومي", f"الصفقة {side} ({side_ar}) تعاكس الترند اليومي العام ({overall_trend}) — رفض", False)
+        db.increment_rejection_counter("climactic_trend_daily_alignment_filter")
         return None
     _log("✅ الصفقة متوافقة مع الترند اليومي العام", f"{side} ({side_ar}) == {overall_trend}", True)
 

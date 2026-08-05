@@ -20,6 +20,7 @@
 """
 from typing import Optional, List
 
+from . import db
 from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, build_score_breakdown
 
 
@@ -33,6 +34,7 @@ def analyze_climactic_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
             trace.append({"check": label, "value": value, "ok": ok})
 
     if len(k15m) < 900:
+        db.increment_rejection_counter("climactic_insufficient_history")
         return None
 
     # 🆕 عتبتان قابلتان للتعديل من الإعدادات (بطلب صريح، بعد مراجعة صفقات
@@ -51,6 +53,7 @@ def analyze_climactic_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
 
     if abs(net_change_pct) < min_extended_move_pct:
         _log(f"❌ فلتر الحركة الممتدة (يحتاج ≥{min_extended_move_pct}% تغيّر صافٍ)", f"{net_change_pct:.2f}% غير كافٍ — رفض", False)
+        db.increment_rejection_counter("climactic_extended_move_filter")
         return None
 
     established_direction_down = net_change_pct < 0
@@ -73,6 +76,7 @@ def analyze_climactic_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
 
     if climax_candle is None:
         _log("❌ شمعة تصريف/استنزاف", f"ما فيه شمعة فوليوم متطرف (>{min_climax_volume_ratio}x) بنفس اتجاه الحركة الممتدة — رفض", False)
+        db.increment_rejection_counter("climactic_no_exhaustion_candle")
         return None
     _log("✅ شمعة تصريف/استنزاف مكتشفة", f"فوليوم {climax_vol_ratio:.1f}x المتوسط", True)
 
@@ -97,6 +101,7 @@ def analyze_climactic_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     _log("تأكيد الانعكاس (إغلاق بعكس شمعة التصريف بهامش ≥0.3×ATR)", reversal_confirmed, reversal_confirmed)
     if not reversal_confirmed:
         _log("❌ القرار النهائي", "الانعكاس لسا ما تأكد بهامش كافٍ — ننتظر", False)
+        db.increment_rejection_counter("climactic_reversal_not_confirmed")
         return None
 
     # 🔴 إصلاح جوهري: نستخدم السعر الحي الحقيقي المُمرَّر من السكانر لو متوفر
