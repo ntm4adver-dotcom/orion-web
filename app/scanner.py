@@ -319,24 +319,36 @@ def evaluate_signal_filters(settings: dict, symbol: str, strategy_key: str, resu
     # يبقى كما حسبته الاستراتيجية دائماً بكلا الحالتين، بدون أي تغيير.
     if settings.get("is_fixed_rr_enabled", False):
         target_rr = float(settings.get("fixed_rr_value", 3.0))
+        rr_mode = settings.get("fixed_rr_mode", "filter")  # 🆕 "filter" (افتراضي، القديم) أو "always_force" (بطلب صريح)
         if target_rr > 0:
             risk_distance = abs(result.entry_price - result.stop_loss)
             reward_distance = abs(result.take_profit - result.entry_price)
             if risk_distance > 0:
                 actual_rr = reward_distance / risk_distance
-                if actual_rr < target_rr:
-                    return False, f"عائد/مخاطرة الهدف الحقيقي (هيكل السوق) = 1:{actual_rr:.2f}، أقل من الحد المطلوب 1:{target_rr:.1f} — رفض بدل تمديد الهدف تعسفياً", "min_structural_rr_filter"
-                if actual_rr > target_rr:
-                    # تقليص آمن: نقرّب الهدف لنفس الاتجاه (بين نقطة الدخول والهدف
-                    # الأصلي)، بدون ما نلمس الوقف إطلاقاً
+                if rr_mode == "always_force":
+                    # 🆕 (بطلب صريح): تعيين مباشر للهدف = مخاطرة × R:R المختار،
+                    # بغض النظر عن هدف الاستراتيجية الأصلي (فيبوناتشي/هيكل سوق) —
+                    # بدون أي رفض بسبب R:R. الوقف يبقى كما هو دائماً، الهدف بس يتغيّر.
                     if result.side == "Long":
                         result.take_profit = result.entry_price + (risk_distance * target_rr)
                     else:
                         result.take_profit = result.entry_price - (risk_distance * target_rr)
-                    result.behavior = f"🎯 [هدف حقيقي قُلِّص لـ1:{target_rr:.1f} (كان 1:{actual_rr:.2f} — تقريب آمن، مو تمديد)] " + result.behavior
+                    result.behavior = f"🎯 [هدف مُعيَّن مباشرة = 1:{target_rr:.1f} (بطلب المستخدم، بغض النظر عن هيكل السوق)] " + result.behavior
+                    result.rr = target_rr
                 else:
-                    result.behavior = f"🎯 [هدف واقعي من هيكل السوق، عائد/مخاطرة محقَّق = 1:{target_rr:.1f}] " + result.behavior
-                result.rr = target_rr
+                    if actual_rr < target_rr:
+                        return False, f"عائد/مخاطرة الهدف الحقيقي (هيكل السوق) = 1:{actual_rr:.2f}، أقل من الحد المطلوب 1:{target_rr:.1f} — رفض بدل تمديد الهدف تعسفياً", "min_structural_rr_filter"
+                    if actual_rr > target_rr:
+                        # تقليص آمن: نقرّب الهدف لنفس الاتجاه (بين نقطة الدخول والهدف
+                        # الأصلي)، بدون ما نلمس الوقف إطلاقاً
+                        if result.side == "Long":
+                            result.take_profit = result.entry_price + (risk_distance * target_rr)
+                        else:
+                            result.take_profit = result.entry_price - (risk_distance * target_rr)
+                        result.behavior = f"🎯 [هدف حقيقي قُلِّص لـ1:{target_rr:.1f} (كان 1:{actual_rr:.2f} — تقريب آمن، مو تمديد)] " + result.behavior
+                    else:
+                        result.behavior = f"🎯 [هدف واقعي من هيكل السوق، عائد/مخاطرة محقَّق = 1:{target_rr:.1f}] " + result.behavior
+                    result.rr = target_rr
 
     return True, "", ""
 

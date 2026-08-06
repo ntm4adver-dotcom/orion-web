@@ -336,6 +336,21 @@
         ⚠️ <b>لو الزر معطّل</b>: ما فيه أي حد أدنى أو تقليص — أي صفقة تمر بأي عائد/مخاطرة كان، بغض النظر
         عن هدف الاستراتيجية.
       </p>
+
+      <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--dark-accent);">
+        <label>🆕 طريقة التطبيق (قرارك الشخصي — بطلب صريح)</label>
+        <select name="fixed_rr_mode" style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--dark-accent); background:var(--card); color:var(--text); margin-top:6px;">
+          <option value="filter" {{ 'selected' if s.fixed_rr_mode == 'filter' or not s.fixed_rr_mode }}>فلتر رفض (الافتراضي والأكثر أماناً) — يرفض لو الهدف الحقيقي أقل من الرقم، يقلّص لو أكبر</option>
+          <option value="always_force" {{ 'selected' if s.fixed_rr_mode == 'always_force' }}>تعيين مباشر (بطلب صريح) — الهدف = مخاطرة × الرقم دائماً، بدون أي رفض بسبب R:R</option>
+        </select>
+        <p class="muted" style="font-size:12px; line-height:1.8; margin-top:8px;">
+          <b>تعيين مباشر:</b> يتجاهل هدف الاستراتيجية الأصلي (الهيكلي) كليّاً، ويعيّن الهدف دايماً = مخاطرة ×
+          الرقم اللي كتبته أعلاه — بدون رفض الصفقة أبداً بسبب R:R. الوقف يبقى دائماً كما حسبته الاستراتيجية،
+          بدون أي تغيير. هذا يرجّع سلوك "الاستبدال الكامل" القديم، بس الآن **قرارك الواعي**، مو افتراضي —
+          فعّله بس لو مقتنع إن جودة الدخول/الوقف/الاتجاه كافية تحقق الرقم اللي تختاره بغض النظر عن هيكل
+          السوق الحقيقي.
+        </p>
+      </div>
     </div>
 
     <script>
