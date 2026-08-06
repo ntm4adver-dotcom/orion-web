@@ -185,6 +185,82 @@ def ema(closes: List[float], span: int) -> float:
     return ema_val
 
 
+def _ema_series(closes: List[float], span: int) -> List[float]:
+    """نسخة متسلسلة من ema() — ترجع كل قيم EMA على طول المسار، مو الأخيرة بس.
+    ضرورية لحساب MACD (يحتاج EMA لخط MACD نفسه عشان يطلع خط الإشارة)."""
+    if len(closes) < span:
+        return []
+    alpha = 2.0 / (span + 1)
+    series = []
+    ema_val = sum(closes[:span]) / span
+    series.append(ema_val)
+    for i in range(span, len(closes)):
+        ema_val = (closes[i] * alpha) + (ema_val * (1 - alpha))
+        series.append(ema_val)
+    return series
+
+
+def macd_histogram_series(closes: List[float], fast: int = 12, slow: int = 26, signal_span: int = 9) -> List[float]:
+    """نسخة متسلسلة من macd() — ترجع سلسلة كاملة لقيم الهستوجرام (الأعمدة)، مو
+    آخر قيمة بس. ضرورية لاكتشاف "قمة/قاع" حقيقي بالأعمدة نفسها (بطلب صريح) —
+    يعني هل الأعمدة كانت تكبر وبدأت تصغر الآن (قمة زخم)، أو العكس (قاع زخم)."""
+    if len(closes) < slow + signal_span:
+        return []
+    ema_fast_series = _ema_series(closes, fast)
+    ema_slow_series = _ema_series(closes, slow)
+    offset = slow - fast
+    macd_line_series = [ema_fast_series[offset + i] - ema_slow_series[i] for i in range(len(ema_slow_series))]
+    if len(macd_line_series) < signal_span:
+        return []
+    signal_series = _ema_series(macd_line_series, signal_span)
+    line_offset = len(macd_line_series) - len(signal_series)
+    return [macd_line_series[line_offset + i] - signal_series[i] for i in range(len(signal_series))]
+
+
+def detect_macd_momentum_shift(histogram_series: List[float], lookback: int = 3) -> Optional[str]:
+    """🆕 يكتشف "قمة" أو "قاع" حقيقي بأعمدة الهستوجرام نفسها (بطلب صريح: "على
+    الأعمدة، مش الخطوط") — مو مجرد إشارة فوق/تحت الصفر. يفحص: هل الأعمدة كانت
+    تتزايد بشكل متسق ثم بدأت تتناقص عند آخر نقطة فعلاً (= قمة زخم صاعد، تباطؤ
+    محتمل)، أو العكس (= قاع زخم هابط، تعافٍ محتمل) — بغض النظر هل الهستوجرام
+    فوق أو تحت الصفر وقتها. هذا بالضبط نمط "تباعد الزخم" (Momentum Divergence)
+    اللي يسبق كثير من الانعكاسات الحقيقية، ويلقطه **قبل** ما يوصل خط الصفر
+    (زي المؤشرات المتأخرة الأخرى).
+    يرجع 'peak' (قمة زخم — حذر من Long، إشارة محتملة لـShort)،
+         'trough' (قاع زخم — حذر من Short، إشارة محتملة لـLong)، أو None."""
+    if len(histogram_series) < lookback + 2:
+        return None
+    recent = histogram_series[-(lookback + 1):]
+    last, prev = recent[-1], recent[-2]
+    was_rising = all(recent[i] >= recent[i - 1] for i in range(1, len(recent) - 1))
+    was_declining = all(recent[i] <= recent[i - 1] for i in range(1, len(recent) - 1))
+    if was_rising and last < prev:
+        return "peak"
+    if was_declining and last > prev:
+        return "trough"
+    return None
+
+
+def macd(closes: List[float], fast: int = 12, slow: int = 26, signal_span: int = 9) -> Tuple[float, float, float]:
+    """🆕 MACD (Moving Average Convergence Divergence) — بالمعادلة القياسية
+    12/26/9. يُستخدم **كتأكيد إضافي فوق الهيكل السعري الموجود** (سوينقات
+    ZigZag، فيبوناتشي...)، مو بديل عنه — مؤشر مشتق من EMA (متأخر ومنعّم بطبيعته)
+    مو أداة دقيقة لتحديد قمة/قاع هيكلي بالسعر الخام، لكنه مفيد جداً كفحص زخم
+    إضافي (هل الاتجاه فعلاً مدعوم بزخم متسارع وقت الدخول، أو الزخم أصلاً ضعيف).
+    يرجع (خط MACD، خط الإشارة، الهستوجرام) — آخر قيمة لكل واحد."""
+    if len(closes) < slow + signal_span:
+        return 0.0, 0.0, 0.0
+    ema_fast_series = _ema_series(closes, fast)
+    ema_slow_series = _ema_series(closes, slow)
+    offset = slow - fast  # ema_fast يبدأ أبكر (فترة أقصر) بمقدار (slow-fast) نقطة عن ema_slow
+    macd_line_series = [ema_fast_series[offset + i] - ema_slow_series[i] for i in range(len(ema_slow_series))]
+    if len(macd_line_series) < signal_span:
+        return (macd_line_series[-1] if macd_line_series else 0.0), 0.0, 0.0
+    signal_series = _ema_series(macd_line_series, signal_span)
+    macd_val = macd_line_series[-1]
+    signal_val = signal_series[-1]
+    return macd_val, signal_val, macd_val - signal_val
+
+
 def _wma_series(values: List[float], period: int) -> List[float]:
     """متوسط متحرك مرجّح (Weighted Moving Average) — يعطي وزن أكبر للقيم الأحدث
     بشكل خطي متدرّج، أساس حساب Hull Moving Average أدناه."""
@@ -459,6 +535,74 @@ def find_significant_swing(klines: List[Kline], atr_val: float, min_move_atr: fl
         return {"high_idx": idx_a, "swing_high": price_a, "low_idx": idx_b, "swing_low": price_b,
                 "direction": "down", "leg_efficiency": er}
     return None
+
+
+def find_swing_via_macd(klines: List[Kline], lookback: int = 400, fast: int = 12, slow: int = 26,
+                         signal_span: int = 9, extremum_window: int = 3) -> Optional[dict]:
+    """🆕 تحديد قمة/قاع السوينق **من أعمدة هستوجرام MACD نفسها**، مو من السعر
+    الخام مباشرة (بطلب صريح: "هذي أقدر أحدد فيها كمان القمم والقيعان"). الفكرة:
+    قمة/قاع الزخم الحقيقي (وين الأعمدة كانت تكبر ثم بدأت تصغر، أو العكس) غالباً
+    يسبق أو يتزامن مع قمة/قاع السعر الفعلي — ويلقط أحياناً انعكاسات حقيقية
+    "تباعد الزخم" (Momentum Divergence) اللي اكتشاف السوينق بالسعر الخام وحده
+    (ZigZag/ATR بـfind_significant_swing) ممكن يفوّتها أو يتأخر عنها.
+
+    الخطوات:
+      1) نحسب سلسلة هستوجرام MACD كاملة على الإغلاقات.
+      2) نمسح السلسلة كلها (مو نقطة أخيرة بس) عن كل نقاط "قمة/قاع زخم" حقيقية
+         (نفس منطق detect_macd_momentum_shift، مطبَّق بمسح كامل).
+      3) لكل قمة زخم، نلقط أعلى سعر (High) بنافذة صغيرة حول نفس اللحظة — ولكل
+         قاع زخم، ألقط أدنى سعر (Low) بنفس الطريقة.
+      4) نرجع آخر زوج (قمة سعر، قاع سعر) بنفس صيغة find_significant_swing
+         بالضبط — عشان يُستخدم بمكانها مباشرة بأي استراتيجية (mtf_fib_trend
+         تحديداً)."""
+    window = klines[-lookback:] if len(klines) > lookback else klines
+    closes = [k.close for k in window]
+    hist_series = macd_histogram_series(closes, fast, slow, signal_span)
+    if len(hist_series) < 10:
+        return None
+
+    # hist_series أقصر من window بسبب فترة الإحماء (slow + signal_span تقريباً) —
+    # offset يربط فهرس الهستوجرام بفهرس الشمعة المقابلة له بـwindow
+    offset = len(window) - len(hist_series)
+
+    # مسح السلسلة كاملة عن كل نقاط قمة/قاع زخم حقيقية (نفس منطق
+    # detect_macd_momentum_shift، بس مطبَّق بمسح شامل بدل نقطة أخيرة بس)
+    peaks_idx, troughs_idx = [], []
+    for i in range(2, len(hist_series) - 1):
+        prev2, prev1, cur = hist_series[i - 2], hist_series[i - 1], hist_series[i]
+        if prev1 >= prev2 and cur < prev1:
+            peaks_idx.append(i)
+        if prev1 <= prev2 and cur > prev1:
+            troughs_idx.append(i)
+
+    if not peaks_idx or not troughs_idx:
+        return None
+
+    last_peak_hist_idx = peaks_idx[-1]
+    last_trough_hist_idx = troughs_idx[-1]
+
+    def _price_extreme(hist_idx: int, kind: str) -> Tuple[int, float]:
+        candle_idx = min(len(window) - 1, offset + hist_idx)
+        lo = max(0, candle_idx - extremum_window)
+        hi = min(len(window), candle_idx + extremum_window + 1)
+        segment = window[lo:hi]
+        if kind == "high":
+            best = max(segment, key=lambda k: k.high)
+            return window.index(best, lo, hi), best.high
+        best = min(segment, key=lambda k: k.low)
+        return window.index(best, lo, hi), best.low
+
+    high_idx, swing_high = _price_extreme(last_peak_hist_idx, "high")
+    low_idx, swing_low = _price_extreme(last_trough_hist_idx, "low")
+
+    if swing_high <= swing_low:
+        return None  # قمة/قاع الزخم ما أعطوا سوينق سعري منطقي (نادر، حماية بس)
+
+    if high_idx > low_idx:
+        return {"low_idx": low_idx, "swing_low": swing_low, "high_idx": high_idx, "swing_high": swing_high,
+                "direction": "up", "source": "macd_histogram"}
+    return {"high_idx": high_idx, "swing_high": swing_high, "low_idx": low_idx, "swing_low": swing_low,
+            "direction": "down", "source": "macd_histogram"}
 
 
 def _hma_bias_pair(closes: List[float]) -> str:

@@ -23,7 +23,7 @@
 """
 from typing import Optional, List
 
-from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, _get_bias, build_score_breakdown, find_significant_swing
+from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, _get_bias, build_score_breakdown, find_significant_swing, find_swing_via_macd
 
 
 def _find_swing_extremes(window: List[Kline]):
@@ -77,6 +77,29 @@ def analyze_mtf_fib_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     low_idx, swing_low = swing["low_idx"], swing["swing_low"]
     swing_range = swing_high - swing_low
     _log("سوينق هيكلي مكتشف (ZigZag)", f"قمة {swing_high:.6g} @ {high_idx} ← قاع {swing_low:.6g} @ {low_idx}, ER={swing['leg_efficiency']:.2f}", True)
+
+    # 🆕 تحقق مزدوج بمصدر مستقل تماماً (بطلب صريح): نفس السوينق لازم "يتأكد"
+    # من زاوية ثانية غير السعر الخام — قمة/قاع الزخم الحقيقي بأعمدة هستوجرام
+    # MACD (وين الزخم كان يتصاعد ثم بدأ يتباطأ فعلاً، مو مجرد تجاوز عتبة ATR
+    # بالسعر). لو المصدرين ما يتفقان على نفس منطقة السوينق تقريباً، معناها
+    # السوينق مو واضح/حاسم بما يكفي — نرفض الإشارة بدل رسم فيبوناتشي على نقطة
+    # مشكوك فيها (بالضبط سيناريو RAVEUSDT اللي راجعناه).
+    macd_swing = find_swing_via_macd(window, lookback=len(window))
+    if macd_swing is None:
+        _log("❌ تأكيد MACD المستقل للسوينق", "ما لقى قمة/قاع زخم واضح بالهستوجرام — رفض (السوينق غير مؤكَّد من مصدر مستقل)", False)
+        return None
+    macd_range = macd_swing["swing_high"] - macd_swing["swing_low"]
+    if macd_range <= 0 or swing_range <= 0:
+        return None
+    # نسبة التداخل بين نطاقي السوينق (ZigZag وMACD) — لازم يكون فيه تداخل حقيقي
+    overlap_low = max(swing_low, macd_swing["swing_low"])
+    overlap_high = min(swing_high, macd_swing["swing_high"])
+    overlap_pct = max(0.0, overlap_high - overlap_low) / min(swing_range, macd_range)
+    _log("مقارنة سوينق MACD المستقل", f"قمة {macd_swing['swing_high']:.6g} ← قاع {macd_swing['swing_low']:.6g} | تداخل={overlap_pct:.0%}", overlap_pct >= 0.4)
+    if overlap_pct < 0.4:
+        _log("❌ تأكيد MACD المستقل للسوينق", f"السوينقين مختلفين جداً (تداخل {overlap_pct:.0%} فقط) — السوينق غير حاسم، رفض", False)
+        return None
+
     if swing_range <= 0:
         return None
 
