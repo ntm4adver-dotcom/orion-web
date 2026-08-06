@@ -32,6 +32,10 @@ class MarketMicrostructure:
     long_short_ratio: Optional[float] = None  # نسبة تمركز الحسابات (>1 أغلبية شراء، <1 أغلبية بيع)
     cvd_pct: Optional[float] = None           # CVD تراكمي 24 ساعة: 0%=بيع كامل, 50%=تعادل, 100%=شراء كامل
     large_order_pressure: Optional[float] = None  # 🆕 ضغط الصفقات الكبيرة فقط (Order Flow متقدم) — يعزل تدخل اللاعبين الكبار عن ضجيج التجزئة
+    recent_liquidations: Optional[dict] = None     # 🆕 تصفيات حقيقية فعلية آخر ساعة: {count, long_liq_pct, total_size}
+    mark_price_divergence_pct: Optional[float] = None  # 🆕 فرق السعر الفعلي عن السعر المرجعي المحمي من التلاعب
+    top_trader_ratio: Optional[float] = None       # 🆕 انحياز كبار المتداولين تحديداً (-1..1)، أدق من انحياز السوق العام
+    index_price_divergence_pct: Optional[float] = None  # 🆕 فرق سعر OKX عن مؤشر مُجمَّع من عدة منصات
 
 
 @dataclass

@@ -587,6 +587,10 @@ class ScannerState:
                     long_short_ratio=exchange.fetch_long_short_ratio(symbol) if hasattr(exchange, "fetch_long_short_ratio") else None,
                     cvd_pct=exchange.get_cvd_24h_pct(symbol) if hasattr(exchange, "get_cvd_24h_pct") else None,
                     large_order_pressure=exchange.fetch_large_order_pressure(symbol) if hasattr(exchange, "fetch_large_order_pressure") else None,
+                    recent_liquidations=exchange.fetch_recent_liquidations(symbol) if hasattr(exchange, "fetch_recent_liquidations") else None,
+                    mark_price_divergence_pct=exchange.fetch_mark_price_divergence_pct(symbol) if hasattr(exchange, "fetch_mark_price_divergence_pct") else None,
+                    top_trader_ratio=exchange.fetch_top_trader_long_short_ratio(symbol) if hasattr(exchange, "fetch_top_trader_long_short_ratio") else None,
+                    index_price_divergence_pct=exchange.fetch_index_price_divergence_pct(symbol) if hasattr(exchange, "fetch_index_price_divergence_pct") else None,
                 )
 
                 # ضغط المتداولين (Taker Pressure) صار شرط إلزامي بالانفجار السعري — لو غاب،

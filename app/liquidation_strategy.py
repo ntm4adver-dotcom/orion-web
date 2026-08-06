@@ -175,6 +175,24 @@ def analyze_liquidation_hunter(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         aligned = (side == "Long" and cvd_pct > 60) or (side == "Short" and cvd_pct < 40)
         if aligned:
             probability += 5
+
+    # 🆕 تأكيد حقيقي من بيانات تصفيات فعلية (بطلب صريح — مو تقدير من تغيّر OI):
+    # لو تصفيات حقيقية صارت فعلاً بالساعة الأخيرة، ومهيمنة بنفس اتجاه فرضية
+    # الكسكارة اللي الصفقة مبنية عليها، هذا دليل أقوى بكثير من أي تقدير غير
+    # مباشر — لأنه بيانات فعلية موثّقة من المنصة نفسها، مو استنتاج.
+    recent_liq = micro.recent_liquidations if micro else None
+    liq_confirms_thesis = False
+    if recent_liq and recent_liq.get("count", 0) >= 3 and recent_liq.get("long_liq_pct") is not None:
+        # zone_type = الاتجاه اللي المفروض يتصفّى وقت الكسر (احسبناه أسفل، نحسبه هنا بدري بس للتأكيد)
+        expected_zone = "Short" if side == "Long" else "Long"
+        long_liq_pct = recent_liq["long_liq_pct"]
+        # لو زون التصفية المتوقعة Short، يعني نتوقع تصفيات مراكز Short (بيع)
+        # تهيمن — يعني long_liq_pct لازم يكون منخفض (تصفيات الشراء أقل هيمنة)
+        liq_confirms_thesis = (expected_zone == "Short" and long_liq_pct < 40) or (expected_zone == "Long" and long_liq_pct > 60)
+        if liq_confirms_thesis:
+            probability += 7  # أعلى وزن من بقية المكافآت — بيانات فعلية موثّقة، مو تقدير
+            _log("✅ تصفيات حقيقية فعلية تؤكد الفرضية", f"{recent_liq['count']} تصفية بالساعة الأخيرة، هيمنة {expected_zone} — يدعم كسكارة {side}", True)
+
     probability = min(95, probability)
     _log("✅ القرار النهائي", f"{side} — مطاردة منطقة تصفية عند {zone_price:.6g}", True)
 
@@ -197,6 +215,7 @@ def analyze_liquidation_hunter(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         ("ضغط المتداولين قوي جداً (تأكيد إضافي)", taker_pressure is not None and ((side == "Long" and taker_pressure > 0.15) or (side == "Short" and taker_pressure < -0.15))),
         ("CVD تراكمي متوافق", cvd_pct is not None and ((side == "Long" and cvd_pct > 60) or (side == "Short" and cvd_pct < 40))),
         ("🆕 ضغط صفقات كبيرة متوافق (Order Flow)", large_order_pressure is not None and ((side == "Long" and large_order_pressure > 0.15) or (side == "Short" and large_order_pressure < -0.15))),
+        ("🆕 تصفيات حقيقية فعلية تؤكد الفرضية (مو تقدير)", liq_confirms_thesis),
     ]
     score_breakdown, signal_score = build_score_breakdown(score_factors)
 

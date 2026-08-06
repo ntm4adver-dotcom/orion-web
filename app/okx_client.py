@@ -754,6 +754,113 @@ def fetch_screened_symbols(mode: str, limit_count: int = 10, established_only: b
         return _default_symbols()[:limit_count]
 
 
+def fetch_recent_liquidations(symbol: str, minutes: int = 60) -> Optional[dict]:
+    """🆕 صفقات تصفية حقيقية فعلية (مو تخمين من تغيّر OI) — endpoint رسمي من
+    OKX يرجع آخر أوامر تصفية صارت فعلياً على المنصة (آخر 7 أيام كحد أقصى).
+    نرجع ملخص لآخر `minutes` دقيقة: عدد التصفيات، حجمها الإجمالي، والاتجاه
+    المهيمن (تصفيات Long أكثر = ضغط هبوطي حقيقي حصل، والعكس)."""
+    inst_id = _to_inst_id(symbol)
+    error_key = f"liquidations:{symbol}"
+    resp = _public_get(f"/api/v5/public/liquidation-orders?instType=SWAP&instId={inst_id}&state=filled&limit=100", error_key=error_key)
+    if not resp or resp.get("code") != "0" or not resp.get("data"):
+        return None
+    try:
+        cutoff = int(time.time() * 1000) - minutes * 60 * 1000
+        long_liq_sz, short_liq_sz, count = 0.0, 0.0, 0
+        for entry in resp["data"]:
+            details = entry.get("details", [])
+            for d in details:
+                ts = int(d.get("ts", 0))
+                if ts < cutoff:
+                    continue
+                sz = float(d.get("sz", 0) or 0)
+                count += 1
+                # posSide بمعنى المركز اللي اتصفّى: long = مراكز شراء اتصفّت (ضغط بيع حقيقي حصل)
+                if d.get("posSide") == "long":
+                    long_liq_sz += sz
+                elif d.get("posSide") == "short":
+                    short_liq_sz += sz
+        total = long_liq_sz + short_liq_sz
+        if total <= 0 or count == 0:
+            return {"count": 0, "long_liq_pct": None, "total_size": 0.0}
+        last_error.pop(error_key, None)
+        return {"count": count, "long_liq_pct": (long_liq_sz / total) * 100.0, "total_size": total}
+    except Exception as e:
+        last_error[error_key] = f"خطأ أثناء معالجة بيانات التصفيات: {type(e).__name__}: {e}"
+        return None
+
+
+def fetch_mark_price_divergence_pct(symbol: str) -> Optional[float]:
+    """🆕 الفرق بين آخر سعر صفقة فعلية (Last) والسعر المرجعي المحمي من التلاعب
+    (Mark Price، تحسبه OKX من مؤشر سبوت). فرق كبير = سيولة رقيقة لحظياً أو
+    حركة سعر مصطنعة على العقد نفسه، مو انعكاساً حقيقياً لسعر السوق. ترجع النسبة
+    المئوية للفرق (موجب = السعر الفعلي أعلى من المرجعي، والعكس)."""
+    inst_id = _to_inst_id(symbol)
+    error_key = f"mark_price:{symbol}"
+    resp = _public_get(f"/api/v5/public/mark-price?instType=SWAP&instId={inst_id}", error_key=error_key)
+    if not resp or resp.get("code") != "0" or not resp.get("data"):
+        return None
+    try:
+        mark_px = float(resp["data"][0].get("markPx", 0) or 0)
+        ticker_resp = _public_get(f"/api/v5/market/ticker?instId={inst_id}", error_key=error_key)
+        if not ticker_resp or not ticker_resp.get("data"):
+            return None
+        last_px = float(ticker_resp["data"][0].get("last", 0) or 0)
+        if mark_px <= 0 or last_px <= 0:
+            return None
+        last_error.pop(error_key, None)
+        return ((last_px - mark_px) / mark_px) * 100.0
+    except Exception as e:
+        last_error[error_key] = f"خطأ أثناء معالجة السعر المرجعي: {type(e).__name__}: {e}"
+        return None
+
+
+def fetch_top_trader_long_short_ratio(symbol: str) -> Optional[float]:
+    """🆕 نسبة شراء/بيع **كبار المتداولين تحديداً** (Top Trader Accounts) —
+    أدق بكثير من نسبة السوق العام (اللي فيها ضجيج كبير من متداولين أفراد
+    عشوائيين). ترجع نسبة بين -1 (كل الكبار Short) و1 (كل الكبار Long)."""
+    inst_id = _to_inst_id(symbol)
+    error_key = f"top_trader_ratio:{symbol}"
+    resp = _public_get(f"/api/v5/rubik/stat/contracts/long-short-account-ratio-contract-top-trader?instId={inst_id}&period=5m&limit=1", error_key=error_key)
+    if not resp or resp.get("code") != "0" or not resp.get("data"):
+        return None
+    try:
+        # صيغة الاستجابة: [ts, longShortAccRatio]
+        ratio = float(resp["data"][0][1])
+        # نحوّل النسبة (عادة موجبة، شراء/بيع) إلى مقياس -1 إلى 1 (تناظري مع بقية مؤشراتنا)
+        last_error.pop(error_key, None)
+        if ratio <= 0:
+            return None
+        return (ratio - 1.0) / (ratio + 1.0)
+    except Exception as e:
+        last_error[error_key] = f"خطأ أثناء معالجة نسبة كبار المتداولين: {type(e).__name__}: {e}"
+        return None
+
+
+def fetch_index_price_divergence_pct(symbol: str) -> Optional[float]:
+    """🆕 الفرق بين سعر OKX الفعلي وسعر المؤشر المُجمَّع من عدة منصات (Index) —
+    فرق كبير يوحي بحركة خاصة بمنصة OKX تحديداً (سيولة رقيقة محلية أو خلل لحظي)،
+    مو حركة سوق حقيقية معترف فيها بكل مكان."""
+    inst_id = symbol.upper().replace("USDT", "-USDT").replace("--", "-")
+    error_key = f"index_price:{symbol}"
+    resp = _public_get(f"/api/v5/market/index-tickers?instId={inst_id}", error_key=error_key)
+    if not resp or resp.get("code") != "0" or not resp.get("data"):
+        return None
+    try:
+        index_px = float(resp["data"][0].get("idxPx", 0) or 0)
+        ticker_resp = _public_get(f"/api/v5/market/ticker?instId={_to_inst_id(symbol)}", error_key=error_key)
+        if not ticker_resp or not ticker_resp.get("data"):
+            return None
+        last_px = float(ticker_resp["data"][0].get("last", 0) or 0)
+        if index_px <= 0 or last_px <= 0:
+            return None
+        last_error.pop(error_key, None)
+        return ((last_px - index_px) / index_px) * 100.0
+    except Exception as e:
+        last_error[error_key] = f"خطأ أثناء معالجة سعر المؤشر: {type(e).__name__}: {e}"
+        return None
+
+
 _oi_history: Dict[str, list] = {}
 OI_HISTORY_MAX_AGE_MS = 45 * 60 * 1000
 OI_HISTORY_MAX_POINTS = 12
