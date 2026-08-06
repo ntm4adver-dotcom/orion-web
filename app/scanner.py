@@ -558,6 +558,12 @@ class ScannerState:
                 time.sleep(0.15)
                 k5m = _fetch("5m", 1000, 220)      # 1000 شمعة 5 دقايق ≈ 3.5 يوم
                 time.sleep(0.15)
+                # 🆕 فريم الدقيقة (بطلب صريح): للسكالب الحقيقي — الدخول والوقف
+                # يُحسبان على مقياس الدقيقة (مسافة ضيقة حقيقية)، والفريمات الأكبر
+                # تبقى بس لتحديد الاتجاه العام (نمشي معه، ما نحسب عليه حجم الصفقة).
+                # 1000 شمعة دقيقة ≈ 16.7 ساعة — كافية لسياق سكالب قصير المدى.
+                k1m = _fetch("1m", 1000, 300)
+                time.sleep(0.15)
                 k_daily = _fetch("1d", 500, 100)   # 500 شمعة يومية ≈ 1.4 سنة (يومي لا يحتاج 1000، أطول أفق زمني أصلاً)
 
                 if len(k5m) < 30 or len(k1h) < 60:
@@ -566,7 +572,7 @@ class ScannerState:
                         db.add_log(f"▫️ {symbol}: بيانات غير كافية للتحليل — السبب: {reason}")
                     else:
                         db.add_log(f"▫️ {symbol}: بيانات غير كافية للتحليل.")
-                    incomplete_data_notes.append(f"{symbol}: نقص بالشموع (4س={len(k4h)}, 1س={len(k1h)}, 15د={len(k15m)}, 5د={len(k5m)}, يومي={len(k_daily)})" + (f" — {reason}" if reason else ""))
+                    incomplete_data_notes.append(f"{symbol}: نقص بالشموع (4س={len(k4h)}, 1س={len(k1h)}, 15د={len(k15m)}, 5د={len(k5m)}, دقيقة={len(k1m)}, يومي={len(k_daily)})" + (f" — {reason}" if reason else ""))
                     # إذا صرنا محظورين أثناء الفحص، نوقف بقية الدورة فوراً بدل تكرار المحاولة على كل عملة
                     if hasattr(exchange, "get_ban_status") and exchange.get_ban_status():
                         db.add_log(f"⏸️ تم إيقاف بقية الدورة — {exchange.get_ban_status()}")
@@ -593,7 +599,7 @@ class ScannerState:
 
                 db.add_log(
                     f"📥 [{symbol}] تم سحب: 4س={len(k4h)} | 1س={len(k1h)} | 15د={len(k15m)} | "
-                    f"5د={len(k5m)} | يومي={len(k_daily)} شمعة | OI={_fmt(micro.oi_change_pct, '%')} | "
+                    f"5د={len(k5m)} | دقيقة={len(k1m)} | يومي={len(k_daily)} شمعة | OI={_fmt(micro.oi_change_pct, '%')} | "
                     f"تمويل={_fmt(micro.funding_rate)} | عمق السوق={_fmt(micro.ob_imbalance)} | "
                     f"ضغط متداولين={_fmt(micro.taker_pressure)} | CVD={_fmt(micro.cvd_pct, '%')}"
                 )
@@ -614,6 +620,7 @@ class ScannerState:
                 k1h_confirmed = k1h[:-1] if len(k1h) > 1 else k1h
                 k15m_confirmed = k15m[:-1] if len(k15m) > 1 else k15m
                 k5m_confirmed = k5m[:-1] if len(k5m) > 1 else k5m
+                k1m_confirmed = k1m[:-1] if len(k1m) > 1 else k1m
                 k_daily_confirmed = k_daily[:-1] if len(k_daily) > 1 else k_daily
 
                 # 🆕 فلتر جودة استباقي على مستوى العملة نفسها (بطلب صريح: حل جذري
@@ -632,7 +639,7 @@ class ScannerState:
                 for strategy_key, strategy_fn in get_active_strategies(
                         settings.get("active_strategy", "explosive_breakout"),
                         settings.get("combined_enabled_strategies", "")):
-                    result = strategy_fn(symbol, k4h_confirmed, k1h_confirmed, k15m_confirmed, k5m_confirmed, k_daily_confirmed, micro=micro, current_price=current_live_price, settings=settings)
+                    result = strategy_fn(symbol, k4h_confirmed, k1h_confirmed, k15m_confirmed, k5m_confirmed, k_daily_confirmed, micro=micro, current_price=current_live_price, settings=settings, k1m=k1m_confirmed)
                     if result is None:
                         continue
                     matched_any = True

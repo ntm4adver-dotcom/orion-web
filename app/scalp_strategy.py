@@ -31,17 +31,23 @@ def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
                              k5m: List[Kline], k_daily: List[Kline],
                              micro: Optional[MarketMicrostructure] = None,
                              trace: Optional[list] = None,
-                             current_price: Optional[float] = None, **kwargs) -> Optional[AnalysisResult]:
+                             current_price: Optional[float] = None,
+                             k1m: Optional[List[Kline]] = None, **kwargs) -> Optional[AnalysisResult]:
     def _log(label, value, ok=None):
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})
 
-    # 🔴 نفس إصلاح فيبوناتشي الترند: _get_bias تعتمد HMA بفترة 50، فيحتاج حد أدنى
-    # يضمن بيانات كافية فعلياً (مو تعديل صامت لفترة أقصر يعطي قراءة غير موثوقة)
+    # 🔴 إصلاح معماري جوهري (بطلب صريح): "دخول ووقف السكالب على فريم الدقيقة،
+    # الفريمات الأكبر بس لتحديد الاتجاه العام ونمشي معه". اتجاه 15د/الساعة أعلاه
+    # يبقى كما هو (هذا صحيح أصلاً — فريم أكبر للاتجاه). لكن آلية الدخول الفعلية
+    # (خط EMA المرجعي، منطقة التراجع، شمعة التأكيد، شمعة المتابعة، ATR للوقف)
+    # تتحول الآن لفريم الدقيقة — مسافة وقف حقيقية بمقياس سكالب، مو بمقياس 5
+    # دقايق (اللي كان يعطي أحياناً وقف أوسع من اللازم لصفقة "سكالب" حقيقية).
+    entry_tf = k1m if k1m and len(k1m) >= 200 else k5m  # احتياط: لو الدقيقة غير متوفرة، نرجع لـ5د بدل ما نفشل كليّاً
     if len(k5m) < 200 or len(k15m) < 55 or len(k1h) < 55:
         _log("عدد الشموع كافٍ (5د≥200، 15د/1س≥55)", f"5د={len(k5m)}, 15د={len(k15m)}, 1س={len(k1h)}", False)
         return None
-    _log("عدد الشموع كافٍ", f"5د={len(k5m)}, 15د={len(k15m)}, 1س={len(k1h)}", True)
+    _log("عدد الشموع كافٍ", f"5د={len(k5m)}, 15د={len(k15m)}, 1س={len(k1h)}, دقيقة={len(entry_tf)}", True)
 
     # 🔴 إصلاح جذري (دائرية منطقية خطيرة مكتشفة): كانت EMA9/21 تُحسب من **كل** شموع
     # 5 دقائق، بما فيها شمعة المتابعة (آخر شمعة) اللي نقارن موقعها لاحقاً بالنسبة
@@ -49,7 +55,7 @@ def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
     # له — دائرية تعطي قراءة مضللة، خصوصاً وقت حركة سعرية حادة بالشمعة الأخيرة.
     # الآن نحسب EMA من الشموع **قبل** الثلاث شموع المستخدمة بالنمط (تراجع+تأكيد+
     # متابعة) فقط — خط مرجعي مستقل تماماً وثابت، مو متأثر بالشموع قيد الفحص.
-    closes5m_reference = [k.close for k in k5m[:-3]] if len(k5m) > 3 else [k.close for k in k5m]
+    closes5m_reference = [k.close for k in entry_tf[:-3]] if len(entry_tf) > 3 else [k.close for k in entry_tf]
     ema9_5m = hma(closes5m_reference, 9)
     ema21_5m = hma(closes5m_reference, 21)
     trend5m = "صاعد" if ema9_5m >= ema21_5m else "هابط"
@@ -68,11 +74,11 @@ def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
     side = "Long" if trend == "صاعد" else "Short"
     _log("اتجاه فريم 5 دقائق (EMA9 مقابل EMA21)", trend5m)
 
-    atr5m = atr(k5m, 14)
+    atr5m = atr(entry_tf, 14)
     if atr5m <= 0:
         return None
 
-    if len(k5m) < 4:
+    if len(entry_tf) < 4:
         return None
 
     # 🔴 إصلاح جذري مبني على ملاحظة دقيقة: كان الدخول يعتمد على آخر شمعة متوفرة
@@ -80,9 +86,9 @@ def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
     # حقيقياً ومو مجرد ذيل رفض مؤقت (Wick) ينعكس فوراً بالشمعة التالية. الآن نعتبر
     # الشمعة قبل الأخيرة هي "شمعة التأكيد"، ونشترط شمعة تالية (الأحدث) تثبت
     # المتابعة الحقيقية ولا تبطل النمط بالرجوع تحت/فوق EMA9 مرة ثانية.
-    confirm_candle = k5m[-2]
-    prev = k5m[-3]
-    follow_through = k5m[-1]
+    confirm_candle = entry_tf[-2]
+    prev = entry_tf[-3]
+    follow_through = entry_tf[-1]
 
     if side == "Long":
         pulled_back = (prev.low <= ema9_5m + atr5m * 0.3) and (prev.low >= ema9_5m - atr5m * 1.5)
@@ -109,7 +115,7 @@ def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
 
     last = follow_through  # الدخول يعتمد على أحدث سعر متاح فعلياً بعد التأكيد الكامل
 
-    vols = [k.volume for k in k5m[-22:-2]]
+    vols = [k.volume for k in entry_tf[-22:-2]]
     avg_vol = sum(vols) / len(vols) if vols else 1.0
     vol_ratio = (confirm_candle.volume / avg_vol) if avg_vol > 0 else 0
     _log("معدل حجم شمعة الارتداد مقابل المتوسط", f"{vol_ratio:.2f}x")
@@ -176,8 +182,13 @@ def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
     # 🆕 سقف احترازي (تناسق مع stop_hunt وcrowd_trap): حتى لو النافذة صغيرة (3
     # شموع بس)، شمعة شاذة وحدة منهم (فتيلة استثنائية) ممكن تبعد الوقف بشكل غير
     # متناسب. نحد أقصى مسافة وقف مقبولة بـ3×ATR — بغض النظر عن مصدرها.
+    # 🔴 سقف مطلق إضافي (بطلب صريح، بعد فحص fabio_scalper لنفس المشكلة): 3×ATR
+    # وحده مو كافٍ لعملة شديدة التقلب — يقدر يتضخم لمسافة تناقض مفهوم "السكالب"
+    # (مخاطرة صغيرة، مدة قصيرة). نضيف سقف % مطلق من السعر كمان، بغض النظر عن
+    # ATR — أضيق شوي من fabio_scalper (1.2% بدل 1.8%) لأن هذي الاستراتيجية
+    # أسرع/أنقى (فريم 5د بس، بدون سياق هيكلي أبطأ يبرر مخاطرة أوسع).
     if atr5m > 0:
-        max_stop_distance = atr5m * 3.0
+        max_stop_distance = min(atr5m * 3.0, entry_price * 0.012)
         if side == "Long":
             stop_loss = max(stop_loss, entry_price - max_stop_distance)
         else:

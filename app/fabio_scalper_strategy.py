@@ -33,7 +33,8 @@ from .volume_profile import compute_volume_profile
 def analyze_fabio_scalper(symbol: str, k4h, k1h, k15m, k5m, k_daily,
                            micro: Optional[MarketMicrostructure] = None,
                            trace: Optional[list] = None,
-                           current_price: Optional[float] = None, **kwargs) -> Optional[AnalysisResult]:
+                           current_price: Optional[float] = None,
+                           k1m: Optional[list] = None, **kwargs) -> Optional[AnalysisResult]:
     def _log(label, value, ok=None):
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})
@@ -66,9 +67,14 @@ def analyze_fabio_scalper(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     if profile is None:
         return None
 
-    # 🔴 إصلاح جوهري: نستخدم السعر الحي الحقيقي المُمرَّر من السكانر لو متوفر
+    # 🔴 إصلاح معماري جوهري (بطلب صريح): "دخول ووقف السكالب على فريم الدقيقة،
+    # الفريمات الأكبر بس للاتجاه" — البروفايل الحجمي (POC/VAH/VAL) يبقى محسوباً
+    # من 15د (سياق هيكلي، صحيح يبقى كذا)، لكن ATR اللي يحدد مسافة الوقف الفعلية
+    # لازم يعكس تقلب فريم الدخول الحقيقي (دقيقة)، مو 15 دقيقة — وإلا الوقف يطلع
+    # بمقياس "صفقة أكبر بكثير من سكالب حقيقي" (بالضبط مشكلة BEATUSDT).
     current_price = current_price if current_price is not None else (k5m[-1].close if k5m else window[-1].close)
-    atr_val = atr(k15m, 14)
+    entry_tf = k1m if k1m and len(k1m) >= 20 else k5m  # احتياط: لو الدقيقة غير متوفرة، نرجع لـ5د بدل ما نفشل كليّاً
+    atr_val = atr(entry_tf, 14)
     if atr_val <= 0:
         return None
 
@@ -132,7 +138,7 @@ def analyze_fabio_scalper(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     # كمان إن **آخر شمعة 5 دقائق مكتملة فعلاً** أغلقت متجاوزة المستوى، مو بس
     # السعر اللحظي — تأكيد حقيقي بقناعة، مو نطة عابرة.
     if is_imbalance and k5m:
-        last_closed_candle = k5m[-2] if len(k5m) > 1 else k5m[-1]
+        last_closed_candle = entry_tf[-2] if len(entry_tf) > 1 else entry_tf[-1]
         candle_confirms = (last_closed_candle.close > profile["vah"] * 1.0005
                             or last_closed_candle.close < profile["val"] * 0.9995)
         if not candle_confirms:
@@ -146,8 +152,14 @@ def analyze_fabio_scalper(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         🔴 رُفع من 0.6% إلى 0.8% بدليل حقيقي: فحص 38 صفقة مغلقة أظهر 45% منها بوقف
         قريب جداً من الحد القديم (0.6%)، و55% من هالحالات كانت "قريبة الفشل" (ضجيج
         طبيعي بعملات متقلبة يضرب الوقف قبل اكتمال الحركة الحقيقية). 0.8% نفس القيمة
-        اللي أثبتت نتائج جيدة بفيبوناتشي الترند (أقوى استراتيجية حالياً بالعائد)."""
-        return max(atr_val * atr_multiple, current_price * price_pct_floor)
+        اللي أثبتت نتائج جيدة بفيبوناتشي الترند (أقوى استراتيجية حالياً بالعائد).
+        🔴 سقف أقصى جديد (بطلب صريح، بعد صفقة BEATUSDT حقيقية): كان فيه حد أدنى
+        بس، بدون أي حد أقصى — لعملة متقلبة (ATR مرتفع نسبة للسعر)، الهامش يتضخم
+        بلا حدود ويخلي "صفقة سكالب" توقف بمسافة 3.9%+، بحجم صفقة سوينج كاملة.
+        هذا يناقض جوهر السكالب (مخاطرة صغيرة ومحسوبة، مدة قصيرة). نسقّف الآن
+        عند 1.8% كحد أقصى مطلق، بغض النظر عن تقلب العملة."""
+        raw = max(atr_val * atr_multiple, current_price * price_pct_floor)
+        return min(raw, current_price * 0.018)
 
     # ── الخطوة 3: العدوانية (Aggression) + بناء الصفقة حسب النموذج المناسب ──
     if is_imbalance:

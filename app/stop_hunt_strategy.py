@@ -178,7 +178,8 @@ def _detect_stop_hunt(klines: List[Kline], lookback: int = 50, vol_period: int =
 def analyze_stop_hunt(symbol: str, k4h, k1h, k15m, k5m, k_daily,
                        micro: Optional[MarketMicrostructure] = None,
                        trace: Optional[list] = None,
-                       current_price: Optional[float] = None, **kwargs) -> Optional[AnalysisResult]:
+                       current_price: Optional[float] = None,
+                       k1m: Optional[List[Kline]] = None, **kwargs) -> Optional[AnalysisResult]:
     def _log(label, value, ok=None):
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})
@@ -219,6 +220,35 @@ def analyze_stop_hunt(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         entry_price = current_price
     elif k5m:
         entry_price = k5m[-1].close
+
+    # 🆕 تحسين دقة الوقف بفريم الدقيقة (بطلب صريح): نمط "صيد الاستوبات" نفسه
+    # حدث حقيقي بمقياس الساعة (كسر مستوى تاريخي متعدد الأيام) — هذا يبقى صحيح
+    # يُكتشف بالساعة، مو بالدقيقة (كسر مستوى تاريخي على مقياس دقيقة بلا معنى
+    # هيكلي). لكن بعد ما نتأكد النمط حقيقي، **دقة نقطة الدخول والوقف** تقدر
+    # تتحسن بفريم الدقيقة — بدل الاعتماد بس على هامش مبني من مدى الشمعة
+    # الساعية الكاملة (اللي ممكن يعطي وقف أوسع من اللازم لحركة سحب سيولة
+    # سريعة فعلياً انتهت خلال دقائق قليلة من الساعة، مو الساعة كاملة).
+    if k1m and len(k1m) >= 20:
+        recent_1m = k1m[-15:]  # آخر ~15 دقيقة — نافذة كافية تغطي حركة السحب الفعلية بدقة
+        atr_1m = atr(k1m, 14)
+        if atr_1m > 0:
+            if side == "Long":
+                minute_low = min(k.low for k in recent_1m)
+                minute_sl_candidate = minute_low - atr_1m * 1.0
+                # نستخدم الأضيق بين الوقف الساعي والوقف الدقيقي، **بشرط** ما ينزل
+                # عن الحد الأدنى المطلق (0.4% من السعر) — نفس فلسفة عدم إعطاء
+                # وقف ضيق جداً يُضرب بضوضاء عادية
+                tighter_sl = max(minute_sl_candidate, entry_price * 0.996)
+                if tighter_sl > sl:  # أضيق فعلاً (أقرب لسعر الدخول) من الوقف الساعي
+                    _log("تحسين الوقف بفريم الدقيقة", f"من {sl:.6g} إلى {tighter_sl:.6g} (أدق، مبني على آخر 15 دقيقة فعلية)", True)
+                    sl = tighter_sl
+            else:
+                minute_high = max(k.high for k in recent_1m)
+                minute_sl_candidate = minute_high + atr_1m * 1.0
+                tighter_sl = min(minute_sl_candidate, entry_price * 1.004)
+                if tighter_sl < sl:
+                    _log("تحسين الوقف بفريم الدقيقة", f"من {sl:.6g} إلى {tighter_sl:.6g} (أدق، مبني على آخر 15 دقيقة فعلية)", True)
+                    sl = tighter_sl
 
     # تحقق أمان: نتأكد الاتجاه لسا سليم منطقياً بعد تحديث سعر الدخول (نادر جداً
     # يصير خلاف كذا، لكن حماية إضافية بدون كلفة)
