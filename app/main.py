@@ -12,7 +12,7 @@ from . import backup_scheduler
 from . import gdrive_backup
 from . import backtest
 from .strategies import get_strategy_options, strategy_label
-from .auth import is_logged_in, APP_PASSWORD
+from .auth import is_logged_in, check_password
 from .scanner import scanner_state
 
 BASE_DIR = os.path.dirname(__file__)
@@ -44,7 +44,7 @@ def login_page(request: Request):
 
 @app.post("/login")
 def login_submit(request: Request, password: str = Form(...)):
-    if password == APP_PASSWORD:
+    if check_password(password):
         request.session["logged_in"] = True
         return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse("login.html", {"request": request, "error": "كلمة المرور غير صحيحة"})
@@ -268,10 +268,14 @@ def api_diagnose(request: Request, symbol: str):
         trace: list = []
         try:
             # لو الاستراتيجية تدعم معامل trace نمرره، وإلا نستدعيها بدونه بدون ما نكسر التوافق
+            # 🔴 إصلاح باق حقيقي (اكتُشف بمراجعة شاملة): كان settings الحقيقية (s) ما
+            # تُمرَّر هنا إطلاقاً — يعني أي استراتيجية تقرأ عتبات من الإعدادات (زي
+            # climactic_reversal) كانت تستخدم القيم الافتراضية دايماً بصفحة التشخيص،
+            # حتى لو المستخدم عدّلها فعلياً — نتيجة مختلفة عن الفحص الحي الحقيقي.
             if "trace" in inspect.signature(fn).parameters:
-                result = fn(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro, trace=trace)
+                result = fn(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro, trace=trace, settings=s)
             else:
-                result = fn(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro)
+                result = fn(symbol, k4h, k1h, k15m, k5m, k_daily, micro=micro, settings=s)
                 trace = [{"check": "ℹ️ هذي الاستراتيجية لا تدعم التتبع التفصيلي بعد", "value": "", "ok": None}]
         except Exception as e:
             result = None

@@ -39,6 +39,15 @@
     <div><label>أداء ضعيف (أقل من %)</label><input type="number" id="strat-weak-th" value="{{ s.strategy_learning_weak_threshold }}" onchange="saveThresholds()"></div>
     <div><label>أداء قوي (أعلى من أو يساوي %)</label><input type="number" id="strat-strong-th" value="{{ s.strategy_learning_strong_threshold }}" onchange="saveThresholds()"></div>
   </div>
+
+  <h4 style="margin:16px 0 8px;">🚨 مستوى العملة الكلي (بدون تجزئة حسب الاتجاه أو الاستراتيجية)</h4>
+  <p class="muted" style="font-size:12px; margin-bottom:8px;">
+    يمسك عملة تفشل بكل الاتجاهات وكل الاستراتيجيات معاً — نمط يضيع بين مستويي العملة والاستراتيجية العاديين لأن كل وحدة لحالها ما توصل الحد الأدنى.
+  </p>
+  <div class="row">
+    <div><label>الحد الأدنى من الصفقات المغلقة</label><input type="number" id="overall-min-trades" value="{{ s.coin_overall_learning_min_trades }}" onchange="saveThresholds()"></div>
+    <div class="switch" style="align-items:center;"><input type="checkbox" id="hard-block-toggle" {{ 'checked' if s.is_coin_hard_block_enabled }} onchange="saveThresholds()"> <label style="margin:0;">رفض قاطع (مو بس رفع حد أدنى) لعملة سجلها الكلي كارثي</label></div>
+  </div>
   <p class="muted" style="margin-top:8px; font-size:12px;">⚠️ التذكير المهم: نسبة "الاحتمال %" المعروضة بكل إشارة هي تقييم داخلي بمعادلة نقاط، مو نسبة نجاح مُختبرة تاريخياً. محرك التعلم هذا هو الآلية الوحيدة اللي تربط القرارات فعلياً بنتائج حقيقية من السوق.</p>
 </div>
 
@@ -86,6 +95,8 @@ function buildLearningPayload(learningChecked){
     strategy_learning_min_trades: document.getElementById('strat-min-trades').value,
     strategy_learning_weak_threshold: document.getElementById('strat-weak-th').value,
     strategy_learning_strong_threshold: document.getElementById('strat-strong-th').value,
+    coin_overall_learning_min_trades: document.getElementById('overall-min-trades').value,
+    is_coin_hard_block_enabled: document.getElementById('hard-block-toggle').checked,
   };
 }
 

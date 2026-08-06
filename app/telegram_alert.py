@@ -42,9 +42,11 @@ def send_text_alert(token: str, chat_ids_string: str, message: str):
 
 def send_signal_alert(token: str, chat_ids_string: str, symbol: str, direction: str,
                        entry_price: float, take_profit: float, stop_loss: float,
-                       probability: int, quality: str, behavior: str, is_instant: bool = False):
+                       probability: int, quality: str, behavior: str, is_instant: bool = False,
+                       exchange_name: str = ""):
     dir_emoji = "🟢 صعود (Long)" if direction == "Long" else "🔴 هبوط (Short)"
     dir_hashtag = "#Long" if direction == "Long" else "#Short"
+    exchange_hashtag = f"#{exchange_name.upper()}Futures" if exchange_name else "#CryptoFutures"
     entry_type_desc = "⚡ دخول فوري (Instant Entry)" if is_instant else "⏳ أمر معلق (Limit Order)"
     sl_desc = "❌ بدون وقف خسارة (No SL)" if stop_loss <= 0 else f"{stop_loss:.6g}"
     message = (
@@ -56,7 +58,7 @@ def send_signal_alert(token: str, chat_ids_string: str, symbol: str, direction: 
         f"🛑 الاستوب (SL): {sl_desc}\n\n"
         f"📊 نسبة النجاح: {probability}% (تصنيف {quality})\n"
         f"🧩 التحليل: {behavior}\n\n"
-        f"{dir_hashtag} #BinanceFutures #OrionBot"
+        f"{dir_hashtag} {exchange_hashtag} #OrionBot"
     )
     _send_to_all(token, chat_ids_string, message)
 

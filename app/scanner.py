@@ -302,6 +302,27 @@ def evaluate_signal_filters(settings: dict, symbol: str, strategy_key: str, resu
         if result.side == "Short" and (100 - buy_pct) < settings["min_4h_buyers_percentage"]:
             return False, "نسبة المبيعات غير كافية", "4h_buyers_filter"
 
+    # 🔴 إصلاح جذري + نقل معماري (بطلب صريح، بعد تشخيص عميق لنمط خسائر حقيقي،
+    # وبعد اكتشاف إضافي إن هذا الفحص كان بمكان يستدعيه الفحص الحي بس، مو
+    # الباك-تست): كان الكود يمحي هدف كل استراتيجية المحسوب من هيكل سوق حقيقي
+    # (فيبوناتشي، VAH/VAL، Measured Move...) ويستبدله برقم رياضي أعمى
+    # (مخاطرة×3) بدون أي علاقة بأقرب مقاومة/دعم فعلي. الحل: حد أدنى كفلتر
+    # رفض، مو استبدال قسري — لو هدف الاستراتيجية الحقيقي يحقق الحد الأدنى،
+    # نُبقيه كما هو. لو أقل، نرفض الصفقة كليّاً بدل تمديد الهدف تعسفياً.
+    # موجود هنا الآن (evaluate_signal_filters) بدل _process_signal عشان
+    # الفحص الحي والباك-تست يطبّقان نفس المنطق بالضبط، بدون أي اختلاف سلوك.
+    if settings.get("is_fixed_rr_enabled", False):
+        min_rr = float(settings.get("fixed_rr_value", 3.0))
+        if min_rr > 0:
+            risk_distance = abs(result.entry_price - result.stop_loss)
+            reward_distance = abs(result.take_profit - result.entry_price)
+            if risk_distance > 0:
+                actual_rr = reward_distance / risk_distance
+                if actual_rr < min_rr:
+                    return False, f"عائد/مخاطرة الهدف الحقيقي (هيكل السوق) = 1:{actual_rr:.2f}، أقل من الحد الأدنى المطلوب 1:{min_rr:.1f} — رفض بدل تمديد الهدف تعسفياً", "min_structural_rr_filter"
+                result.rr = round(actual_rr, 2)
+                result.behavior = f"🎯 [هدف واقعي من هيكل السوق، عائد/مخاطرة محقَّق ≥ 1:{min_rr:.1f}] " + result.behavior
+
     return True, "", ""
 
 
@@ -612,29 +633,13 @@ class ScannerState:
             )
 
     def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k15m, k5m, btc_trend=None, btc_klines=None, market_regime_er=None, current_live_price=None, micro=None):
-        # 🔴 إصلاح جذري (بطلب صريح، بعد تشخيص عميق لنمط خسائر حقيقي): كان هذا
-        # المنطق يمحي هدف كل استراتيجية المحسوب من هيكل سوق حقيقي (فيبوناتشي،
-        # VAH/VAL، Measured Move...) ويستبدله برقم رياضي أعمى (مخاطرة×3) بدون
-        # أي علاقة بأقرب مقاومة/دعم فعلي — فالسعر كان يرتد عند مستوى حقيقي
-        # (ما استهدفناه أصلاً) قبل ما يوصل الرقم الأعمى البعيد، محوّلاً صفقات
-        # كانت لتربح لو الهدف واقعي إلى خسائر كاملة.
-        # الحل: الحد الأدنى للعائد/مخاطرة يصير **فلتر رفض**، مو استبدال قسري —
-        # لو هدف الاستراتيجية الحقيقي أصلاً يحقق الحد الأدنى المطلوب، نُبقيه
-        # كما هو (هدف واقعي مبني على هيكل السوق). لو أقل من الحد الأدنى، نرفض
-        # الصفقة كليّاً بدل ما نمدّ الهدف تعسفياً بعيداً عن أي مستوى حقيقي.
-        if settings.get("is_fixed_rr_enabled", False):
-            min_rr = float(settings.get("fixed_rr_value", 3.0))
-            if min_rr > 0:
-                risk_distance = abs(result.entry_price - result.stop_loss)
-                reward_distance = abs(result.take_profit - result.entry_price)
-                if risk_distance > 0:
-                    actual_rr = reward_distance / risk_distance
-                    if actual_rr < min_rr:
-                        db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: عائد/مخاطرة الهدف الحقيقي (هيكل السوق) = 1:{actual_rr:.2f}، أقل من الحد الأدنى المطلوب 1:{min_rr:.1f} — رفض بدل تمديد الهدف تعسفياً.")
-                        db.increment_rejection_counter("min_structural_rr_filter")
-                        return
-                    result.rr = round(actual_rr, 2)
-                    result.behavior = f"🎯 [هدف واقعي من هيكل السوق، عائد/مخاطرة محقَّق ≥ 1:{min_rr:.1f}] " + result.behavior
+        # 🔴 إصلاح موقع معماري (اكتُشف بمراجعة شاملة): فلتر الحد الأدنى لعائد/مخاطرة
+        # الهدف الحقيقي (min_structural_rr_filter) كان هنا بـ_process_signal —
+        # دالة خاصة بالفحص الحي بس، ما يستدعيها الباك-تست إطلاقاً. يعني نتائج
+        # الباك-تست كانت تختبر صفقات كان الفحص الحي يرفضها فعلياً (عائد/مخاطرة
+        # أقل من الحد الأدنى)، فتختلف نتائج الباك-تست جوهرياً عن السلوك الحي.
+        # نُقل الآن لـevaluate_signal_filters (الدالة المشتركة اللي كلا المسارين
+        # يستدعيانها بالضبط) — تناسق كامل بين الفحص الحي والباك-تست من الآن.
 
         # 🔴 current_live_price الآن يُمرَّر صراحة من المستدعي (يعكس السعر اللحظي
         # الحقيقي وقت الفحص) — k4h/k1h/k15m/k5m هنا أصبحت نسخ "مؤكَّدة" (بدون آخر
@@ -731,6 +736,7 @@ class ScannerState:
                 settings["telegram_token"], settings["telegram_chat_ids"], result.symbol,
                 result.side, result.entry_price, result.take_profit, result.stop_loss,
                 result.prob, result.quality, result.behavior,
+                exchange_name=settings.get("exchange", ""),
             )
 
         if settings["okx_is_auto_trading_enabled"]:
