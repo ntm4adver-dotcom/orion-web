@@ -150,6 +150,45 @@
       </div>
 
       <div class="card" style="margin-top:14px; background:rgba(56,189,248,0.05);">
+        <h3 style="margin-top:0; font-size:15px;">🛡️ فلتر حماية عام — فرق السعر عن Mark/Index Price</h3>
+        <div class="switch">
+          <input type="checkbox" name="is_price_divergence_filter_enabled" {{ 'checked' if s.is_price_divergence_filter_enabled }}>
+          <label style="margin:0;">رفض أي صفقة (بكل الاستراتيجيات) لو السعر المتداول يبتعد كثير عن السعر المرجعي/المؤشر</label>
+        </div>
+        <p class="muted" style="font-size:12px; line-height:1.8; margin-top:8px;">
+          <b>Mark Price</b> هو السعر المرجعي المحمي من التلاعب اللحظي (تحسبه OKX من مؤشر سبوت)، و<b>Index
+          Price</b> مؤشر مُجمَّع من عدة منصات (مو OKX بس). لو السعر المتداول فعلياً على العقد يبتعد كثير عن
+          الاثنين، هذا دليل سيولة رقيقة لحظياً أو حركة مصطنعة خاصة بمنصة OKX تحديداً — وقت خطير للدخول
+          بغض النظر عن جودة الإشارة نفسها.
+        </p>
+        <div class="row" style="margin-top:10px;">
+          <div>
+            <label>أقصى فرق مقبول (%)</label>
+            <input type="number" step="0.05" min="0.1" name="max_price_divergence_pct" value="{{ s.max_price_divergence_pct }}">
+            <p class="muted" style="font-size:11px; margin-top:4px;">الافتراضي 0.5% — أعلى من هذا الرقم يعني رفض الصفقة كاملة</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px; background:rgba(56,189,248,0.05);">
+        <h3 style="margin-top:0; font-size:15px;">🐋 توافق كبار المتداولين (Top Trader Ratio)</h3>
+        <div class="switch">
+          <input type="checkbox" name="is_top_trader_filter_enabled" {{ 'checked' if s.is_top_trader_filter_enabled }}>
+          <label style="margin:0;">رفض أي صفقة (بكل الاستراتيجيات) بدون توافق كبار المتداولين مع اتجاهها</label>
+        </div>
+        <p class="muted" style="font-size:12px; line-height:1.8; margin-top:8px;">
+          نسبة شراء/بيع <b>كبار المتداولين تحديداً</b> (Top Trader Accounts) — أدق بكثير من انحياز السوق
+          العام، لأنها تعكس مراكز المحترفين، مو ضجيج المتداولين الأفراد العشوائي.
+        </p>
+        <div class="row" style="margin-top:10px;">
+          <div>
+            <label>أقل انحياز مطلوب (-1 إلى 1)</label>
+            <input type="number" step="0.05" min="0" max="1" name="min_top_trader_alignment" value="{{ s.min_top_trader_alignment }}">
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px; background:rgba(56,189,248,0.05);">
         <h3 style="margin-top:0; font-size:15px;">🌊 عتبات "الحركة الحاسمة" — ارتداد فوليوم التصريف</h3>
         <p class="muted" style="font-size:12px; line-height:1.8;">
           كانت هذي الأرقام ثابتة بالكود، صارت إعدادات قابلة للتعديل (بطلب صريح بعد مراجعة فترة نتائجها كانت

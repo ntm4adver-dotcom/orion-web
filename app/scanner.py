@@ -164,6 +164,31 @@ def evaluate_signal_filters(settings: dict, symbol: str, strategy_key: str, resu
         if not aligned:
             return False, f"ضغط المتداولين الفعليين غير متوفر أو غير كافٍ لدعم اتجاه الصفقة ({tp if tp is not None else 'غير متوفر'})", "taker_pressure_filter"
 
+    # 🆕 فلتر حماية عام (Mark/Index Price Divergence) — بطلب صريح، يشتغل على
+    # **كل** الاستراتيجيات بدون استثناء (خطر السيولة الرقيقة/التلاعب اللحظي
+    # مو خاص باستراتيجية معينة). لو السعر المتداول فعلياً يبتعد كثير عن السعر
+    # المرجعي المحمي من التلاعب (Mark Price) أو مؤشر مُجمَّع من عدة منصات
+    # (Index Price)، هذا دليل سيولة رقيقة لحظياً أو حركة مصطنعة على العقد نفسه
+    # بمنصة OKX تحديداً — وقت خطير للدخول بغض النظر عن جودة الإشارة نفسها.
+    if settings.get("is_price_divergence_filter_enabled", False) and micro is not None:
+        max_div = float(settings.get("max_price_divergence_pct", 0.5))
+        mark_div = micro.mark_price_divergence_pct
+        index_div = micro.index_price_divergence_pct
+        worst_div = max(abs(mark_div) if mark_div is not None else 0, abs(index_div) if index_div is not None else 0)
+        if (mark_div is not None or index_div is not None) and worst_div > max_div:
+            return False, f"فرق كبير بين السعر المتداول والسعر المرجعي/المؤشر ({worst_div:.2f}% > {max_div}%) — سيولة رقيقة أو حركة مصطنعة لحظياً", "price_divergence_filter"
+
+    # 🆕 فلتر توافق كبار المتداولين (Top Trader Ratio) — بطلب صريح، يشتغل على
+    # **كل** الاستراتيجيات بدون استثناء (نفس أسلوب فلتر ضغط المتداولين). أدق
+    # من انحياز السوق العام (long_short_ratio) لأنه مبني على حسابات كبار
+    # المتداولين تحديداً، مو ضجيج المتداولين الأفراد العشوائي.
+    if settings.get("is_top_trader_filter_enabled", False) and micro is not None:
+        ttr = micro.top_trader_ratio
+        min_ratio = float(settings.get("min_top_trader_alignment", 0.1))
+        aligned = ttr is not None and ((result.side == "Long" and ttr > min_ratio) or (result.side == "Short" and ttr < -min_ratio))
+        if not aligned:
+            return False, f"انحياز كبار المتداولين غير متوفر أو غير كافٍ لدعم اتجاه الصفقة ({ttr if ttr is not None else 'غير متوفر'})", "top_trader_filter"
+
     # 🔴 إصلاح باق حقيقي (بطلب صريح، بعد ملاحظة daily_breakout ما جابت ولا صفقة):
     # كان الكود يعيد حساب "السعر الحالي" من k5m[-1] — لكن k5m المُمرَّرة هنا هي
     # النسخة **المؤكَّدة** (تستبعد الشمعة الحيّة قيد التكوين)، يعني السعر المحسوب
@@ -364,6 +389,26 @@ class ScannerState:
         self._stop_flag = threading.Event()
         self._trigger_immediate = threading.Event()
         self._notified_transitions = set()
+        self._missing_data_notified_at: dict = {}  # 🆕 {symbol: آخر توقيت أُرسل فيه تنبيه نقص بيانات} — يمنع إزعاج تليجرام كل دورة فحص
+
+    def _notify_missing_data_once(self, settings: dict, symbol: str, missing_fields: list):
+        """🆕 إشعار تليجرام لو بيانات حرجة ناقصة/فشل جلبها (بطلب صريح) — مرة
+        وحدة كل ساعة لكل عملة بحد أقصى، عشان ما نغرق تليجرام برسائل متكررة لو
+        المشكلة مستمرة (اتصال منقطع مثلاً)."""
+        now = time.time()
+        last = self._missing_data_notified_at.get(symbol, 0)
+        if now - last < 3600:  # ساعة وحدة كحد أقصى لكل عملة
+            return
+        self._missing_data_notified_at[symbol] = now
+        try:
+            msg = (
+                f"⚠️ نقص بيانات لحظية لعملة {symbol}\n"
+                f"الحقول الناقصة/فشلت: {', '.join(missing_fields)}\n"
+                f"السبب المحتمل: اتصال منقطع بـOKX، أو الـendpoint نفسه غير متاح مؤقتاً."
+            )
+            telegram_alert.send_text_alert(settings["telegram_token"], settings["telegram_chat_ids"], msg)
+        except Exception as e:
+            db.add_log(f"⚠️ فشل إرسال تنبيه نقص البيانات لتليجرام: {e}")
 
     def start(self):
         if self._thread and self._thread.is_alive():
@@ -598,15 +643,35 @@ class ScannerState:
                 if micro.taker_pressure is None:
                     incomplete_data_notes.append(f"{symbol}: بيانات ضغط المتداولين الفعليين (Taker Pressure) غير متوفرة — سيتم رفض كل صفقات الانفجار السعري لهذي العملة بهذي الدورة")
 
-                def _fmt(v, suffix=""):
-                    return f"{v:.3f}{suffix}" if v is not None else "غير متوفر"
+                def _fmt(v, suffix="", decimals=3):
+                    # 🔴 إصلاح باق عرض حقيقي (بطلب صريح): معدل التمويل الحقيقي عادة رقم
+                    # صغير جداً (0.0001 = 0.01% مثلاً) — بـ3 خانات عشرية بس يظهر "0.000"
+                    # دائماً حتى لو البيانات مجلوبة صح فعلياً. رفعنا الدقة الافتراضية،
+                    # ونمرر دقة أعلى صراحة لمعدل التمويل تحديداً بالأسفل.
+                    return f"{v:.{decimals}f}{suffix}" if v is not None else "غير متوفر"
 
                 db.add_log(
                     f"📥 [{symbol}] تم سحب: 4س={len(k4h)} | 1س={len(k1h)} | 15د={len(k15m)} | "
                     f"5د={len(k5m)} | دقيقة={len(k1m)} | يومي={len(k_daily)} شمعة | OI={_fmt(micro.oi_change_pct, '%')} | "
-                    f"تمويل={_fmt(micro.funding_rate)} | عمق السوق={_fmt(micro.ob_imbalance)} | "
-                    f"ضغط متداولين={_fmt(micro.taker_pressure)} | CVD={_fmt(micro.cvd_pct, '%')}"
+                    f"تمويل={_fmt(micro.funding_rate, decimals=6)} | عمق السوق={_fmt(micro.ob_imbalance)} | "
+                    f"ضغط متداولين={_fmt(micro.taker_pressure)} | CVD={_fmt(micro.cvd_pct, '%')} | "
+                    f"تصفيات حقيقية={(micro.recent_liquidations.get('count', 0) if micro.recent_liquidations else 'غير متوفرة')} | "
+                    f"فرق Mark={_fmt(micro.mark_price_divergence_pct, '%')} | فرق Index={_fmt(micro.index_price_divergence_pct, '%')} | "
+                    f"كبار المتداولين={_fmt(micro.top_trader_ratio)}"
                 )
+
+                # 🆕 إشعار تليجرام لو بيانات حرجة ناقصة/فشلت (بطلب صريح): نفس البيانات
+                # اللي نعرضها باللوق نفحصها، ولو أكثر من نصفها غير متوفر لعملة معينة،
+                # نرسل تنبيه تليجرام — عشان تتأكد فعلاً إن الجلب شغّال، مو تراقب اللوق يدوياً.
+                missing_fields = [name for name, val in [
+                    ("OI", micro.oi_change_pct), ("تمويل", micro.funding_rate),
+                    ("عمق السوق", micro.ob_imbalance), ("ضغط متداولين", micro.taker_pressure),
+                    ("CVD", micro.cvd_pct), ("تصفيات حقيقية", micro.recent_liquidations),
+                    ("فرق Mark", micro.mark_price_divergence_pct), ("فرق Index", micro.index_price_divergence_pct),
+                    ("كبار المتداولين", micro.top_trader_ratio),
+                ] if val is None]
+                if len(missing_fields) >= 5 and settings.get("is_telegram_enabled"):
+                    self._notify_missing_data_once(settings, symbol, missing_fields)
 
                 # 🔴 إصلاح معماري جوهري (بطلب صريح، ينطبق على كل الاستراتيجيات
                 # دفعة وحدة): آخر شمعة بأي فريم مجلوب من المنصة هي الشمعة **الحيّة
