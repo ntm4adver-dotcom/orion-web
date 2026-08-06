@@ -139,12 +139,25 @@ def analyze_liquidation_hunter(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         _log("❌ فلتر أدنى عائد/مخاطرة (1:2)", f"1:{rr} غير كافٍ — رفض", False)
         return None
 
+    # 🔴 إصلاح جوهري (بطلب صريح، بعد تشخيص عميق): كل "منطقة التصفية" أصلاً
+    # تقدير إحصائي (Estimate)، مو بيانات حقيقية مؤكَّدة — المنصات لا تكشف
+    # بيانات تصفية متداولين آخرين علناً. الفائدة المفتوحة الحقيقية (OI) كانت
+    # مجرد بونص نقاط اختياري — الصفقة كانت تمر حتى بدون أي دليل حقيقي على
+    # تراكم مراكز فعلي. الآن نشترط دليل حقيقي فعلي (نمو OI ملموس) **إلزامياً**
+    # قبل الثقة بالتقدير الإحصائي للمنطقة — تحقق واقعي يعوّض جزء من ضعف
+    # الأساس التقديري، بدل التداول على تخمين بحت بدون أي تأكيد حقيقي.
+    oi_change_pct = micro.oi_change_pct if micro else None
+    if oi_change_pct is None or oi_change_pct < 0.5:
+        _log("❌ تأكيد OI حقيقي إلزامي (منطقة التصفية أصلاً تقدير، تحتاج دليل حقيقي)",
+             f"{oi_change_pct if oi_change_pct is not None else 'غير متوفر'} — لا يوجد دليل حقيقي كافٍ على تراكم مراكز فعلي — رفض", False)
+        return None
+    _log("✅ تأكيد OI حقيقي (نمو ملموس فعلي)", f"{oi_change_pct:.2f}%", True)
+
     probability = 74
     if distance_pct <= 2.0:
         probability += 6  # منطقة قريبة = احتمال وصول أعلى واقعياً
-    oi_change_pct = micro.oi_change_pct if micro else None
-    if oi_change_pct is not None and oi_change_pct > 1.0:
-        probability += 5  # فائدة مفتوحة مرتفعة = مراكز مرفوعة أكثر فعلاً = كسكارة أقوى محتملة
+    if oi_change_pct > 2.0:
+        probability += 5  # نمو OI أقوى = مراكز مرفوعة أكثر فعلاً = كسكارة أقوى محتملة
     if taker_pressure is not None:
         aligned = (side == "Long" and taker_pressure > 0.15) or (side == "Short" and taker_pressure < -0.15)
         if aligned:
@@ -172,7 +185,7 @@ def analyze_liquidation_hunter(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         ("الانفجار السعري كمُطلِق زخم", True),
         ("بوابة تأكيد الزخم الإلزامية (Taker Pressure)", True),
         ("منطقة تصفية بمسافة منطقية (0.3%–8%)", distance_pct <= 2.0),
-        ("الفائدة المفتوحة (OI) داعمة", oi_change_pct is not None and oi_change_pct > 1.0),
+        ("الفائدة المفتوحة (OI) الحقيقية تدعم فرضية التصفية (إلزامي الآن)", True),
         ("ضغط المتداولين قوي جداً (تأكيد إضافي)", taker_pressure is not None and ((side == "Long" and taker_pressure > 0.15) or (side == "Short" and taker_pressure < -0.15))),
         ("CVD تراكمي متوافق", cvd_pct is not None and ((side == "Long" and cvd_pct > 60) or (side == "Short" and cvd_pct < 40))),
         ("🆕 ضغط صفقات كبيرة متوافق (Order Flow)", large_order_pressure is not None and ((side == "Long" and large_order_pressure > 0.15) or (side == "Short" and large_order_pressure < -0.15))),

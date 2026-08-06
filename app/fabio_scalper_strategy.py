@@ -121,6 +121,21 @@ def analyze_fabio_scalper(symbol: str, k4h, k1h, k15m, k5m, k_daily,
 
     is_imbalance = current_price > profile["vah"] * 1.0005 or current_price < profile["val"] * 0.9995
 
+    # 🔴 إصلاح خطأ حقيقي (اكتُشف بمراجعة صفقات فعلية: CAPUSDT وPIUSDT دخلتا
+    # نفس النمط 3 مرات كل وحدة بنفس الجلسة تقريباً، كلهم فشلوا): الشرط كان
+    # يعتمد على السعر اللحظي الحي بس — يعني أي "نطة" مؤقتة فوق VAH (حتى لو
+    # لحظية وبدون قناعة حقيقية) تفعّل الشرط، وبما إن السعر يتذبذب حوالين نفس
+    # المستوى، تتكرر نفس الصفقة الفاشلة عدة مرات بنفس الجلسة. الآن نشترط
+    # كمان إن **آخر شمعة 5 دقائق مكتملة فعلاً** أغلقت متجاوزة المستوى، مو بس
+    # السعر اللحظي — تأكيد حقيقي بقناعة، مو نطة عابرة.
+    if is_imbalance and k5m:
+        last_closed_candle = k5m[-2] if len(k5m) > 1 else k5m[-1]
+        candle_confirms = (last_closed_candle.close > profile["vah"] * 1.0005
+                            or last_closed_candle.close < profile["val"] * 0.9995)
+        if not candle_confirms:
+            _log("❌ تأكيد إغلاق شمعة 5د (مو سعر لحظي فقط)", f"آخر إغلاق مكتمل={last_closed_candle.close:.6g} — نطة لحظية بدون قناعة حقيقية — رفض", False)
+            is_imbalance = False
+
     def _safe_buffer(atr_multiple: float, price_pct_floor: float = 0.008) -> float:
         """هامش وقف واقعي: الأكبر بين مضاعف ATR الموسَّع، أو نسبة دنيا من السعر.
         هذا يحمي من الوقف الضيق جداً وقت هدوء السوق (ATR منخفض مؤقتاً)، اللي كان يخلي

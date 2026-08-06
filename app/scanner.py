@@ -612,22 +612,29 @@ class ScannerState:
             )
 
     def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k15m, k5m, btc_trend=None, btc_klines=None, market_regime_er=None, current_live_price=None, micro=None):
-        # 🆕 فرض عائد/مخاطرة ثابت (بطلب صريح): يتجاوز هدف الاستراتيجية المحسوب،
-        # ويفرض R محدد يكتبه المستخدم بنفسه — لا يزيد ولا ينقص. يُطبَّق **أول شي**
-        # (قبل الهيدج، الحارس، أي فلتر) عشان الوقف يبقى كما حسبته الاستراتيجية
-        # (بقي كما هو، بس الهدف يتغيّر)، وكل الحسابات اللاحقة (نسبة R، تقسيم
-        # الأهداف، إلخ) تعتمد على الهدف الثابت الجديد بشكل متسق تلقائياً.
+        # 🔴 إصلاح جذري (بطلب صريح، بعد تشخيص عميق لنمط خسائر حقيقي): كان هذا
+        # المنطق يمحي هدف كل استراتيجية المحسوب من هيكل سوق حقيقي (فيبوناتشي،
+        # VAH/VAL، Measured Move...) ويستبدله برقم رياضي أعمى (مخاطرة×3) بدون
+        # أي علاقة بأقرب مقاومة/دعم فعلي — فالسعر كان يرتد عند مستوى حقيقي
+        # (ما استهدفناه أصلاً) قبل ما يوصل الرقم الأعمى البعيد، محوّلاً صفقات
+        # كانت لتربح لو الهدف واقعي إلى خسائر كاملة.
+        # الحل: الحد الأدنى للعائد/مخاطرة يصير **فلتر رفض**، مو استبدال قسري —
+        # لو هدف الاستراتيجية الحقيقي أصلاً يحقق الحد الأدنى المطلوب، نُبقيه
+        # كما هو (هدف واقعي مبني على هيكل السوق). لو أقل من الحد الأدنى، نرفض
+        # الصفقة كليّاً بدل ما نمدّ الهدف تعسفياً بعيداً عن أي مستوى حقيقي.
         if settings.get("is_fixed_rr_enabled", False):
-            fixed_rr = float(settings.get("fixed_rr_value", 3.0))
-            if fixed_rr > 0:
+            min_rr = float(settings.get("fixed_rr_value", 3.0))
+            if min_rr > 0:
                 risk_distance = abs(result.entry_price - result.stop_loss)
+                reward_distance = abs(result.take_profit - result.entry_price)
                 if risk_distance > 0:
-                    if result.side == "Long":
-                        result.take_profit = result.entry_price + (risk_distance * fixed_rr)
-                    else:
-                        result.take_profit = result.entry_price - (risk_distance * fixed_rr)
-                    result.rr = round(fixed_rr, 2)
-                    result.behavior = f"🎯 [R ثابت مفروض: {fixed_rr}] " + result.behavior
+                    actual_rr = reward_distance / risk_distance
+                    if actual_rr < min_rr:
+                        db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: عائد/مخاطرة الهدف الحقيقي (هيكل السوق) = 1:{actual_rr:.2f}، أقل من الحد الأدنى المطلوب 1:{min_rr:.1f} — رفض بدل تمديد الهدف تعسفياً.")
+                        db.increment_rejection_counter("min_structural_rr_filter")
+                        return
+                    result.rr = round(actual_rr, 2)
+                    result.behavior = f"🎯 [هدف واقعي من هيكل السوق، عائد/مخاطرة محقَّق ≥ 1:{min_rr:.1f}] " + result.behavior
 
         # 🔴 current_live_price الآن يُمرَّر صراحة من المستدعي (يعكس السعر اللحظي
         # الحقيقي وقت الفحص) — k4h/k1h/k15m/k5m هنا أصبحت نسخ "مؤكَّدة" (بدون آخر

@@ -760,8 +760,43 @@ OI_HISTORY_MAX_POINTS = 12
 
 
 def fetch_open_interest_change_pct(symbol: str) -> Optional[float]:
+    """🔴 إصلاح باق حقيقي (تضارب مفاتيح): كان هذا المسار يخزّن التاريخ المحلي
+    تحت مفتاح `symbol` (مثال: "BTCUSDT")، بينما مسار oi_spike بـ
+    fetch_screened_symbols يخزّن تحت `inst_id` (مثال: "BTC-USDT-SWAP") — بنفس
+    القاموس المشترك `_oi_history`. يعني المسارين ما يتشاركون بيانات نفس العملة
+    أبداً، وكل عملة تحتاج تبني تاريخها من الصفر مرتين بمكانين منفصلين. الآن
+    نوحّد المفتاح على `inst_id` بكل مكان.
+
+    🆕 محاولة أولى: نجيب تاريخ الفائدة المفتوحة **جاهزاً من OKX نفسها** (endpoint
+    مخصَّص) — يلغي فترة الإحماء كليّاً لو اشتغل. لو الاستجابة مو بالشكل المتوقَّع
+    (تحقق دفاعي صريح، عشان قرار تداول حقيقي ما يعتمد على افتراض غير مؤكَّد)،
+    نرجع تلقائياً للطريقة القديمة (تراكم لقطات محلية، بعد إصلاح تضارب المفتاح)."""
     import time as _time
     inst_id = _to_inst_id(symbol)
+
+    # محاولة أولى: بيانات جاهزة من OKX (بدون فترة إحماء لو نجحت)
+    try:
+        hist_resp = _public_get(
+            f"/api/v5/rubik/stat/contracts/open-interest-history?instId={inst_id}&period=5m&limit=10"
+        )
+        if hist_resp and hist_resp.get("code") == "0" and hist_resp.get("data"):
+            rows = hist_resp["data"]
+            # تحقق دفاعي: نتأكد الصفوف فعلاً رقمية بالشكل المتوقَّع [ts, oi, ...]
+            # قبل ما نثق فيها — لو الشكل مختلف عن افتراضنا، نتجاهلها بأمان
+            # ونكمل للطريقة الاحتياطية بدل ما نستنتج رقم غلط بصمت.
+            if (len(rows) >= 2 and isinstance(rows[0], list) and len(rows[0]) >= 2):
+                try:
+                    latest_oi = float(rows[0][1])
+                    oldest_oi = float(rows[-1][1])
+                    if oldest_oi > 0 and latest_oi > 0:
+                        last_error.pop(f"oi_change:{symbol}", None)
+                        return ((latest_oi - oldest_oi) / oldest_oi) * 100.0
+                except (ValueError, IndexError, TypeError):
+                    pass  # شكل غير متوقَّع — نكمل للطريقة الاحتياطية بأمان
+    except Exception:
+        pass  # أي خطأ بالمحاولة الأولى — نكمل للطريقة الاحتياطية بدون توقف
+
+    # الطريقة الاحتياطية (لقطة حالية + تراكم محلي، بعد إصلاح تضارب المفتاح)
     resp = _public_get(f"/api/v5/public/open-interest?instId={inst_id}")
     if not resp or resp.get("code") != "0" or not resp.get("data"):
         return None
@@ -770,7 +805,7 @@ def fetch_open_interest_change_pct(symbol: str) -> Optional[float]:
     except Exception:
         return None
     now = int(_time.time() * 1000)
-    history = _oi_history.setdefault(symbol, [])
+    history = _oi_history.setdefault(inst_id, [])  # 🔴 مفتاح موحَّد الآن (inst_id، مو symbol)
     history[:] = [h for h in history if now - h[0] <= OI_HISTORY_MAX_AGE_MS]
     oldest = history[0] if history else None
     history.append((now, oi))

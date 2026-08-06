@@ -203,10 +203,15 @@ def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
     # — فحص حقيقي أظهر 0% نجاح من 15 صفقة! الآن الهدف مبني **حصراً** على امتداد
     # الحركة الفعلي بالسوق (بدون ربطه بالمخاطرة إطلاقاً)، ونتحقق بعدها هل عائد/
     # المخاطرة الناتج طبيعياً يحقق 1:5، بدل ما نفرض هدف غير واقعي عشان نوصل للرقم.
+    # 🔴 إصلاح إضافي (بطلب صريح، تكملة للإصلاح السابق): "امتداد الحركة×2" كان
+    # لسا امتداد رياضي (مضاعف مدى)، مو مستوى حقيقي السعر تفاعل معه فعلاً. الآن
+    # الهدف = **الحد الفعلي للمدى نفسه** (recent_high/recent_low) — مستوى حقيقي
+    # سبق واختبره السعر بنفس النافذة، بدل تمديد رياضي بعده.
+    approach_buffer = swing_range * 0.05  # هامش اقتراب صغير، السعر غالباً يرتد قبل لمس الحد بالضبط
     if side == "Long":
-        take_profit = entry_price + swing_range * 2.0
+        take_profit = recent_high - approach_buffer
     else:
-        take_profit = entry_price - swing_range * 2.0
+        take_profit = recent_low + approach_buffer
 
     reward = abs(take_profit - entry_price)
     rr = round(reward / risk, 2) if risk > 0 else 0.0

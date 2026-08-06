@@ -108,16 +108,21 @@ def analyze_climactic_reversal_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         db.increment_rejection_counter("climactic_trend_reversal_not_confirmed")
         return None
 
-    # 🆕 الفحص الجوهري لهذي النسخة: الصفقة لازم تطابق الترند اليومي العام،
-    # وإلا نرفضها — حتى لو كل شروط الاستنزاف الأصلية متحققة. هذا يمنع
-    # بالضبط سيناريو "الدخول عكس اتجاه العملة الأكبر" اللي كان عيب النسخة
-    # الأصلية.
+    # 🔴 إصلاح جذري (بطلب صريح، بعد تشخيص بالبيانات الفعلية: صفر صفقة منذ
+    # الإنشاء، وعدّاد climactic_trend_daily_alignment_filter وحده كان يرفض كل
+    # شي بعد كل الفحوصات التانية بالضبط). السبب الجوهري: نمط "استنزاف/انعكاس"
+    # بطبيعته غالباً يصير **عكس** الترند اليومي الأكبر وقتها (هذا تعريف
+    # الانعكاس نفسه) — فشرط "لازم يطابق الترند اليومي" كان يناقض جوهر النمط
+    # ذاتياً، مو مجرد صارم. الآن نحوّله من بوابة رفض قاطعة إلى عامل تعزيز
+    # ثقة: التوافق مع الترند يرفع الاحتمالية (لأنه فعلاً دليل إضافي جيد لو
+    # توفر)، لكن غيابه ما يمنع الصفقة كليّاً — يحافظ على روح الفكرة الأصلية
+    # (تفضيل التوافق) بدون ما يقتل الاستراتيجية بالكامل.
     side_ar = "صاعد" if side == "Long" else "هابط"
-    if side_ar != overall_trend:
-        _log("❌ فلتر التوافق مع الترند اليومي", f"الصفقة {side} ({side_ar}) تعاكس الترند اليومي العام ({overall_trend}) — رفض", False)
-        db.increment_rejection_counter("climactic_trend_daily_alignment_filter")
-        return None
-    _log("✅ الصفقة متوافقة مع الترند اليومي العام", f"{side} ({side_ar}) == {overall_trend}", True)
+    trend_aligned = side_ar == overall_trend
+    if trend_aligned:
+        _log("✅ الصفقة متوافقة مع الترند اليومي العام (تعزيز ثقة إضافي)", f"{side} ({side_ar}) == {overall_trend}", True)
+    else:
+        _log("⚠️ الصفقة تعاكس الترند اليومي العام (طبيعي لنمط انعكاس، بدون رفض)", f"{side} ({side_ar}) != {overall_trend}", None)
 
     # 🔴 نفس السعر الحي الحقيقي المُمرَّر من السكانر لو متوفر
     current_price = current_price if current_price is not None else (k5m[-1].close if k5m else last.close)
@@ -155,10 +160,12 @@ def analyze_climactic_reversal_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         _log("❌ فلتر أدنى عائد/مخاطرة (1:1.5)", f"1:{rr} غير كافٍ — رفض", False)
         return None
 
-    # 🆕 احتمالية أساسية أعلى شوي من النسخة الأصلية (78 مقابل 74) — لأن
-    # التوافق مع الترند اليومي يعتبر تأكيد إضافي حقيقي بحد ذاته، مو بس تأكيد
-    # لحظي (Taker Pressure/OI)
-    probability = 78
+    # 🔴 الاحتمالية الأساسية رجعت لنفس مستوى النسخة الأصلية (74) بما إن
+    # التوافق مع الترند اليومي صار عامل تعزيز اختياري، مو مضمون الحدوث —
+    # التعزيز الفعلي يُضاف أدناه بس لو التوافق موجود فعلاً.
+    probability = 74
+    if trend_aligned:
+        probability += 8  # تعزيز حقيقي أكبر من بقية العوامل — هذا جوهر ميزة هذي النسخة
     taker_pressure = micro.taker_pressure if micro else None
     if taker_pressure is not None:
         aligned = (side == "Long" and taker_pressure > 0.1) or (side == "Short" and taker_pressure < -0.1)
@@ -183,7 +190,7 @@ def analyze_climactic_reversal_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         ("حركة ممتدة/تصحيح حقيقي (≥5% صافي تغيّر)", True),
         ("شمعة تصريف/استنزاف بفوليوم متطرف (>8x)", True),
         ("تأكيد انعكاس فعلي (إغلاق بعكس شمعة التصريف)", True),
-        ("🆕 الصفقة مع اتجاه الترند اليومي العام (مو عكسه)", True),
+        ("🆕 الصفقة مع اتجاه الترند اليومي العام (تعزيز اختياري، مو شرط)", trend_aligned),
         ("ضغط متداولين فعلي متوافق", taker_pressure is not None and ((side == "Long" and taker_pressure > 0.1) or (side == "Short" and taker_pressure < -0.1))),
         ("فوليوم تصريف ضخم جداً (>15x)", climax_vol_ratio > 15),
         ("🆕 ضغط صفقات كبيرة متوافق (Order Flow)", large_order_pressure is not None and ((side == "Long" and large_order_pressure > 0.15) or (side == "Short" and large_order_pressure < -0.15))),

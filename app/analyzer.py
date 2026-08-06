@@ -769,11 +769,13 @@ def analyze_explosive_breakout(
     tp1 = entry_price + max(effective_atr * 2.5, measured_move) if side == "Long" else entry_price - max(effective_atr * 2.5, measured_move)
     tp2 = entry_price + max(effective_atr * 5.0, measured_move * 2.0) if side == "Long" else entry_price - max(effective_atr * 5.0, measured_move * 2.0)
 
-    min_rr = 3.0
-    reward_distance = abs(tp2 - entry_price)
-    if risk_distance > 0 and reward_distance / risk_distance < min_rr:
-        tp2 = entry_price + risk_distance * min_rr if side == "Long" else entry_price - risk_distance * min_rr
-    rr = abs(tp2 - entry_price) / risk_distance if risk_distance > 0 else min_rr
+    # 🔴 إصلاح جذري (بطلب صريح): كان يمدّ الهدف تعسفياً بعيداً عن الحركة
+    # المقاسة الحقيقية لو ما وصل الحد الأدنى المطلوب — نفس الخلل اللي تسبب
+    # بنمط "يقرب من الهدف ويرتد" على نطاق واسع. الآن نُبقي الهدف الحقيقي
+    # (Measured Move) كما هو دايماً؛ فلتر الحد الأدنى العام (min_structural_rr_filter
+    # بـscanner.py) يرفض الصفقة كليّاً لو العائد/مخاطرة الحقيقي غير كافٍ، بدل
+    # ما نمدّ الهدف تعسفياً بعيداً عن أي مستوى حقيقي.
+    rr = abs(tp2 - entry_price) / risk_distance if risk_distance > 0 else 0.0
 
     prob = 80 if is_early_entry else 82
     if is_compressed:
