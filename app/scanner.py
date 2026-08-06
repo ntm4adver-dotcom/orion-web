@@ -311,17 +311,32 @@ def evaluate_signal_filters(settings: dict, symbol: str, strategy_key: str, resu
     # نُبقيه كما هو. لو أقل، نرفض الصفقة كليّاً بدل تمديد الهدف تعسفياً.
     # موجود هنا الآن (evaluate_signal_filters) بدل _process_signal عشان
     # الفحص الحي والباك-تست يطبّقان نفس المنطق بالضبط، بدون أي اختلاف سلوك.
+    #
+    # 🆕 تعديل غير متماثل (بطلب صريح): "أقل من الرقم" يبقى رفض (نفس المنطق
+    # أعلاه — تمديد هدف قريب لأبعد من مستوى حقيقي هو بالضبط باق XRPUSDT اللي
+    # اكتشفناه). لكن "أكثر من الرقم" يصير **تقليص آمن** — الهدف يقرّب أكثر من
+    # المستوى الحقيقي (مو أبعد عنه)، فهذا يزيد احتمال الوصول، مو يقلله. الوقف
+    # يبقى كما حسبته الاستراتيجية دائماً بكلا الحالتين، بدون أي تغيير.
     if settings.get("is_fixed_rr_enabled", False):
-        min_rr = float(settings.get("fixed_rr_value", 3.0))
-        if min_rr > 0:
+        target_rr = float(settings.get("fixed_rr_value", 3.0))
+        if target_rr > 0:
             risk_distance = abs(result.entry_price - result.stop_loss)
             reward_distance = abs(result.take_profit - result.entry_price)
             if risk_distance > 0:
                 actual_rr = reward_distance / risk_distance
-                if actual_rr < min_rr:
-                    return False, f"عائد/مخاطرة الهدف الحقيقي (هيكل السوق) = 1:{actual_rr:.2f}، أقل من الحد الأدنى المطلوب 1:{min_rr:.1f} — رفض بدل تمديد الهدف تعسفياً", "min_structural_rr_filter"
-                result.rr = round(actual_rr, 2)
-                result.behavior = f"🎯 [هدف واقعي من هيكل السوق، عائد/مخاطرة محقَّق ≥ 1:{min_rr:.1f}] " + result.behavior
+                if actual_rr < target_rr:
+                    return False, f"عائد/مخاطرة الهدف الحقيقي (هيكل السوق) = 1:{actual_rr:.2f}، أقل من الحد المطلوب 1:{target_rr:.1f} — رفض بدل تمديد الهدف تعسفياً", "min_structural_rr_filter"
+                if actual_rr > target_rr:
+                    # تقليص آمن: نقرّب الهدف لنفس الاتجاه (بين نقطة الدخول والهدف
+                    # الأصلي)، بدون ما نلمس الوقف إطلاقاً
+                    if result.side == "Long":
+                        result.take_profit = result.entry_price + (risk_distance * target_rr)
+                    else:
+                        result.take_profit = result.entry_price - (risk_distance * target_rr)
+                    result.behavior = f"🎯 [هدف حقيقي قُلِّص لـ1:{target_rr:.1f} (كان 1:{actual_rr:.2f} — تقريب آمن، مو تمديد)] " + result.behavior
+                else:
+                    result.behavior = f"🎯 [هدف واقعي من هيكل السوق، عائد/مخاطرة محقَّق = 1:{target_rr:.1f}] " + result.behavior
+                result.rr = target_rr
 
     return True, "", ""
 

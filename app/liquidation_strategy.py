@@ -69,7 +69,15 @@ def analyze_liquidation_hunter(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     funding_rate = micro.funding_rate if micro else None
     long_short_ratio = micro.long_short_ratio if micro else None
 
-    heatmap = estimate_liquidation_heatmap(k1h, current_price, funding_rate=funding_rate,
+    # 🔴 تصحيح تناقض جوهري (بطلب صريح): estimate_liquidation_heatmap ما فيها
+    # أي سقف داخلي لحجم البيانات — كانت تستقبل k1h **كاملة** (أحياناً مئات
+    # الساعات)، بينما مُطلِق الصفقة نفسه (الانفجار السعري) قصير المدى جداً
+    # (دقائق). خارطة تصفية مبنية على أسابيع من البيانات تنتج مناطق بعيدة جداً
+    # عن أفق التداول الفعلي لهذي الاستراتيجية. الآن نقيّد لآخر 72 ساعة (3
+    # أيام) — كافية إحصائياً لبروفايل فوليوم/تصفية ذو معنى، لكن متناسقة زمنياً
+    # أكثر بكثير مع طبيعة "صيد" حدث لحظي (انفجار سعري)، مو نافذة أسابيع.
+    k1h_for_heatmap = k1h[-72:] if len(k1h) >= 72 else k1h
+    heatmap = estimate_liquidation_heatmap(k1h_for_heatmap, current_price, funding_rate=funding_rate,
                                             long_short_ratio=long_short_ratio)
     side = breakout_result.side
 
@@ -135,8 +143,8 @@ def analyze_liquidation_hunter(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     rr = round(reward / risk, 2)
     _log("عائد/مخاطرة محسوب من هندسة الكسكارة", f"1:{rr}")
 
-    if rr < 2.0:
-        _log("❌ فلتر أدنى عائد/مخاطرة (1:2)", f"1:{rr} غير كافٍ — رفض", False)
+    if rr < 3.0:
+        _log("❌ فلتر أدنى عائد/مخاطرة (1:3)", f"1:{rr} غير كافٍ — رفض", False)
         return None
 
     # 🔴 إصلاح جوهري (بطلب صريح، بعد تشخيص عميق): كل "منطقة التصفية" أصلاً
