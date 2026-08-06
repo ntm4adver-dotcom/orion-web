@@ -29,7 +29,7 @@
 """
 from typing import List, Optional
 
-from .analyzer import Kline, AnalysisResult, MarketMicrostructure, build_score_breakdown, atr
+from .analyzer import Kline, AnalysisResult, MarketMicrostructure, build_score_breakdown, atr, find_strongest_reaction_level
 
 
 def _detect_stop_hunt(klines: List[Kline], lookback: int = 50, vol_period: int = 20,
@@ -221,34 +221,21 @@ def analyze_stop_hunt(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     elif k5m:
         entry_price = k5m[-1].close
 
-    # 🆕 تحسين دقة الوقف بفريم الدقيقة (بطلب صريح): نمط "صيد الاستوبات" نفسه
-    # حدث حقيقي بمقياس الساعة (كسر مستوى تاريخي متعدد الأيام) — هذا يبقى صحيح
-    # يُكتشف بالساعة، مو بالدقيقة (كسر مستوى تاريخي على مقياس دقيقة بلا معنى
-    # هيكلي). لكن بعد ما نتأكد النمط حقيقي، **دقة نقطة الدخول والوقف** تقدر
-    # تتحسن بفريم الدقيقة — بدل الاعتماد بس على هامش مبني من مدى الشمعة
-    # الساعية الكاملة (اللي ممكن يعطي وقف أوسع من اللازم لحركة سحب سيولة
-    # سريعة فعلياً انتهت خلال دقائق قليلة من الساعة، مو الساعة كاملة).
-    if k1m and len(k1m) >= 20:
-        recent_1m = k1m[-15:]  # آخر ~15 دقيقة — نافذة كافية تغطي حركة السحب الفعلية بدقة
-        atr_1m = atr(k1m, 14)
-        if atr_1m > 0:
-            if side == "Long":
-                minute_low = min(k.low for k in recent_1m)
-                minute_sl_candidate = minute_low - atr_1m * 1.0
-                # نستخدم الأضيق بين الوقف الساعي والوقف الدقيقي، **بشرط** ما ينزل
-                # عن الحد الأدنى المطلق (0.4% من السعر) — نفس فلسفة عدم إعطاء
-                # وقف ضيق جداً يُضرب بضوضاء عادية
-                tighter_sl = max(minute_sl_candidate, entry_price * 0.996)
-                if tighter_sl > sl:  # أضيق فعلاً (أقرب لسعر الدخول) من الوقف الساعي
-                    _log("تحسين الوقف بفريم الدقيقة", f"من {sl:.6g} إلى {tighter_sl:.6g} (أدق، مبني على آخر 15 دقيقة فعلية)", True)
-                    sl = tighter_sl
-            else:
-                minute_high = max(k.high for k in recent_1m)
-                minute_sl_candidate = minute_high + atr_1m * 1.0
-                tighter_sl = min(minute_sl_candidate, entry_price * 1.004)
-                if tighter_sl < sl:
-                    _log("تحسين الوقف بفريم الدقيقة", f"من {sl:.6g} إلى {tighter_sl:.6g} (أدق، مبني على آخر 15 دقيقة فعلية)", True)
-                    sl = tighter_sl
+    # 🆕 اختيار أقوى نقطة دخول (بطلب صريح): بدل الدخول الأعمى عند أقرب سعر
+    # (السعر الحالي مباشرة)، نبحث بفريم الدقيقة عن النقطة اللي تاريخياً (آخر
+    # ساعتين تقريباً) أعطت أقوى انفجار سعري لو السعر لمسها — نستخدمها كسعر
+    # دخول محدد (Limit) بدل current_price، بشرط تكون بنفس اتجاه الصفقة ومنطقية
+    # (قريبة كفاية يُحتمل السعر يرجع يلمسها، ومو أسوأ من سعر الدخول الأصلي).
+    if k1m and len(k1m) >= 40:
+        reaction = find_strongest_reaction_level(k1m, side=side, current_price=entry_price, max_distance_pct=1.5)
+        if reaction is not None:
+            candidate_level = reaction["level"]
+            # الشرط: النقطة الأقوى لازم تكون بصف الصفقة منطقياً — أرخص من
+            # سعر الدخول الحالي لصفقة Long (فرصة دخول أفضل)، أو أغلى لصفقة Short
+            is_better_entry = (side == "Long" and candidate_level < entry_price) or (side == "Short" and candidate_level > entry_price)
+            if is_better_entry:
+                _log("🎯 أقوى نقطة دخول مكتشفة (فريم الدقيقة)", f"{candidate_level:.6g} (قوة الانفجار: {reaction['explosion_score']:.1f}×ATR) — بدل السعر الحالي {entry_price:.6g}", True)
+                entry_price = candidate_level
 
     # تحقق أمان: نتأكد الاتجاه لسا سليم منطقياً بعد تحديث سعر الدخول (نادر جداً
     # يصير خلاف كذا، لكن حماية إضافية بدون كلفة)

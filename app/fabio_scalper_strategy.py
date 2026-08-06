@@ -26,7 +26,7 @@ Direction – Location – Aggression:
 """
 from typing import Optional
 
-from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, build_score_breakdown
+from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, build_score_breakdown, find_strongest_reaction_level
 from .volume_profile import compute_volume_profile
 
 
@@ -238,6 +238,20 @@ def analyze_fabio_scalper(symbol: str, k4h, k1h, k15m, k5m, k_daily,
                 if nearest_name == "LVN" else "السعر عند حافة منطقة القيمة لكن الاتجاه لا يدعم نموذج الارتداد — رفض"
             _log("❌ القرار النهائي", reason, False)
             return None
+
+    # 🆕 اختيار أقوى نقطة دخول (بطلب صريح، نفس منطق stop_hunt): بدل الاعتماد
+    # بالكامل على نقطة الدخول المحسوبة من البروفايل الحجمي (اللي ممكن السعر
+    # يلمسها وينعكس فوراً بدون قوة زخم حقيقية — بالضبط نمط ALLOUSDT)، نبحث
+    # بفريم الدقيقة عن نقطة أقوى تاريخياً (انفجار سعري مؤكَّد فعلياً)، ونستخدمها
+    # بدل نقطة البروفايل لو كانت أفضل منطقياً (أقرب لصالح الصفقة).
+    if k1m and len(k1m) >= 40:
+        reaction = find_strongest_reaction_level(k1m, side=side, current_price=entry_price, max_distance_pct=1.5)
+        if reaction is not None:
+            candidate_level = reaction["level"]
+            is_better_entry = (side == "Long" and candidate_level < entry_price) or (side == "Short" and candidate_level > entry_price)
+            if is_better_entry:
+                _log("🎯 أقوى نقطة دخول مكتشفة (فريم الدقيقة)", f"{candidate_level:.6g} (قوة الانفجار: {reaction['explosion_score']:.1f}×ATR) — بدل نقطة البروفايل {entry_price:.6g}", True)
+                entry_price = candidate_level
 
     risk = abs(entry_price - stop_loss)
     if risk <= 0:

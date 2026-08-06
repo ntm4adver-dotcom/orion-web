@@ -537,6 +537,59 @@ def find_significant_swing(klines: List[Kline], atr_val: float, min_move_atr: fl
     return None
 
 
+def find_strongest_reaction_level(klines: List[Kline], side: str, current_price: float,
+                                   lookback: int = 120, pivot_window: int = 3,
+                                   reaction_candles: int = 5, max_distance_pct: float = 2.0) -> Optional[dict]:
+    """🆕 يبحث (عادة بفريم الدقيقة) عن **أقوى نقطة دخول** — مو أقرب نقطة (السعر
+    الحالي مباشرة)، بل النقطة اللي لو السعر لمسها، تاريخياً (بآخر lookback شمعة)
+    انطلق منها بأقوى وأسرع حركة مؤاتية (بطلب صريح: "النقطة اللي إذا لمسها
+    السعر ينطلق بقوة بانفجار سعري خرافي").
+
+    الفكرة:
+      1) نفحص كل قمة/قاع محلي (Pivot) بالنافذة الزمنية.
+      2) لكل وحدة، نقيس "قوة الانفجار" = أقصى حركة مؤاتية سجّلتها خلال
+         reaction_candles شمعة بعدها مباشرة، منسوبة لـATR (عشان تكون قابلة
+         للمقارنة بين نقاط مختلفة بغض النظر عن توقيتها).
+      3) نستبعد أي نقطة بعيدة جداً عن السعر الحالي (max_distance_pct) — نقطة
+         قوية بس بعيدة جداً غير عملية (ممكن السعر ما يرجع يلمسها أبداً قريباً).
+      4) نرجع أقوى نقطة "قابلة للمس" فعلياً — تُستخدم كسعر دخول محدد (Limit)،
+         بدل الدخول الأعمى عند السعر الحالي مباشرة."""
+    min_needed = reaction_candles + pivot_window * 2 + 5
+    if len(klines) < min_needed:
+        return None
+    window = klines[-lookback:] if len(klines) > lookback else klines
+    if len(window) < min_needed:
+        return None
+    atr_val = atr(window, 14)
+    if atr_val <= 0:
+        return None
+
+    candidates = []
+    for i in range(pivot_window, len(window) - reaction_candles - pivot_window):
+        segment = window[i - pivot_window:i + pivot_window + 1]
+        candle = window[i]
+        future = window[i + 1:i + 1 + reaction_candles]
+        if not future:
+            continue
+
+        if side == "Long" and candle.low == min(k.low for k in segment):
+            max_move = max(k.high for k in future) - candle.low
+            candidates.append((candle.low, max_move / atr_val, i))
+        elif side == "Short" and candle.high == max(k.high for k in segment):
+            max_move = candle.high - min(k.low for k in future)
+            candidates.append((candle.high, max_move / atr_val, i))
+
+    if not candidates:
+        return None
+
+    reachable = [c for c in candidates if current_price > 0 and abs(c[0] - current_price) / current_price * 100 <= max_distance_pct]
+    if not reachable:
+        return None
+
+    best_level, best_score, best_idx = max(reachable, key=lambda c: c[1])
+    return {"level": best_level, "explosion_score": best_score, "candle_index": best_idx}
+
+
 def find_swing_via_macd(klines: List[Kline], lookback: int = 400, fast: int = 12, slow: int = 26,
                          signal_span: int = 9, extremum_window: int = 3) -> Optional[dict]:
     """🆕 تحديد قمة/قاع السوينق **من أعمدة هستوجرام MACD نفسها**، مو من السعر
