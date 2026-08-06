@@ -109,15 +109,21 @@ def _detect_stop_hunt(klines: List[Kline], lookback: int = 50, vol_period: int =
             risk = entry_price - stop_loss
             if risk <= 0:
                 continue
-            # 🔴 إصلاح جذري (بطلب صريح، بعد تشخيص عميق): الهدف كان رقم رياضي أعمى
-            # (المخاطرة×3) بدون أي علاقة بهيكل السوق — فالسعر كان يرتد عند مقاومة
-            # حقيقية (ما استهدفناها أصلاً) قبل ما يوصل الرقم البعيد. الآن الهدف
-            # = أقرب مقاومة حقيقية فعلية (أعلى قمة بنفس نافذة البحث اللي استخدمناها
-            # لاكتشاف القاع المسحوب أصلاً) — مستوى حقيقي السعر تفاعل معه فعلاً
-            # بالماضي القريب، مع هامش اقتراب صغير (السعر غالباً يرتد قبل لمس
-            # المقاومة بالضبط، مو يخترقها بدقة رياضية).
-            approach_buffer = min(buffer * 0.5, (highest_high - entry_price) * 0.1) if highest_high > entry_price else 0
-            take_profit = highest_high - max(approach_buffer, 0)
+            # 🔴 إصلاح جذري إضافي (بطلب صريح، بعد مراجعة صفقة حقيقية XRPUSDT):
+            # كان الهدف يُستهدف من **نفس نافذة 400 ساعة العريضة** المستخدمة
+            # لاكتشاف المستوى المسحوب — منطقي للسحب (مستوى قديم معروف يستحق
+            # الصيد)، لكن **غير منطقي للهدف** (قمة قديمة جداً ممكن تكون قبل
+            # بداية الترند الحالي بمراحل، فيطلب من صفقة بترند هابط واضح ترتد
+            # +10% لقمة ما لها علاقة بالسياق الحالي). الآن نبحث عن المقاومة
+            # الهيكلية بنافذة أضيق وأحدث بكثير (100 ساعة ≈ 4 أيام) — ذات صلة
+            # فعلية بالترند الحالي، مو أي قمة تاريخية بغض النظر عن السياق.
+            recent_target_window = klines[max(0, idx - 100): idx]
+            nearby_high = max((k.high for k in recent_target_window), default=highest_high) if recent_target_window else highest_high
+            # سقف أمان أخير (ATR) — حتى لو النافذة الأقصر لسا فيها قيمة شاذة
+            max_target_distance = atr_ref * 8.0 if atr_ref > 0 else float("inf")
+            target_high = min(nearby_high, entry_price + max_target_distance)
+            approach_buffer = min(buffer * 0.5, (target_high - entry_price) * 0.1) if target_high > entry_price else 0
+            take_profit = target_high - max(approach_buffer, 0)
             # 🆕 حقول تمييزية حقيقية (بطلب صريح): كانت نقاط القوة تعتمد بشكل كبير
             # على بيانات لحظية (Microstructure) غير متوفرة بالاختبار الخلفي، فتصير
             # النقاط **ثابتة تماماً** بغض النظر عن جودة الصفقة الفعلية. الآن نحسب
@@ -148,10 +154,15 @@ def _detect_stop_hunt(klines: List[Kline], lookback: int = 50, vol_period: int =
             risk = stop_loss - entry_price
             if risk <= 0:
                 continue
-            # 🔴 نفس الإصلاح بالاتجاه المعاكس: الهدف = أقرب دعم حقيقي فعلي (أدنى
-            # قاع بنفس نافذة البحث)، مو رقم رياضي أعمى.
-            approach_buffer = min(buffer * 0.5, (entry_price - lowest_low) * 0.1) if entry_price > lowest_low else 0
-            take_profit = lowest_low + max(approach_buffer, 0)
+            # 🔴 نفس إصلاح المستوى القديم (بطلب صريح): نافذة أضيق وأحدث (100
+            # ساعة) بدل 400 ساعة العريضة، + سقف أمان ATR — يضمن الهدف ذو صلة
+            # فعلية بالترند الحالي، مو أي قاع تاريخي بغض النظر عن السياق.
+            recent_target_window = klines[max(0, idx - 100): idx]
+            nearby_low = min((k.low for k in recent_target_window), default=lowest_low) if recent_target_window else lowest_low
+            max_target_distance = atr_ref * 8.0 if atr_ref > 0 else float("inf")
+            target_low = max(nearby_low, entry_price - max_target_distance)
+            approach_buffer = min(buffer * 0.5, (entry_price - target_low) * 0.1) if entry_price > target_low else 0
+            take_profit = target_low + max(approach_buffer, 0)
             recovery_strength_pct = (highest_high - klines[-1].close) / candle_range if candle_range > 0 else 0
             sweep_depth_pct = (current.high - highest_high) / candle_range if candle_range > 0 else 0
             return {
