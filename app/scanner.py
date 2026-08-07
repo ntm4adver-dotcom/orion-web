@@ -183,12 +183,24 @@ def evaluate_signal_filters(settings: dict, symbol: str, strategy_key: str, resu
     # **الألتكوينز فقط** (نستثني البيتكوين نفسه — المؤشر لا معنى له عليه).
     # استحواذ صاعد = تدفق رأس مال من الألتكوينز للبيتكوين (ضغط سلبي عام على
     # الألتات)، فنرفض صفقات Long بالألتكوينز وقتها. العكس بالعكس.
+    #
+    # 🔴 إصلاح فجوة توثيق حقيقية (بطلب صريح، بعد سؤال عن صفقتين متضاربتين):
+    # كنا نحسب الاتجاه ونستخدمه بالقرار، لكن ما نحفظ القيمة الفعلية وقت كل
+    # صفقة بأي مكان يظهر بالتصدير — فيصير مستحيل نتحقق لاحقاً وين كان
+    # الاستحواذ بالضبط وقت أي صفقة معينة. الآن نسجّلها **داخل نص الصفقة
+    # نفسها** (behavior)، بغض النظر هل الفلتر مفعّل أو لأ — تظهر بكل تصدير جاي.
+    if not symbol.upper().startswith("BTC") and btc_dominance_trend is not None:
+        result.behavior = (
+            f"[₿ استحواذ البيتكوين وقت الإشارة: {btc_dominance_trend['current']:.2f}% "
+            f"({btc_dominance_trend['trend']}، تغيّر {btc_dominance_trend['change_pct']:+.2f} نقطة/6س)] " + result.behavior
+        )
+
     if settings.get("is_btc_dominance_filter_enabled", False) and not symbol.upper().startswith("BTC") and btc_dominance_trend is not None:
         dom_trend = btc_dominance_trend.get("trend")
         if dom_trend == "صاعد" and result.side == "Long":
-            return False, f"استحواذ البيتكوين صاعد (تدفق رأس مال من الألتكوينز للبيتكوين) — بيئة ضعيفة لصفقات Long بالألتكوينز حالياً", "btc_dominance_filter"
+            return False, f"استحواذ البيتكوين صاعد ({btc_dominance_trend['current']:.2f}%، تدفق رأس مال من الألتكوينز للبيتكوين) — بيئة ضعيفة لصفقات Long بالألتكوينز حالياً", "btc_dominance_filter"
         if dom_trend == "هابط" and result.side == "Short":
-            return False, f"استحواذ البيتكوين هابط (موسم ألتكوينز) — بيئة ضعيفة لصفقات Short بالألتكوينز حالياً", "btc_dominance_filter"
+            return False, f"استحواذ البيتكوين هابط ({btc_dominance_trend['current']:.2f}%، موسم ألتكوينز) — بيئة ضعيفة لصفقات Short بالألتكوينز حالياً", "btc_dominance_filter"
 
     # 🆕 فلتر توافق كبار المتداولين (Top Trader Ratio) — بطلب صريح، يشتغل على
     # **كل** الاستراتيجيات بدون استثناء (نفس أسلوب فلتر ضغط المتداولين). أدق

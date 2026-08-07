@@ -50,15 +50,26 @@ def fetch_btc_dominance_pct() -> Optional[float]:
         return None
 
 
-def get_btc_dominance_trend(min_points: int = 3) -> Optional[dict]:
+def get_btc_dominance_trend(min_points: int = 3, min_span_hours: float = 2.0) -> Optional[dict]:
     """يحسب اتجاه استحواذ البيتكوين خلال النافذة المحفوظة (حتى 6 ساعات) —
     يرجع {current, change_pct, trend} حيث trend = "صاعد" (استحواذ يرتفع =
     ضغط سلبي على الألتكوينز عموماً) أو "هابط" (استحواذ ينخفض = بيئة داعمة
-    للألتكوينز) أو "مستقر" (تغيّر ضئيل جداً)."""
+    للألتكوينز) أو "مستقر" (تغيّر ضئيل جداً).
+
+    🔴 إصلاح باق حقيقي (بطلب صريح، بعد ملاحظة تغيّر غير منطقي خلال 5 دقايق):
+    كانت الدالة تقارن "أقدم نقطة محفوظة" بـ"أحدث نقطة" بدون أي تحقق من الفرق
+    الزمني الفعلي بينهم. لو الأرشيف لسا يتجمّع (تطبيق بدأ حديثاً، أو تصفير
+    الأرشيف صار قريباً)، أقدم نقطة ممكن تكون من قبل دقايق بس، مو ساعات — فأي
+    تذبذب طبيعي بسيط بالبيانات (مو تغيّر كلي حقيقي) يظهر كـ"اتجاه" خاطئ.
+    الآن نشترط فرق زمني حقيقي كافٍ (ساعتين على الأقل) قبل ما نحسب أي اتجاه —
+    استحواذ البيتكوين مؤشر بطيء التغيّر بطبيعته، ما ينطقي يتغيّر بدقايق."""
     if len(_dominance_history) < min_points:
         return None
-    oldest = _dominance_history[0][1]
-    current = _dominance_history[-1][1]
+    oldest_ts, oldest = _dominance_history[0]
+    newest_ts, current = _dominance_history[-1]
+    span_hours = (newest_ts - oldest_ts) / (1000 * 60 * 60)
+    if span_hours < min_span_hours:
+        return None  # فرق زمني غير كافٍ — أي "اتجاه" هنا غير موثوق، مو مؤشر حقيقي
     change_pct = current - oldest  # فرق بالنقاط المئوية (مو نسبة مئوية للتغيّر)
     if abs(change_pct) < 0.15:
         trend = "مستقر"
@@ -66,4 +77,4 @@ def get_btc_dominance_trend(min_points: int = 3) -> Optional[dict]:
         trend = "صاعد"
     else:
         trend = "هابط"
-    return {"current": current, "change_pct": change_pct, "trend": trend}
+    return {"current": current, "change_pct": change_pct, "trend": trend, "span_hours": round(span_hours, 1)}
