@@ -21,14 +21,15 @@
 from typing import Optional, List
 
 from . import db
-from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, build_score_breakdown
+from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, build_score_breakdown, find_strongest_reaction_level
 
 
 def analyze_climactic_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
                                  micro: Optional[MarketMicrostructure] = None,
                                  trace: Optional[list] = None,
                                  current_price: Optional[float] = None,
-                                 settings: Optional[dict] = None, **kwargs) -> Optional[AnalysisResult]:
+                                 settings: Optional[dict] = None,
+                                 k1m: Optional[list] = None, **kwargs) -> Optional[AnalysisResult]:
     def _log(label, value, ok=None):
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})
@@ -110,6 +111,15 @@ def analyze_climactic_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         return None
 
     entry_price = current_price
+
+    # 🆕 اختيار أقوى نقطة دخول (بطلب صريح — نفس الإصلاح بكل الاستراتيجيات):
+    if k1m and len(k1m) >= 40:
+        reaction = find_strongest_reaction_level(k1m, side=side, current_price=entry_price, max_distance_pct=1.5)
+        if reaction is not None:
+            candidate_level = reaction["level"]
+            is_better_entry = (side == "Long" and candidate_level < entry_price) or (side == "Short" and candidate_level > entry_price)
+            if is_better_entry:
+                entry_price = candidate_level
     move_range = abs(swing_start_price - (climax_candle.low if side == "Long" else climax_candle.high))
     if move_range <= 0:
         return None

@@ -23,6 +23,7 @@
 """
 from typing import Optional, List
 
+from . import db
 from .analyzer import Kline, AnalysisResult, MarketMicrostructure, atr, _get_bias, build_score_breakdown, find_significant_swing, find_swing_via_macd
 
 
@@ -87,6 +88,7 @@ def analyze_mtf_fib_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     macd_swing = find_swing_via_macd(window, lookback=len(window))
     if macd_swing is None:
         _log("❌ تأكيد MACD المستقل للسوينق", "ما لقى قمة/قاع زخم واضح بالهستوجرام — رفض (السوينق غير مؤكَّد من مصدر مستقل)", False)
+        db.increment_rejection_counter("mtf_fib_macd_swing_not_found")
         return None
     macd_range = macd_swing["swing_high"] - macd_swing["swing_low"]
     if macd_range <= 0 or swing_range <= 0:
@@ -98,7 +100,18 @@ def analyze_mtf_fib_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     _log("مقارنة سوينق MACD المستقل", f"قمة {macd_swing['swing_high']:.6g} ← قاع {macd_swing['swing_low']:.6g} | تداخل={overlap_pct:.0%}", overlap_pct >= 0.4)
     if overlap_pct < 0.4:
         _log("❌ تأكيد MACD المستقل للسوينق", f"السوينقين مختلفين جداً (تداخل {overlap_pct:.0%} فقط) — السوينق غير حاسم، رفض", False)
+        db.increment_rejection_counter("mtf_fib_macd_swing_disagreement")
         return None
+
+    # 🔴 تقوية دور MACD (بطلب صريح: "اعتمد على أعمدة الماكد لتحديد القمم
+    # والقيعان" — مو بس فحص تحقق ثانوي فوق ZigZag). بعد ما يتأكد التوافق،
+    # **نستخدم قمة/قاع الزخم المكتشفة من أعمدة MACD نفسها** كالقيم الفعلية
+    # لرسم الفيبوناتشي، بدل قيم ZigZag الخام — لأن MACD يحدد فعلياً وين
+    # الزخم بدأ يتباطأ (نقطة التحول الحقيقية)، مو مجرد تجاوز عتبة سعر.
+    _log("✅ القمة/القاع النهائية المُعتمَدة (من أعمدة MACD)", f"قمة {macd_swing['swing_high']:.6g} ← قاع {macd_swing['swing_low']:.6g}", True)
+    swing_high, swing_low = macd_swing["swing_high"], macd_swing["swing_low"]
+    high_idx, low_idx = macd_swing["high_idx"], macd_swing["low_idx"]
+    swing_range = swing_high - swing_low
 
     if swing_range <= 0:
         return None

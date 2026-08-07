@@ -21,14 +21,15 @@
 """
 from typing import Optional
 
-from .analyzer import analyze, AnalysisResult, MarketMicrostructure, build_score_breakdown
+from .analyzer import analyze, AnalysisResult, MarketMicrostructure, build_score_breakdown, find_strongest_reaction_level
 from .liquidation_heatmap import estimate_liquidation_heatmap
 
 
 def analyze_liquidation_hunter(symbol: str, k4h, k1h, k15m, k5m, k_daily,
                                 micro: Optional[MarketMicrostructure] = None,
                                 trace: Optional[list] = None,
-                                current_price: Optional[float] = None, **kwargs) -> Optional[AnalysisResult]:
+                                current_price: Optional[float] = None,
+                                k1m: Optional[list] = None, **kwargs) -> Optional[AnalysisResult]:
     def _log(label, value, ok=None):
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})
@@ -114,6 +115,18 @@ def analyze_liquidation_hunter(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     else:
         entry_price = current_price + retest_buffer
     _log("📍 دخول محدد (Limit) عند إعادة اختبار بدل مطاردة السعر", f"{entry_price:.6g} (بدل سعر السوق {current_price:.6g})")
+
+    # 🆕 اختيار أقوى نقطة دخول (بطلب صريح — نفس الإصلاح بكل الاستراتيجيات):
+    # نقارن نقطة إعادة الاختبار الحالية (ATR×0.5) بأقوى نقطة تاريخية مكتشفة
+    # بفريم الدقيقة، ونستخدم الأفضل منطقياً.
+    if k1m and len(k1m) >= 40:
+        reaction = find_strongest_reaction_level(k1m, side=side, current_price=entry_price, max_distance_pct=1.5)
+        if reaction is not None:
+            candidate_level = reaction["level"]
+            is_better_entry = (side == "Long" and candidate_level < entry_price) or (side == "Short" and candidate_level > entry_price)
+            if is_better_entry:
+                _log("🎯 أقوى نقطة دخول مكتشفة (فريم الدقيقة)", f"{candidate_level:.6g} (قوة الانفجار: {reaction['explosion_score']:.1f}×ATR) — بدل نقطة إعادة الاختبار {entry_price:.6g}", True)
+                entry_price = candidate_level
 
     # بوابة تأكيد زخم إلزامية: هذي الاستراتيجية تحديداً تعتمد كلياً على استمرار زخم
     # حقيقي، فلازم يكون ضغط المتداولين الفعلي متوافق فعلاً وقت الدخول (لو توفرت البيانات)
