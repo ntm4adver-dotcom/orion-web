@@ -59,6 +59,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "max_price_divergence_pct": 0.5,  # 🆕 أقصى فرق مقبول (%) بين السعر المتداول والسعر المرجعي/المؤشر
     "is_top_trader_filter_enabled": 0,  # 🆕 شرط عام (لكل الاستراتيجيات): رفض أي صفقة بدون توافق كبار المتداولين مع اتجاهها
     "min_top_trader_alignment": 0.1,  # 🆕 أقل انحياز مطلوب لكبار المتداولين (-1..1) لاعتبار التوافق كافياً
+    "is_btc_dominance_filter_enabled": 0,  # 🆕 فلتر للألتكوينز فقط: رفض Long وقت استحواذ بيتكوين صاعد، ورفض Short وقت استحواذ هابط
     "min_btc_correlation": 0.35,  # الحد الأدنى لمعامل الارتباط بالبيتكوين قبل اعتبار العملة "فكّت الارتباط"
     "is_btc_decoupling_exception_enabled": 1,  # 🆕 لو مفعّل: العملة اللي "فكّت ارتباطها" تُقيَّم بناءً على اتجاهها الخاص بدل البيتكوين. لو معطّل: كل الصفقات تُقيَّم دايماً بالنسبة لاتجاه البيتكوين، حتى لو الارتباط ضعيف مؤقتاً (بطلب صريح: فك الارتباط أحياناً مؤقت والسوق يجبر العملة ترجع تتبع البيتكوين لاحقاً)
     "is_breakeven_stop_enabled": 1,  # نقل الوقف لنقطة الدخول تلقائياً عند تحقيق ربح 1R
@@ -262,7 +263,7 @@ def get_settings() -> Dict[str, Any]:
                  "is_efficiency_filter_enabled", "is_market_alignment_filter_enabled",
                  "is_breakeven_stop_enabled", "is_auto_breakeven_half_target_enabled",
                  "is_split_targets_enabled", "is_market_regime_filter_enabled", "is_reverse_mode_enabled", "is_fixed_rr_enabled",
-                 "is_btc_decoupling_exception_enabled", "is_taker_pressure_filter_enabled", "is_coin_hard_block_enabled", "is_price_divergence_filter_enabled", "is_top_trader_filter_enabled",
+                 "is_btc_decoupling_exception_enabled", "is_taker_pressure_filter_enabled", "is_coin_hard_block_enabled", "is_price_divergence_filter_enabled", "is_top_trader_filter_enabled", "is_btc_dominance_filter_enabled",
                  "is_coin_quality_filter_enabled"):
         settings[bkey] = bool(int(settings.get(bkey, 0)))
     return settings

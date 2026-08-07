@@ -122,7 +122,8 @@ def _fetch_klines_cached(exchange, symbol: str, timeframe: str, target_count: in
 
 def evaluate_signal_filters(settings: dict, symbol: str, strategy_key: str, result,
                              k4h, k1h, k15m, k5m, btc_trend=None, btc_klines=None,
-                             market_regime_er=None, micro=None, current_live_price=None) -> tuple:
+                             market_regime_er=None, micro=None, current_live_price=None,
+                             btc_dominance_trend=None) -> tuple:
     """🆕 دالة مشتركة نقية (بدون أي استدعاءات جانبية لقاعدة البيانات) تحتوي **كل**
     منطق الفلاتر بالضبط — يستخدمها الفحص الحي (scanner.py) **والاختبار الخلفي**
     (backtest.py) بنفس الطريقة تماماً، بنفس الإعدادات الفعلية، عشان الاختبار
@@ -177,6 +178,17 @@ def evaluate_signal_filters(settings: dict, symbol: str, strategy_key: str, resu
         worst_div = max(abs(mark_div) if mark_div is not None else 0, abs(index_div) if index_div is not None else 0)
         if (mark_div is not None or index_div is not None) and worst_div > max_div:
             return False, f"فرق كبير بين السعر المتداول والسعر المرجعي/المؤشر ({worst_div:.2f}% > {max_div}%) — سيولة رقيقة أو حركة مصطنعة لحظياً", "price_divergence_filter"
+
+    # 🆕 فلتر استحواذ البيتكوين (BTC Dominance) — بطلب صريح، يشتغل على
+    # **الألتكوينز فقط** (نستثني البيتكوين نفسه — المؤشر لا معنى له عليه).
+    # استحواذ صاعد = تدفق رأس مال من الألتكوينز للبيتكوين (ضغط سلبي عام على
+    # الألتات)، فنرفض صفقات Long بالألتكوينز وقتها. العكس بالعكس.
+    if settings.get("is_btc_dominance_filter_enabled", False) and not symbol.upper().startswith("BTC") and btc_dominance_trend is not None:
+        dom_trend = btc_dominance_trend.get("trend")
+        if dom_trend == "صاعد" and result.side == "Long":
+            return False, f"استحواذ البيتكوين صاعد (تدفق رأس مال من الألتكوينز للبيتكوين) — بيئة ضعيفة لصفقات Long بالألتكوينز حالياً", "btc_dominance_filter"
+        if dom_trend == "هابط" and result.side == "Short":
+            return False, f"استحواذ البيتكوين هابط (موسم ألتكوينز) — بيئة ضعيفة لصفقات Short بالألتكوينز حالياً", "btc_dominance_filter"
 
     # 🆕 فلتر توافق كبار المتداولين (Top Trader Ratio) — بطلب صريح، يشتغل على
     # **كل** الاستراتيجيات بدون استثناء (نفس أسلوب فلتر ضغط المتداولين). أدق
@@ -579,6 +591,20 @@ class ScannerState:
         except Exception:
             market_regime_er = None
 
+        # 🆕 استحواذ البيتكوين (BTC Dominance) — بطلب صريح: مؤشر مهم للألتكوينز
+        # تحديداً (كل استراتيجياتنا تتداول ألتكوينز، مو البيتكوين نفسه). ارتفاع
+        # الاستحواذ = تدفق رأس مال من الألتكوينز للبيتكوين (ضغط سلبي على الألتات
+        # حتى لو السوق العام "صاعد")، وانخفاضه = بيئة داعمة للألتكوينز.
+        btc_dominance_trend = None
+        try:
+            from . import market_data
+            market_data.fetch_btc_dominance_pct()
+            btc_dominance_trend = market_data.get_btc_dominance_trend()
+            if btc_dominance_trend:
+                db.add_log(f"₿ استحواذ البيتكوين: {btc_dominance_trend['current']:.2f}% ({btc_dominance_trend['trend']}، تغيّر {btc_dominance_trend['change_pct']:+.2f} نقطة آخر 6 ساعات)")
+        except Exception as e:
+            db.add_log(f"⚠️ تعذر جلب استحواذ البيتكوين: {e}")
+
         for idx, symbol in enumerate(symbols):
             if self._stop_flag.is_set():
                 break
@@ -713,7 +739,7 @@ class ScannerState:
                         continue
                     matched_any = True
                     self._process_signal(settings, symbol, strategy_key, result, k4h_confirmed, k1h_confirmed, k15m_confirmed, k5m_confirmed,
-                                          btc_trend, btc_klines, market_regime_er, current_live_price, micro)
+                                          btc_trend, btc_klines, market_regime_er, current_live_price, micro, btc_dominance_trend)
 
                 if not matched_any:
                     db.add_log(f"▫️ {symbol}: ليس له اتجاه كافٍ حالياً.")
@@ -735,7 +761,7 @@ class ScannerState:
                 f"أو حصل خطأ أثناء التحليل:\n\n{body}",
             )
 
-    def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k15m, k5m, btc_trend=None, btc_klines=None, market_regime_er=None, current_live_price=None, micro=None):
+    def _process_signal(self, settings: dict, symbol: str, strategy_key: str, result, k4h, k1h, k15m, k5m, btc_trend=None, btc_klines=None, market_regime_er=None, current_live_price=None, micro=None, btc_dominance_trend=None):
         # 🔴 إصلاح موقع معماري (اكتُشف بمراجعة شاملة): فلتر الحد الأدنى لعائد/مخاطرة
         # الهدف الحقيقي (min_structural_rr_filter) كان هنا بـ_process_signal —
         # دالة خاصة بالفحص الحي بس، ما يستدعيها الباك-تست إطلاقاً. يعني نتائج
@@ -787,7 +813,7 @@ class ScannerState:
             # نعالج النسخة المعكوسة بشكل مستقل تماماً (استدعاء منفصل، نفس كل الفلاتر)،
             # واللاحقة _REVERSED تمنع أي عودية لانهائية (ما يدخل هذا الشرط مرة ثانية)
             self._process_signal(settings, symbol, f"{strategy_key}_REVERSED", reversed_result,
-                                  k4h, k1h, k15m, k5m, btc_trend, btc_klines, market_regime_er, current_live_price, micro)
+                                  k4h, k1h, k15m, k5m, btc_trend, btc_klines, market_regime_er, current_live_price, micro, btc_dominance_trend)
             # نكمل الآن معالجة الصفقة **الأصلية** بشكل طبيعي تماماً (بدون أي تعديل عليها)
 
 
@@ -797,6 +823,7 @@ class ScannerState:
         accepted, reason, counter_key = evaluate_signal_filters(
             settings, symbol, strategy_key, result, k4h, k1h, k15m, k5m,
             btc_trend, btc_klines, market_regime_er, micro, current_live_price,
+            btc_dominance_trend,
         )
         if not accepted:
             db.add_log(f"⏳ [{symbol}/{strategy_key}] تم تخطي الإشارة: {reason}.")

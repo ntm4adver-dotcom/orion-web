@@ -189,6 +189,19 @@
       </div>
 
       <div class="card" style="margin-top:14px; background:rgba(56,189,248,0.05);">
+        <h3 style="margin-top:0; font-size:15px;">₿ فلتر استحواذ البيتكوين (BTC Dominance) — للألتكوينز فقط</h3>
+        <div class="switch">
+          <input type="checkbox" name="is_btc_dominance_filter_enabled" {{ 'checked' if s.is_btc_dominance_filter_enabled }}>
+          <label style="margin:0;">رفض Long وقت استحواذ صاعد (ضغط سلبي على الألتات)، ورفض Short وقت استحواذ هابط (موسم ألتكوينز)</label>
+        </div>
+        <p class="muted" style="font-size:12px; line-height:1.8; margin-top:8px;">
+          استحواذ البيتكوين صاعد = رأس المال يتدفق من الألتكوينز للبيتكوين — حتى لو السوق العام "صاعد"
+          بالقيمة الإجمالية، الألتكوينز فعلياً أضعف نسبياً. المصدر: CoinGecko (مجاني). يُستثنى البيتكوين
+          نفسه تلقائياً من هذا الفلتر (المؤشر لا معنى له عليه).
+        </p>
+      </div>
+
+      <div class="card" style="margin-top:14px; background:rgba(56,189,248,0.05);">
         <h3 style="margin-top:0; font-size:15px;">🌊 عتبات "الحركة الحاسمة" — ارتداد فوليوم التصريف</h3>
         <p class="muted" style="font-size:12px; line-height:1.8;">
           كانت هذي الأرقام ثابتة بالكود، صارت إعدادات قابلة للتعديل (بطلب صريح بعد مراجعة فترة نتائجها كانت
