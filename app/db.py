@@ -24,7 +24,7 @@ if (os.path.abspath(DB_PATH) != os.path.abspath(_OLD_DEFAULT_DB_PATH)
 _lock = threading.Lock()
 
 DEFAULT_SETTINGS: Dict[str, Any] = {
-    "scan_interval_seconds": 30,
+    "scan_interval_seconds": 300,
     "telegram_token": "",
     "telegram_chat_ids": "",
     "telegram_contacts_json": "[]",  # [{"name": "...", "chat_id": "..."}, ...] — المصدر الأصلي، telegram_chat_ids مشتق منه تلقائياً
@@ -35,15 +35,15 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "is_single_coin_mode_enabled": 0,
     "single_coin_symbol": "BTCUSDT",
     "watchlist_json": '["BTCUSDT"]',  # المصدر الأصلي لقائمة المراقبة، single_coin_symbol مشتق منه تلقائياً
-    "symbols_limit": 10,
+    "symbols_limit": 50,
     "is_volume_filter_enabled": 0,
     "min_volume_ratio": 0.8,
     "is_vwap_filter_enabled": 0,
     "is_4h_buyers_filter_enabled": 0,
     "min_4h_buyers_percentage": 60,
     "is_cancel_if_exceeds_target_enabled": 1,
-    "exchange": "binance",  # 'binance' or 'okx' for market data source
-    "symbol_selection_mode": "top_volume",  # top_volume / big_movers / high_funding / oi_spike
+    "exchange": "okx",  # 🔴 بطلب صريح — نبقى على OKX حصراً
+    "symbol_selection_mode": "oi_spike",  # 🔴 يناسب طبيعة استراتيجياتك (صيد استوبات/تصفيات) أكثر من top_volume الهادئ
     "is_auto_backup_enabled": 1,
     "auto_backup_interval_hours": 6,
     "auto_backup_retention_count": 10,
@@ -55,23 +55,23 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "min_efficiency_ratio": 0.15,  # الحد الأدنى لنسبة الكفاءة الاتجاهية (0-1، كل ما زاد كل ما كان الاتجاه أنظف) — خُفّض من 0.28 بناءً على دليل رفض مفرط فعلي
     "is_market_alignment_filter_enabled": 1,  # رفض أي صفقة تعاكس اتجاه السوق العام (البيتكوين)
     "is_taker_pressure_filter_enabled": 0,  # 🆕 شرط إلزامي عام (لكل الاستراتيجيات): رفض أي صفقة ما فيها تأكيد ضغط متداولين فعلي واضح ومتوافق مع الاتجاه — بناءً على مراجعة صفقات حقيقية أظهرت فاصل واضح بين الرابح والخاسر (scalp_precision تحديداً)
-    "is_price_divergence_filter_enabled": 0,  # 🆕 فلتر حماية عام: رفض أي صفقة لو السعر المتداول يبتعد كثير عن Mark Price/Index Price (سيولة رقيقة أو تلاعب لحظي)
+    "is_price_divergence_filter_enabled": 1,  # 🔴 حماية منطقية بحدود واسعة (0.5%)، خطر رفض خاطئ منخفض
     "max_price_divergence_pct": 0.5,  # 🆕 أقصى فرق مقبول (%) بين السعر المتداول والسعر المرجعي/المؤشر
     "is_top_trader_filter_enabled": 0,  # 🆕 شرط عام (لكل الاستراتيجيات): رفض أي صفقة بدون توافق كبار المتداولين مع اتجاهها
     "min_top_trader_alignment": 0.1,  # 🆕 أقل انحياز مطلوب لكبار المتداولين (-1..1) لاعتبار التوافق كافياً
     "is_btc_dominance_filter_enabled": 0,  # 🆕 فلتر للألتكوينز فقط: رفض Long وقت استحواذ بيتكوين صاعد، ورفض Short وقت استحواذ هابط
     "min_btc_correlation": 0.35,  # الحد الأدنى لمعامل الارتباط بالبيتكوين قبل اعتبار العملة "فكّت الارتباط"
-    "is_btc_decoupling_exception_enabled": 1,  # 🆕 لو مفعّل: العملة اللي "فكّت ارتباطها" تُقيَّم بناءً على اتجاهها الخاص بدل البيتكوين. لو معطّل: كل الصفقات تُقيَّم دايماً بالنسبة لاتجاه البيتكوين، حتى لو الارتباط ضعيف مؤقتاً (بطلب صريح: فك الارتباط أحياناً مؤقت والسوق يجبر العملة ترجع تتبع البيتكوين لاحقاً)
+    "is_btc_decoupling_exception_enabled": 0,  # 🔴 بطلبك الصريح — فك الارتباط أحياناً مؤقت والسوق يجبر العملة ترجع تتبع البيتكوين لاحقاً، فنتجاهل الاستثناء دايماً
     "is_breakeven_stop_enabled": 1,  # نقل الوقف لنقطة الدخول تلقائياً عند تحقيق ربح 1R
     "min_signal_score": 0,  # الحد الأدنى لنقاط قوة الإشارة (0-100) — 0 يعني بدون فلترة إضافية
-    "is_market_regime_filter_enabled": 0,  # رفض الصفقات المعاكسة لترند سوق عام ضعيف/متذبذب (فلتر اختياري، مو بس تعزيز)
+    "is_market_regime_filter_enabled": 1,  # 🔴 دليل حقيقي: فترة ترند قوي أعطت 80% نجاح فعلياً
     "min_market_regime_er": 0.3,  # الحد الأدنى لكفاءة نظام السوق العام قبل قبول أي صفقة (يُستخدم بس لو الفلتر أعلاه مفعّل)
     "is_reverse_mode_enabled": 0,  # وضع الاختبار العكسي: يقلب كل إشارة (Long↔Short) بنفس مسافات الوقف/الهدف لمقارنة الأداء
     "breakeven_trigger_r_multiple": 1.0,  # نسبة المخاطرة (R) المطلوبة لتفعيل وقف التعادل — تُستخدم بس لو الوضع التلقائي أدناه مُلغى
     "is_auto_breakeven_half_target_enabled": 1,  # الافتراضي: تفعيل تلقائي لوقف التعادل عند نصف عائد/مخاطرة الصفقة نفسها
     "is_split_targets_enabled": 0,  # تقسيم الهدف لهدفين: نصف الكمية عند نصف المسافة، والنصف الثاني عند الهدف الكامل
-    "is_fixed_rr_enabled": 0,  # 🔴 صار "حد أدنى" (فلتر رفض) للعائد/مخاطرة الحقيقي من هدف الاستراتيجية، مو استبدال قسري للهدف — لازم يكون مفعّل عشان يرفض أي صفقة عائدها الحقيقي أقل من fixed_rr_value
-    "fixed_rr_value": 3.0,  # 🆕 قيمة R الثابتة المفروضة (لو الإعداد أعلاه مفعّل) - الهدف = الدخول ± (المخاطرة × هذا الرقم)
+    "is_fixed_rr_enabled": 1,  # 🔴 فعّلناه افتراضياً — حماية حقيقية ضد أهداف غير واقعية بعيدة عن هيكل السوق
+    "fixed_rr_value": 2.0,  # 🔴 نزّلناها من 3.0 — يتناسب مع حجم الوقف المُضيَّق الحالي (فلسفة السكالب)، بدل رقم كان مصمم لأوقاف أوسع
     "fixed_rr_mode": "filter",  # 🆕 "filter" (افتراضي، آمن): يرفض الصفقة لو الهدف الحقيقي أقل من R المطلوب، يقلّص لو أكبر | "always_force" (بطلب صريح): يعيّن الهدف = R المختار دائماً بدون أي رفض
     "combined_enabled_strategies": "",  # قائمة مفاتيح استراتيجيات مفصولة بفاصلة تعمل داخل وضع "الكل معاً" — فاضي = الكل مفعّل
     # OKX trading connection
@@ -99,8 +99,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "is_coin_hard_block_enabled": 0,  # رفض قاطع (مو بس رفع حد أدنى) لعملة سجلها الكلي كارثي على كل الاتجاهات والاستراتيجيات
     "is_coin_quality_filter_enabled": 1,  # 🆕 فلتر جودة استباقي مستقل عن سجل صفقاتنا — يفحص سلوك سعر العملة نفسه (كفاءة اتجاهية، شموع شاذة، تقلب) قبل أي استراتيجية
     "min_coin_efficiency_ratio": 0.05,  # 🆕 أقل كفاءة اتجاهية عامة مقبولة (200 شمعة 15د) — أقل من كذا = حركة عشوائية بلا معنى
-    "max_coin_wick_outlier_ratio": 6.0,  # 🆕 أقصى نسبة مقبولة لأكبر شمعة (200 ساعة) مقارنة بالمدى المعتاد — أعلى من كذا = شموع شاذة/سلوك غير طبيعي
-    "max_coin_atr_pct": 8.0,  # 🆕 أقصى تقلب مقبول (ATR كنسبة من السعر على فريم الساعة) — أعلى من كذا = عملة برية جداً
+    "max_coin_wick_outlier_ratio": 10.0,  # 🔴 وسط بين 6 (شدّد جداً، عارض stop_hunt) و12 (مرن جداً)
+    "max_coin_atr_pct": 10.0,  # 🔴 وسط بين 8 و15 اللي جرّبناهم
     "climactic_min_extended_move_pct": 5.0,  # 🆕 أقل حركة ممتدة (%) قبل قبول ارتداد فوليوم التصريف — ارفعه لتفضيل حركات أقوى/أحسم
     "climactic_min_volume_ratio": 8.0,  # 🆕 أقل نسبة فوليوم لشمعة التصريف (مضاعف المتوسط) — ارفعه لتفضيل استنزاف أوضح
     "climactic_confirm_margin_atr": 0.3,  # 🆕 هامش تأكيد الانعكاس (مضاعف ATR) — ارفعه لرفض الارتدادات الهامشية بشكل أشد
