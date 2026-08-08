@@ -11,7 +11,7 @@ from . import binance_client
 from . import okx_client
 from . import telegram_alert
 from . import learning
-from .analyzer import MarketMicrostructure, Kline, assess_coin_tradability
+from .analyzer import MarketMicrostructure, Kline, assess_coin_tradability, find_entry_cluster
 from .strategies import get_active_strategies, strategy_label
 
 
@@ -201,6 +201,51 @@ def evaluate_signal_filters(settings: dict, symbol: str, strategy_key: str, resu
             return False, f"استحواذ البيتكوين صاعد ({btc_dominance_trend['current']:.2f}%، تدفق رأس مال من الألتكوينز للبيتكوين) — بيئة ضعيفة لصفقات Long بالألتكوينز حالياً", "btc_dominance_filter"
         if dom_trend == "هابط" and result.side == "Short":
             return False, f"استحواذ البيتكوين هابط ({btc_dominance_trend['current']:.2f}%، موسم ألتكوينز) — بيئة ضعيفة لصفقات Short بالألتكوينز حالياً", "btc_dominance_filter"
+
+    # 🆕 تحسين مركزي بمرجعية بروفايل الفوليوم (بطلب صريح: "لكل الاستراتيجيات")
+    # — يشتغل على نتيجة أي استراتيجية بعد ما تحدد وقفها وهدفها، ويحاول
+    # يضيّق الوقف ويقرّب الهدف لأقرب مستوى تداول حقيقي (POC/VAH/VAL)، بدل
+    # الأرقام الخام المحسوبة داخل كل استراتيجية لحالها. آمن باتجاه واحد بس
+    # (يضيّق/يقرّب، ما يوسّع/يبعّد أبداً).
+    if settings.get("is_volume_profile_refinement_enabled", False) and len(k1h) >= 30:
+        try:
+            from .volume_profile import compute_volume_profile, find_volume_profile_entry, refine_stop_and_target_with_profile
+            profile = compute_volume_profile(k1h[-100:])
+            if profile is not None:
+                # 🔴 إعادة تصميم ثانية (بطلب صريح: "كلاستر بيكون أقوى") — كان
+                # النظام السابق **يستبدل** نقطة الدخول (حتى لو أصلاً محسَّنة
+                # بفريم الدقيقة داخل الاستراتيجية) بمجرد إن بروفايل الفوليوم
+                # لقى نقطة "أرخص"، بدون أي اعتبار لقوة الدليل — تراجع محتمل،
+                # مو تحسين مضمون. الآن: نبني "تجمّع" (Confluence) بين نقطة
+                # الدخول الحالية (اللي ممكن تكون أصلاً مؤكَّدة بدليل فريم
+                # الدقيقة) ونقطة بروفايل الفوليوم — **نستبدل بس لو المصدرين
+                # يتفقان فعلياً على نفس المنطقة** (تأكيد مزدوج مستقل)، وإلا
+                # نبقي على نقطة الدخول الأصلية كما هي بدون أي تغيير.
+                entry_candidate = find_volume_profile_entry(profile, result.side, result.entry_price, max_distance_pct=2.0)
+                if entry_candidate is not None:
+                    candidates = [
+                        {"level": result.entry_price, "source": "نقطة الدخول الحالية"},
+                        {"level": entry_candidate["level"], "source": f"بروفايل الفوليوم ({entry_candidate['source']})"},
+                    ]
+                    cluster = find_entry_cluster(candidates, tolerance_pct=0.5)
+                    if cluster is not None:
+                        new_entry = cluster["level"]
+                        stays_valid = (result.side == "Long" and result.stop_loss < new_entry < result.take_profit) or \
+                                      (result.side == "Short" and result.take_profit < new_entry < result.stop_loss)
+                        if stays_valid:
+                            result.behavior = f"[📊 تجمّع تأكيد (Confluence): {' + '.join(cluster['sources'])} على منطقة {new_entry:.6g}] " + result.behavior
+                            result.entry_price = new_entry
+                    # لو ما فيه تجمّع (المصدرين مختلفين) — نبقي نقطة الدخول الحالية كما هي، بدون أي تغيير
+
+                # نحسّن الوقف/الهدف أيضاً (باتجاه واحد بس — يضيّق/يقرّب، ما يوسّع أبداً)
+                new_sl, new_tp = refine_stop_and_target_with_profile(
+                    profile, result.side, result.entry_price, result.stop_loss, result.take_profit,
+                )
+                if new_sl != result.stop_loss or new_tp != result.take_profit:
+                    result.behavior = f"[📊 وقف/هدف مُحسَّن ببروفايل الفوليوم: وقف {new_sl:.6g}، هدف {new_tp:.6g}] " + result.behavior
+                    result.stop_loss, result.take_profit = new_sl, new_tp
+        except Exception:
+            pass  # فشل حساب البروفايل ما يوقف الصفقة — نكمل بالأرقام الأصلية
 
     # 🆕 فلتر توافق كبار المتداولين (Top Trader Ratio) — بطلب صريح، يشتغل على
     # **كل** الاستراتيجيات بدون استثناء (نفس أسلوب فلتر ضغط المتداولين). أدق

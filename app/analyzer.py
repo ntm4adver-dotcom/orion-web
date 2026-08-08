@@ -62,6 +62,7 @@ class AnalysisResult:
     tp1: float = 0.0
     score_breakdown: list = None  # قائمة {factor, points, confirmed, earned} — تُضبط لكل استراتيجية
     signal_score: float = 100.0   # مجموع النقاط المكتسبة فعلياً من أصل 100
+    entry_confidence: Optional[str] = None  # 🆕 "reaction_level" لو نقطة الدخول مبنية على دليل قوي (انفجار سعري مُقاس بفريم الدقيقة) — يمنع استبدالها الأعمى لاحقاً
 
 
 def build_score_breakdown(factors: list) -> tuple:
@@ -539,6 +540,34 @@ def find_significant_swing(klines: List[Kline], atr_val: float, min_move_atr: fl
         return {"high_idx": idx_a, "swing_high": price_a, "low_idx": idx_b, "swing_low": price_b,
                 "direction": "down", "leg_efficiency": er}
     return None
+
+
+def find_entry_cluster(candidates: List[dict], tolerance_pct: float = 0.5) -> Optional[dict]:
+    """🆕 يبحث عن تكتّل (Confluence) بين نقاط دخول مرشحة من **مصادر مستقلة
+    تماماً عن بعض** (بطلب صريح: "كلاستر بيكون أقوى"). كل candidate صيغته
+    {'level': float, 'source': str}. لو نقطتين أو أكثر من مصادر مختلفة
+    قريبة من بعض (بحدود tolerance_pct)، هذا **تأكيد متعدد المصادر** على نفس
+    المنطقة السعرية — أقوى بكثير من أي مصدر واحد لحاله. يرجع متوسط النقاط
+    المتجمّعة + قائمة المصادر المتفقة، أو None لو ما فيه تجمّع حقيقي."""
+    if len(candidates) < 2:
+        return None
+    best_cluster = None
+    for i, c1 in enumerate(candidates):
+        if c1["level"] <= 0:
+            continue
+        cluster = [c1]
+        for j, c2 in enumerate(candidates):
+            if i == j:
+                continue
+            if abs(c1["level"] - c2["level"]) / c1["level"] * 100 <= tolerance_pct:
+                cluster.append(c2)
+        if best_cluster is None or len(cluster) > len(best_cluster):
+            best_cluster = cluster
+    if best_cluster is None or len(best_cluster) < 2:
+        return None
+    avg_level = sum(c["level"] for c in best_cluster) / len(best_cluster)
+    sources = [c["source"] for c in best_cluster]
+    return {"level": avg_level, "sources": sources, "confluence_count": len(best_cluster)}
 
 
 def find_strongest_reaction_level(klines: List[Kline], side: str, current_price: float,
