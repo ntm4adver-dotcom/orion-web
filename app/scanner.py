@@ -235,6 +235,11 @@ def evaluate_signal_filters(settings: dict, symbol: str, strategy_key: str, resu
                         if stays_valid:
                             result.behavior = f"[📊 تجمّع تأكيد (Confluence): {' + '.join(cluster['sources'])} على منطقة {new_entry:.6g}] " + result.behavior
                             result.entry_price = new_entry
+                            # 🆕 تعزيز درجة قوة نقطة الدخول — تجمّع مصدرين مستقلين دليل قوي حقيقي
+                            if result.entry_strength_notes is None:
+                                result.entry_strength_notes = []
+                            result.entry_strength_score = min(100.0, (result.entry_strength_score or 0.0) + 30.0)
+                            result.entry_strength_notes.append(f"تجمّع تأكيد (بروفايل الفوليوم): {' + '.join(cluster['sources'])}")
                     # لو ما فيه تجمّع (المصدرين مختلفين) — نبقي نقطة الدخول الحالية كما هي، بدون أي تغيير
 
                 # نحسّن الوقف/الهدف أيضاً (باتجاه واحد بس — يضيّق/يقرّب، ما يوسّع أبداً)
@@ -352,6 +357,14 @@ def evaluate_signal_filters(settings: dict, symbol: str, strategy_key: str, resu
     block_reason = learning.is_coin_blocked(result.symbol, settings)
     if block_reason:
         return False, block_reason, "coin_hard_block"
+
+    # 🆕 معايرة حقيقية للاحتمالية (بطلب صريح) — تشتغل **قبل** فحص الحد الأدنى
+    # مباشرة، عشان القرار يُبنى على الرقم المُعايَر الحقيقي، مو الرقم القواعدي
+    # الخام (اللي أثبتنا مراراً إنه غير موثوق بالتصديرات الحقيقية).
+    calibrated_prob, calibration_note = learning.get_calibrated_probability(strategy_key, result.prob, settings)
+    if calibration_note:
+        result.behavior = f"[{calibration_note}] " + result.behavior
+        result.prob = calibrated_prob
 
     req_prob, _ = learning.effective_threshold(result.symbol, result.side, settings, strategy_key=strategy_key)
     if result.prob < req_prob:
@@ -916,6 +929,8 @@ class ScannerState:
             "signal_score": getattr(result, "signal_score", 100.0),
             "score_breakdown": getattr(result, "score_breakdown", None),
             "split_targets_used": settings.get("is_split_targets_enabled", False),
+            "entry_strength_score": getattr(result, "entry_strength_score", 20.0),
+            "entry_strength_notes": getattr(result, "entry_strength_notes", None),
         })
 
         if settings["is_telegram_enabled"]:

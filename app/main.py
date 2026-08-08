@@ -97,7 +97,7 @@ async def settings_save(request: Request):
                   "is_efficiency_filter_enabled", "is_market_alignment_filter_enabled",
                   "is_breakeven_stop_enabled", "is_auto_breakeven_half_target_enabled",
                   "is_split_targets_enabled", "is_market_regime_filter_enabled", "is_reverse_mode_enabled", "is_fixed_rr_enabled",
-                  "is_btc_decoupling_exception_enabled", "is_taker_pressure_filter_enabled", "is_coin_hard_block_enabled", "is_price_divergence_filter_enabled", "is_top_trader_filter_enabled", "is_btc_dominance_filter_enabled",
+                  "is_btc_decoupling_exception_enabled", "is_taker_pressure_filter_enabled", "is_coin_hard_block_enabled", "is_price_divergence_filter_enabled", "is_top_trader_filter_enabled", "is_btc_dominance_filter_enabled", "is_volume_profile_refinement_enabled", "is_probability_calibration_enabled",
                   "is_coin_quality_filter_enabled"]
     updates = {}
     for key in db.DEFAULT_SETTINGS:

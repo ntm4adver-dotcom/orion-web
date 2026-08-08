@@ -34,6 +34,7 @@ from .analyzer import (
     Kline, AnalysisResult, MarketMicrostructure, atr, build_score_breakdown,
     structural_stop_loss, detect_fakeout_rejection, detect_immediate_reversal_after_sweep,
     low_vol, in_kill_zone, check_irrational_market, daily_trend, _hma_bias_pair,
+    find_previous_day_high_low,
 )
 
 
@@ -61,11 +62,16 @@ def analyze_daily_breakout(
         _log("عدد شموع 5 دقائق كافٍ", len(k5m), False)
         return None
 
-    # اليوم الحالي غالباً لسا قيد التكوين بالشمعة اليومية الأخيرة، فـ"اليوم
-    # السابق" فعلياً هو k_daily[-2]
-    prev_day = k_daily[-2]
-    prev_high, prev_low = prev_day.high, prev_day.low
-    _log("قمة اليوم السابق / قاعه", f"{prev_high:.6g} / {prev_low:.6g}")
+    # 🔴 إصلاح أدق (بطلب صريح): بدل الاعتماد على موقع بالمصفوفة (index) اللي
+    # يعتمد على افتراض هش (هل k_daily مُشذَّبة أو خام) — وهذا بالضبط سبب الباق
+    # اللي اكتشفناه قبل شوي — نطابق **التاريخ الفعلي** مباشرة. النتيجة صحيحة
+    # دايماً بغض النظر عن حالة المصفوفة أو طولها.
+    prev_hl = find_previous_day_high_low(k_daily)
+    if prev_hl is None:
+        _log("قمة/قاع اليوم السابق (مطابقة تاريخ فعلي)", "ما لقينا شمعة يومية سابقة مؤكَّدة — رفض", False)
+        return None
+    prev_high, prev_low = prev_hl
+    _log("قمة اليوم السابق / قاعه (مطابقة تاريخ فعلي)", f"{prev_high:.6g} / {prev_low:.6g}")
 
     # آخر شمعة 5 دقائق *مكتملة فعلياً* — نستبعد الشمعة الأخيرة (قيد التكوين)
     closed = k5m[-2]
@@ -231,7 +237,7 @@ def analyze_daily_breakout(
     return AnalysisResult(
         symbol=symbol,
         trend=h1_trend or side,
-        dt=daily_trend(k_daily),
+        dt=daily_trend(k_daily, already_confirmed=True),
         prob=prob,
         price=last_price,
         atr=atr5m,

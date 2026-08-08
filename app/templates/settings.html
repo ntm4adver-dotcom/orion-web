@@ -2,6 +2,19 @@
 {% block title %}الإعدادات - Orion{% endblock %}
 {% block content %}
 <form method="post" action="/settings">
+  <div class="card" style="background:rgba(148,163,184,0.05); border:1px solid rgba(148,163,184,0.2);">
+    <h3 style="margin-top:0;">📋 فهرس سريع</h3>
+    <p class="muted" style="font-size:12px; line-height:2;">
+      <span style="background:rgba(34,197,94,0.15); color:#22c55e; padding:2px 8px; border-radius:6px;">✅ أساسي</span>
+      = مفعّل افتراضياً أو عنده دليل أداء حقيقي وراه — فلتر جودة العملة، Market Regime، فرق Mark Price،
+      فيبوناتشي الحد الأدنى R:R.
+      <br>
+      <span style="background:rgba(251,191,36,0.15); color:#fbbf24; padding:2px 8px; border-radius:6px;">🧪 تجريبي</span>
+      = معطّل افتراضياً، منطقه سليم لكن بلا بيانات كافية بعد — ضغط المتداولين، كبار المتداولين، استحواذ
+      البيتكوين، بروفايل الفوليوم، معايرة الاحتمالية. راقبها بصفحة "التطور" قبل ما تثق فيها بثقة كبيرة.
+    </p>
+  </div>
+
   <div class="card">
     <h3>إعدادات الفحص العامة</h3>
     <div class="row">
@@ -125,7 +138,7 @@
       </p>
 
       <div class="card" style="margin-top:14px; background:rgba(56,189,248,0.05);">
-        <h3 style="margin-top:0; font-size:15px;">💥 ضغط المتداولين الفعليين (Taker Pressure) — شرط إلزامي</h3>
+        <h3 style="margin-top:0; font-size:15px;">💥 ضغط المتداولين الفعليين (Taker Pressure) — شرط إلزامي <span style="font-size:11px; background:rgba(251,191,36,0.15); color:#fbbf24; padding:2px 8px; border-radius:6px; vertical-align:middle;">🧪 تجريبي — يحتاج مراقبة</span></h3>
         <div class="switch">
           <input type="checkbox" name="is_taker_pressure_filter_enabled" {{ 'checked' if s.is_taker_pressure_filter_enabled }}>
           <label style="margin:0;">رفض أي صفقة (بكل الاستراتيجيات بدون استثناء) بدون تأكيد ضغط متداولين فعلي واضح ومتوافق</label>
@@ -150,7 +163,7 @@
       </div>
 
       <div class="card" style="margin-top:14px; background:rgba(56,189,248,0.05);">
-        <h3 style="margin-top:0; font-size:15px;">🛡️ فلتر حماية عام — فرق السعر عن Mark/Index Price</h3>
+        <h3 style="margin-top:0; font-size:15px;">🛡️ فلتر حماية عام — فرق السعر عن Mark/Index Price <span style="font-size:11px; background:rgba(34,197,94,0.15); color:#22c55e; padding:2px 8px; border-radius:6px; vertical-align:middle;">✅ أساسي</span></h3>
         <div class="switch">
           <input type="checkbox" name="is_price_divergence_filter_enabled" {{ 'checked' if s.is_price_divergence_filter_enabled }}>
           <label style="margin:0;">رفض أي صفقة (بكل الاستراتيجيات) لو السعر المتداول يبتعد كثير عن السعر المرجعي/المؤشر</label>
@@ -171,7 +184,7 @@
       </div>
 
       <div class="card" style="margin-top:14px; background:rgba(56,189,248,0.05);">
-        <h3 style="margin-top:0; font-size:15px;">🐋 توافق كبار المتداولين (Top Trader Ratio)</h3>
+        <h3 style="margin-top:0; font-size:15px;">🐋 توافق كبار المتداولين (Top Trader Ratio) <span style="font-size:11px; background:rgba(251,191,36,0.15); color:#fbbf24; padding:2px 8px; border-radius:6px; vertical-align:middle;">🧪 تجريبي — يحتاج مراقبة</span></h3>
         <div class="switch">
           <input type="checkbox" name="is_top_trader_filter_enabled" {{ 'checked' if s.is_top_trader_filter_enabled }}>
           <label style="margin:0;">رفض أي صفقة (بكل الاستراتيجيات) بدون توافق كبار المتداولين مع اتجاهها</label>
@@ -189,7 +202,7 @@
       </div>
 
       <div class="card" style="margin-top:14px; background:rgba(56,189,248,0.05);">
-        <h3 style="margin-top:0; font-size:15px;">₿ فلتر استحواذ البيتكوين (BTC Dominance) — للألتكوينز فقط</h3>
+        <h3 style="margin-top:0; font-size:15px;">₿ فلتر استحواذ البيتكوين (BTC Dominance) — للألتكوينز فقط <span style="font-size:11px; background:rgba(251,191,36,0.15); color:#fbbf24; padding:2px 8px; border-radius:6px; vertical-align:middle;">🧪 تجريبي — يحتاج مراقبة</span></h3>
         <div class="switch">
           <input type="checkbox" name="is_btc_dominance_filter_enabled" {{ 'checked' if s.is_btc_dominance_filter_enabled }}>
           <label style="margin:0;">رفض Long وقت استحواذ صاعد (ضغط سلبي على الألتات)، ورفض Short وقت استحواذ هابط (موسم ألتكوينز)</label>
@@ -198,6 +211,51 @@
           استحواذ البيتكوين صاعد = رأس المال يتدفق من الألتكوينز للبيتكوين — حتى لو السوق العام "صاعد"
           بالقيمة الإجمالية، الألتكوينز فعلياً أضعف نسبياً. المصدر: CoinGecko (مجاني). يُستثنى البيتكوين
           نفسه تلقائياً من هذا الفلتر (المؤشر لا معنى له عليه).
+        </p>
+      </div>
+
+      <div class="card" style="margin-top:14px; background:rgba(56,189,248,0.05);">
+        <h3 style="margin-top:0; font-size:15px;">📊 تحسين الوقف/الهدف ببروفايل الفوليوم — لكل الاستراتيجيات <span style="font-size:11px; background:rgba(251,191,36,0.15); color:#fbbf24; padding:2px 8px; border-radius:6px; vertical-align:middle;">🧪 تجريبي — يحتاج مراقبة</span></h3>
+        <div class="switch">
+          <input type="checkbox" name="is_volume_profile_refinement_enabled" {{ 'checked' if s.is_volume_profile_refinement_enabled }}>
+          <label style="margin:0;">تضييق الوقف وتقريب الهدف لأقرب مستوى تداول حقيقي (POC/VAH/VAL) بدل الأرقام الخام</label>
+        </div>
+        <p class="muted" style="font-size:12px; line-height:1.8; margin-top:8px;">
+          <b>POC</b> = السعر اللي تداول عنده أكبر حجم (منطقة قبول سعري قوية). <b>VAH/VAL</b> = حدود نطاق
+          70% من التداول. لو فيه واحد من هذي المستويات أقرب من الوقف/الهدف المحسوب أصلاً، نستخدمه بدلاً
+          منه — **باتجاه واحد بس** (يضيّق الوقف، يقرّب الهدف، ما يوسّعهم أو يبعّدهم أبداً).
+        </p>
+        <p class="muted" style="font-size:12px; line-height:1.8; margin-top:8px;">
+          ⚠️ لو مفعّل مع "فلتر R:R" (وضع filter): تقريب الهدف يقلّل عائد/مخاطرة الصفقة، فممكن يرفضها فلتر
+          R:R لو صار العائد أقل من المطلوب — هذا سلوك متعمَّد ومتّسق (هدف واقعي وغير كافٍ = صفقة تُرفض، مو تُمدَّد).
+        </p>
+      </div>
+
+      <div class="card" style="margin-top:14px; background:rgba(56,189,248,0.05);">
+        <h3 style="margin-top:0; font-size:15px;">🔬 معايرة حقيقية للاحتمالية — لكل الاستراتيجيات <span style="font-size:11px; background:rgba(251,191,36,0.15); color:#fbbf24; padding:2px 8px; border-radius:6px; vertical-align:middle;">🧪 تجريبي — يحتاج مراقبة</span></h3>
+        <div class="switch">
+          <input type="checkbox" name="is_probability_calibration_enabled" {{ 'checked' if s.is_probability_calibration_enabled }}>
+          <label style="margin:0;">استبدال رقم الثقة القواعدي الخام بنسبة نجاح فعلية مسجَّلة تاريخياً لنفس الاستراتيجية</label>
+        </div>
+        <p class="muted" style="font-size:12px; line-height:1.8; margin-top:8px;">
+          <b>المشكلة اللي تحلها:</b> رقم "الاحتمالية" الحالي بكل استراتيجية مبني على تقييم قواعدي ثابت
+          (نقاط لكل عامل تأكيد)، مو احتمالية إحصائية حقيقية — وهذا فسّر التباعد الكبير بين الثقة المعلنة
+          والنجاح الفعلي بكل التصديرات اللي راجعناها.
+        </p>
+        <p class="muted" style="font-size:12px; line-height:1.8; margin-top:8px;">
+          <b>الحل:</b> نبحث بالسجل — صفقات مغلقة فعلياً لنفس الاستراتيجية بنطاق ثقة قريب (±8%) — ونمزج
+          الرقم الخام مع نسبة النجاح الحقيقية المسجَّلة، بوزن يتزايد كل ما زادت العينة (سقف 70%، يبقى وزن
+          احتياطي دايماً للتقييم الأصلي).
+        </p>
+        <div class="row" style="margin-top:10px;">
+          <div>
+            <label>أقل عدد صفقات مغلقة مشابهة قبل الوثوق بالمعايرة</label>
+            <input type="number" step="1" min="5" name="probability_calibration_min_trades" value="{{ s.probability_calibration_min_trades }}">
+          </div>
+        </div>
+        <p class="muted" style="font-size:12px; line-height:1.8; margin-top:8px;">
+          ⚠️ لو ما فيه صفقات مغلقة كافية لاستراتيجية معينة بعد، الرقم الخام يبقى كما هو (بدون معايرة) — هذا
+          الزر "يستيقظ" تدريجياً كل ما تراكمت بيانات حقيقية أكثر.
         </p>
       </div>
 
@@ -228,7 +286,22 @@
       </div>
 
       <div class="card" style="margin-top:14px; background:rgba(56,189,248,0.05);">
-        <h3 style="margin-top:0; font-size:15px;">🚫 فلتر جودة العملة الاستباقي (Coin Tradability Gate)</h3>
+        <h3 style="margin-top:0; font-size:15px;">📐 نسبة تراجع فيبوناتشي الترند</h3>
+        <p class="muted" style="font-size:12px; line-height:1.8;">
+          ⚠️ <b>ملاحظة صادقة:</b> 0.72 (الافتراضي الحالي) <b>ليست مستوى فيبوناتشي كلاسيكي حقيقي</b> —
+          المستويات الكلاسيكية الفعلية: 23.6%، 38.2%، 50%، 61.8%، 78.6%. جرّب 0.618 أو 0.786 وقارن الأداء
+          بنفسك بصفحة "التطور".
+        </p>
+        <div class="row" style="margin-top:10px;">
+          <div>
+            <label>نسبة التراجع المستهدفة (0 إلى 1)</label>
+            <input type="number" step="0.01" min="0.3" max="0.95" name="mtf_fib_entry_level" value="{{ s.mtf_fib_entry_level }}">
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px; background:rgba(56,189,248,0.05);">
+        <h3 style="margin-top:0; font-size:15px;">🚫 فلتر جودة العملة الاستباقي (Coin Tradability Gate) <span style="font-size:11px; background:rgba(34,197,94,0.15); color:#22c55e; padding:2px 8px; border-radius:6px; vertical-align:middle;">✅ أساسي</span></h3>
         <div class="switch">
           <input type="checkbox" name="is_coin_quality_filter_enabled" {{ 'checked' if s.is_coin_quality_filter_enabled }}>
           <label style="margin:0;">فحص سلوك سعر العملة نفسها قبل أي استراتيجية — رفض كامل لهذي الدورة لو العملة سيئة السلوك</label>
@@ -260,7 +333,7 @@
       </div>
 
       <div class="card" style="margin-top:14px; background:rgba(56,189,248,0.05);">
-        <h3 style="margin-top:0; font-size:15px;">🌊 قوة نظام السوق العام (Market Regime)</h3>
+        <h3 style="margin-top:0; font-size:15px;">🌊 قوة نظام السوق العام (Market Regime) <span style="font-size:11px; background:rgba(34,197,94,0.15); color:#22c55e; padding:2px 8px; border-radius:6px; vertical-align:middle;">✅ أساسي</span></h3>
         <p class="muted" style="font-size:12px; line-height:1.8;">
           مبني على اكتشاف حقيقي: فترة سوق بترند واضح وقوي أعطت 80% نجاح، بينما فترات السوق المتذبذب أعطت
           نتائج ضعيفة جداً. <b>التعزيز مفعّل دائماً</b> (يزيد الثقة تلقائياً وقت ترند قوي، بدون أي إعداد) —
@@ -364,7 +437,7 @@
     </div>
 
     <div class="card" style="margin-top:16px; background:rgba(168,85,247,0.05);">
-      <h3 style="margin-top:0;">🎯 حد أدنى لعائد/مخاطرة الهدف الحقيقي (فلتر رفض، مو استبدال)</h3>
+      <h3 style="margin-top:0;">🎯 حد أدنى لعائد/مخاطرة الهدف الحقيقي (فلتر رفض، مو استبدال) <span style="font-size:11px; background:rgba(34,197,94,0.15); color:#22c55e; padding:2px 8px; border-radius:6px; vertical-align:middle;">✅ أساسي</span></h3>
       <div class="switch">
         <input type="checkbox" name="is_fixed_rr_enabled" {{ 'checked' if s.is_fixed_rr_enabled }}>
         <label style="margin:0;">رفض أي صفقة عائدها/مخاطرتها الحقيقي (من هدف الاستراتيجية الهيكلي) أقل من الحد الأدنى</label>

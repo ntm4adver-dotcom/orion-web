@@ -36,7 +36,8 @@ def _find_swing_extremes(window: List[Kline]):
 def analyze_mtf_fib_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
                            micro: Optional[MarketMicrostructure] = None,
                            trace: Optional[list] = None,
-                           current_price: Optional[float] = None, **kwargs) -> Optional[AnalysisResult]:
+                           current_price: Optional[float] = None,
+                           settings: Optional[dict] = None, **kwargs) -> Optional[AnalysisResult]:
     def _log(label, value, ok=None):
         if trace is not None:
             trace.append({"check": label, "value": value, "ok": ok})
@@ -50,7 +51,17 @@ def analyze_mtf_fib_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         _log("عدد شموع كافٍ (15د≥55، 5د≥350)", f"15د={len(k15m)}, 5د={len(k5m)}", False)
         return None
 
-    main_trend = _get_bias(k15m)
+    # 🔴 تصحيح دقيق (بطلب صريح، بعد مراجعة نقدية): كان الوصف السابق يسمّي منطقة
+    # 0.72 "مستوى فيبوناتشي كلاسيكي" — هذا **غير دقيق فنياً**. المستويات
+    # الكلاسيكية الحقيقية لفيبوناتشي هي 23.6%، 38.2%، 50%، 61.8%، 78.6% —
+    # 72% مو وحدة منها. الأقرب لتفسير هذا الرقم: منتصف تقريباً "منطقة الدخول
+    # المثلى" (OTE) اللي بعض مدارس التحليل (ICT) تستخدمها (تقريباً 62%-79%)،
+    # مو مستوى فيبوناتشي كلاسيكي معترف فيه عالمياً. بدل ما نغيّر الرقم بدون
+    # دليل أداء يبرر رقم بديل محدد، خليناه إعداد قابل للتعديل — جرّبه بنفسك
+    # (0.618 أو 0.786 مستويات كلاسيكية حقيقية لو حبيت تقارن الأداء).
+    fib_entry_level = float((settings or {}).get("mtf_fib_entry_level", 0.72))
+
+    main_trend = _get_bias(k15m, already_confirmed=True)
     _log("الاتجاه الرئيسي (15 دقيقة)", main_trend)
 
     # 🔴 تصحيح تعارض تحليلي حقيقي (اكتُشف بمراجعة تناسق زمني بين أجزاء الاستراتيجية،
@@ -175,14 +186,14 @@ def analyze_mtf_fib_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
 
         side = "Long"
         # 🔴 إصلاح جذري (بطلب صريح، مبني على مراجعة شارت حقيقية): كان الدخول عند
-        # منطقة فيبوناتشي 0.72 **بالضبط** — هذا مستوى كلاسيكي معروف جداً بين
-        # المتداولين والخوارزميات (منطقة "Golden Zone")، وبالتالي عرضة جداً لاصطياد
-        # سيولة (السعر يوصله، يُصطاد الوقف/الدخول المتجمع هناك، ثم يرتد) — بالضبط
-        # النمط اللي لوحظ على الشارت الحقيقي (السعر يتوقف عند نقطة الدخول ويتذبذب
-        # أو يسحب سيولة قبل ما يكمل). الآن نطلب اختراق إضافي بسيط **تحت** 0.72
-        # (نحو القاع أكثر، محاكاة السحب المتوقع) قبل ما نثق بنقطة الدخول — ندخل
-        # بعد التأكيد، مو عند المستوى المعروف مباشرة.
-        fib_072 = swing_low + 0.72 * swing_range
+        # منطقة فيبوناتشي محدَّدة بالضبط — منطقة "OTE" شائعة الاستخدام بين
+        # المتداولين والخوارزميات، وبالتالي عرضة جداً لاصطياد سيولة (السعر يوصلها،
+        # يُصطاد الوقف/الدخول المتجمع هناك، ثم يرتد) — بالضبط النمط اللي لوحظ على
+        # الشارت الحقيقي (السعر يتوقف عند نقطة الدخول ويتذبذب أو يسحب سيولة قبل
+        # ما يكمل). الآن نطلب اختراق إضافي بسيط **تحت** المنطقة (نحو القاع أكثر،
+        # محاكاة السحب المتوقع) قبل ما نثق بنقطة الدخول — ندخل بعد التأكيد، مو
+        # عند المستوى المعروف مباشرة.
+        fib_072 = swing_low + fib_entry_level * swing_range
         liquidity_sweep_margin = swing_range * 0.04  # هامش 4% من مدى الحركة الكاملة
         entry_price = fib_072 - liquidity_sweep_margin
         # 🔴 إصلاح حرج مبني على صفقة حقيقية فشلت خلال 6.4 ثانية بس: كان الوقف يُحسب
@@ -216,7 +227,7 @@ def analyze_mtf_fib_trend(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         side = "Short"
         # نفس الإصلاح بالفرع الصاعد — هامش اختراق إضافي **فوق** 0.72 (نحو القمة
         # أكثر) قبل الدخول، محاكاة اصطياد السيولة المتوقع عند هذا المستوى المعروف
-        fib_072 = swing_high - 0.72 * swing_range
+        fib_072 = swing_high - fib_entry_level * swing_range
         liquidity_sweep_margin = swing_range * 0.04
         entry_price = fib_072 + liquidity_sweep_margin
         stop_candidate = swing_high - swing_range * 0.5 + atr(k5m, 14) * 0.2

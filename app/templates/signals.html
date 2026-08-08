@@ -143,6 +143,22 @@ function fmt(n){
   return num.toPrecision(6);
 }
 
+function formatSignalTime(ts){
+  // 🆕 وقت الصفقة بأعلى الكرت (بطلب صريح) — تاريخ ووقت واضحين بالتوقيت المحلي
+  // لجهاز المستخدم، + "قبل كم" عشان تعرف فوراً بدون حساب يدوي وقت تراجع الصفقة
+  const d = new Date(ts);
+  const dateStr = d.toLocaleDateString('ar', {year:'numeric', month:'short', day:'numeric'});
+  const timeStr = d.toLocaleTimeString('ar', {hour:'2-digit', minute:'2-digit'});
+  const diffMs = Date.now() - ts;
+  const diffMin = Math.floor(diffMs / 60000);
+  let ago;
+  if (diffMin < 1) ago = 'الآن';
+  else if (diffMin < 60) ago = `قبل ${diffMin} دقيقة`;
+  else if (diffMin < 1440) ago = `قبل ${Math.floor(diffMin/60)} ساعة`;
+  else ago = `قبل ${Math.floor(diffMin/1440)} يوم`;
+  return `${dateStr} — ${timeStr} (${ago})`;
+}
+
 function buildBar(sig){
   const live = (sig.current_price && sig.current_price > 0) ? sig.current_price : sig.entry_price;
   const isLong = sig.side === 'Long';
@@ -363,6 +379,7 @@ function renderSignals(){
     const isReversed = sig.strategy && sig.strategy.endsWith('_REVERSED');
     return `
     <div class="sig-card" ${isReversed ? 'style="border:2px solid #a855f7; background:rgba(168,85,247,.04);"' : ''}>
+      ${sig.timestamp ? `<div class="muted" style="font-size:11px; margin-bottom:6px;">🕐 ${formatSignalTime(sig.timestamp)}</div>` : ''}
       <div class="sig-top">
         <div>
           ${isReversed ? `<span class="prob-pill" style="background:#a855f7; color:#fff;">🔄 صفقة هيدج (معاكسة)</span>` : ''}

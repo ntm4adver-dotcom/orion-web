@@ -60,8 +60,8 @@ def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
     ema21_5m = hma(closes5m_reference, 21)
     trend5m = "صاعد" if ema9_5m >= ema21_5m else "هابط"
 
-    trend15m = _get_bias(k15m)
-    trend1h = _get_bias(k1h)
+    trend15m = _get_bias(k15m, already_confirmed=True)
+    trend1h = _get_bias(k1h, already_confirmed=True)
     multi_tf_aligned = trend15m == trend1h
     _log("اتجاه 15 دقيقة", trend15m)
     _log("اتجاه الساعة", trend1h)
@@ -198,6 +198,8 @@ def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
     # بدل الدخول عند أقرب سعر (السعر الحالي مباشرة بعد التأكيد)، نبحث بنفس
     # فريم الدقيقة عن نقطة أقوى تاريخياً (انفجار سعري حقيقي مؤكَّد) ونستخدمها
     # لو كانت أفضل منطقياً من نقطة الدخول الحالية.
+    entry_strength_score = 20.0  # 🆕 نقطة أساس — أي صفقة عندها منطق دخول محسوب
+    entry_strength_notes = []
     if k1m and len(k1m) >= 40:
         reaction = find_strongest_reaction_level(k1m, side=side, current_price=entry_price, max_distance_pct=1.5)
         if reaction is not None:
@@ -206,6 +208,8 @@ def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
             if is_better_entry:
                 _log("🎯 أقوى نقطة دخول مكتشفة (فريم الدقيقة)", f"{candidate_level:.6g} (قوة الانفجار: {reaction['explosion_score']:.1f}×ATR) — بدل {entry_price:.6g}", True)
                 entry_price = candidate_level
+                entry_strength_score += min(40.0, reaction['explosion_score'] * 5)
+                entry_strength_notes.append(f"رد فعل سعري تاريخي (دقيقة): قوة {reaction['explosion_score']:.1f}×ATR")
 
     risk = abs(entry_price - stop_loss)
     if risk <= 0:
@@ -294,4 +298,5 @@ def analyze_scalp_precision(symbol: str, k4h: List[Kline], k1h: List[Kline], k15
         behavior=behavior, volume_analysis=volume_analysis,
         low_vol=False, kill_zone_ok=True, news_time=False, ranging=False,
         score_breakdown=score_breakdown, signal_score=signal_score,
+        entry_strength_score=min(100.0, entry_strength_score), entry_strength_notes=entry_strength_notes,
     )

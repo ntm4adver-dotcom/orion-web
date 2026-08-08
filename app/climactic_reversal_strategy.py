@@ -113,6 +113,8 @@ def analyze_climactic_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     entry_price = current_price
 
     # 🆕 اختيار أقوى نقطة دخول (بطلب صريح — نفس الإصلاح بكل الاستراتيجيات):
+    entry_strength_score = 20.0  # 🆕 نقطة أساس — أي صفقة عندها منطق دخول محسوب
+    entry_strength_notes = []
     if k1m and len(k1m) >= 40:
         reaction = find_strongest_reaction_level(k1m, side=side, current_price=entry_price, max_distance_pct=1.5)
         if reaction is not None:
@@ -120,6 +122,8 @@ def analyze_climactic_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
             is_better_entry = (side == "Long" and candidate_level < entry_price) or (side == "Short" and candidate_level > entry_price)
             if is_better_entry:
                 entry_price = candidate_level
+                entry_strength_score += min(40.0, reaction['explosion_score'] * 5)
+                entry_strength_notes.append(f"رد فعل سعري تاريخي (دقيقة): قوة {reaction['explosion_score']:.1f}×ATR")
     move_range = abs(swing_start_price - (climax_candle.low if side == "Long" else climax_candle.high))
     if move_range <= 0:
         return None
@@ -196,4 +200,5 @@ def analyze_climactic_reversal(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         behavior=behavior, volume_analysis=volume_analysis,
         low_vol=False, kill_zone_ok=True, news_time=False, ranging=False,
         score_breakdown=score_breakdown, signal_score=signal_score,
+        entry_strength_score=min(100.0, entry_strength_score), entry_strength_notes=entry_strength_notes,
     )

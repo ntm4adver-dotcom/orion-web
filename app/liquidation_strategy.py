@@ -119,6 +119,8 @@ def analyze_liquidation_hunter(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     # 🆕 اختيار أقوى نقطة دخول (بطلب صريح — نفس الإصلاح بكل الاستراتيجيات):
     # نقارن نقطة إعادة الاختبار الحالية (ATR×0.5) بأقوى نقطة تاريخية مكتشفة
     # بفريم الدقيقة، ونستخدم الأفضل منطقياً.
+    entry_strength_score = 20.0  # 🆕 نقطة أساس — أي صفقة عندها منطق دخول محسوب
+    entry_strength_notes = []
     if k1m and len(k1m) >= 40:
         reaction = find_strongest_reaction_level(k1m, side=side, current_price=entry_price, max_distance_pct=1.5)
         if reaction is not None:
@@ -127,6 +129,8 @@ def analyze_liquidation_hunter(symbol: str, k4h, k1h, k15m, k5m, k_daily,
             if is_better_entry:
                 _log("🎯 أقوى نقطة دخول مكتشفة (فريم الدقيقة)", f"{candidate_level:.6g} (قوة الانفجار: {reaction['explosion_score']:.1f}×ATR) — بدل نقطة إعادة الاختبار {entry_price:.6g}", True)
                 entry_price = candidate_level
+                entry_strength_score += min(40.0, reaction['explosion_score'] * 5)
+                entry_strength_notes.append(f"رد فعل سعري تاريخي (دقيقة): قوة {reaction['explosion_score']:.1f}×ATR")
 
     # بوابة تأكيد زخم إلزامية: هذي الاستراتيجية تحديداً تعتمد كلياً على استمرار زخم
     # حقيقي، فلازم يكون ضغط المتداولين الفعلي متوافق فعلاً وقت الدخول (لو توفرت البيانات)
@@ -239,4 +243,5 @@ def analyze_liquidation_hunter(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         behavior=behavior, volume_analysis=volume_analysis,
         low_vol=False, kill_zone_ok=True, news_time=False, ranging=False,
         score_breakdown=score_breakdown, signal_score=signal_score,
+        entry_strength_score=min(100.0, entry_strength_score), entry_strength_notes=entry_strength_notes,
     )

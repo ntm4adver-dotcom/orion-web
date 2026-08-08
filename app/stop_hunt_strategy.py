@@ -226,6 +226,8 @@ def analyze_stop_hunt(symbol: str, k4h, k1h, k15m, k5m, k_daily,
     # ساعتين تقريباً) أعطت أقوى انفجار سعري لو السعر لمسها — نستخدمها كسعر
     # دخول محدد (Limit) بدل current_price، بشرط تكون بنفس اتجاه الصفقة ومنطقية
     # (قريبة كفاية يُحتمل السعر يرجع يلمسها، ومو أسوأ من سعر الدخول الأصلي).
+    entry_strength_score = 20.0  # 🆕 نقطة أساس — أي صفقة عندها منطق دخول محسوب
+    entry_strength_notes = []
     if k1m and len(k1m) >= 40:
         reaction = find_strongest_reaction_level(k1m, side=side, current_price=entry_price, max_distance_pct=1.5)
         if reaction is not None:
@@ -236,6 +238,8 @@ def analyze_stop_hunt(symbol: str, k4h, k1h, k15m, k5m, k_daily,
             if is_better_entry:
                 _log("🎯 أقوى نقطة دخول مكتشفة (فريم الدقيقة)", f"{candidate_level:.6g} (قوة الانفجار: {reaction['explosion_score']:.1f}×ATR) — بدل السعر الحالي {entry_price:.6g}", True)
                 entry_price = candidate_level
+                entry_strength_score += min(40.0, reaction['explosion_score'] * 5)
+                entry_strength_notes.append(f"رد فعل سعري تاريخي (دقيقة): قوة {reaction['explosion_score']:.1f}×ATR")
 
     # تحقق أمان: نتأكد الاتجاه لسا سليم منطقياً بعد تحديث سعر الدخول (نادر جداً
     # يصير خلاف كذا، لكن حماية إضافية بدون كلفة)
@@ -335,4 +339,5 @@ def analyze_stop_hunt(symbol: str, k4h, k1h, k15m, k5m, k_daily,
         behavior=behavior, volume_analysis=volume_analysis,
         low_vol=False, kill_zone_ok=True, news_time=False, ranging=False,
         score_breakdown=score_breakdown, signal_score=signal_score,
+        entry_strength_score=min(100.0, entry_strength_score), entry_strength_notes=entry_strength_notes,
     )

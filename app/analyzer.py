@@ -8,6 +8,7 @@ as the sole strategy!"). هذا الملف يحافظ على نفس المعاد
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Optional, List, Tuple
 
@@ -62,7 +63,8 @@ class AnalysisResult:
     tp1: float = 0.0
     score_breakdown: list = None  # قائمة {factor, points, confirmed, earned} — تُضبط لكل استراتيجية
     signal_score: float = 100.0   # مجموع النقاط المكتسبة فعلياً من أصل 100
-    entry_confidence: Optional[str] = None  # 🆕 "reaction_level" لو نقطة الدخول مبنية على دليل قوي (انفجار سعري مُقاس بفريم الدقيقة) — يمنع استبدالها الأعمى لاحقاً
+    entry_strength_score: float = 20.0  # 🆕 درجة قوة نقطة الدخول تحديداً (0-100) — بطلب صريح، عشان تُصدَّر وتُقارَن
+    entry_strength_notes: list = None   # 🆕 قائمة نصية توضح مصدر كل نقطة بالدرجة (رد فعل سعري / تجمّع بروفايل فوليوم / إلخ)
 
 
 def build_score_breakdown(factors: list) -> tuple:
@@ -708,7 +710,43 @@ def _hma_bias_pair(closes: List[float]) -> str:
     return "صاعد" if h_short >= h_long else "هابط"
 
 
-def _get_bias(klines: List[Kline]) -> str:
+def find_previous_day_candle(klines_daily: List[Kline], reference_time_ms: Optional[int] = None) -> Optional[Kline]:
+    """🆕 يرجع شمعة "اليوم السابق" (أمس) المكتملة فعلياً — **بمطابقة التاريخ
+    الحقيقي (منتصف الليل UTC)**، مو بموقعها بالمصفوفة (index [-1] أو [-2]).
+
+    بطلب صريح، بعد اكتشاف باق حقيقي: الاعتماد على index ثابت هش أصلاً — يعتمد
+    على افتراض ضمني هل المصفوفة "مُشذَّبة" (اليوم الحالي محذوف) أو "خام"
+    (شاملة اليوم الحالي). أي اختلاف بسيط بمصدر البيانات أو طريقة التمرير يكسر
+    الافتراض بصمت (بالضبط الباق اللي صار). هذا الحل **يطابق التاريخ الفعلي
+    مباشرة**، بغض النظر تماماً عن حالة المصفوفة (مُشذَّبة أو لأ، طولها كم)."""
+    if not klines_daily:
+        return None
+    now_ms = reference_time_ms if reference_time_ms is not None else int(time.time() * 1000)
+    day_ms = 86400 * 1000
+    start_of_today = (now_ms // day_ms) * day_ms
+    start_of_yesterday = start_of_today - day_ms
+
+    # المطابقة الأساسية: شمعة يومية تبدأ بالضبط بين منتصف ليل أمس واليوم
+    same_day = [k for k in klines_daily if start_of_yesterday <= k.open_time < start_of_today]
+    if same_day:
+        return same_day[-1]
+
+    # احتياط (فرق منطقة زمنية بسيط بين المنصة والساعة المحلية مثلاً): أقرب
+    # شمعة مكتملة **قبل** بداية اليوم الحالي، مهما كان طول المصفوفة أو حالتها
+    before_today = [k for k in klines_daily if k.open_time < start_of_today]
+    if before_today:
+        return before_today[-1]
+
+    return None  # ما فيه شمعة سابقة لليوم الحالي إطلاقاً بالبيانات المتوفرة
+
+
+def find_previous_day_high_low(klines_daily: List[Kline], reference_time_ms: Optional[int] = None) -> Optional[Tuple[float, float]]:
+    """اختصار مباشر — يرجع (قمة، قاع) شمعة اليوم السابق الحقيقية، أو None."""
+    candle = find_previous_day_candle(klines_daily, reference_time_ms)
+    return (candle.high, candle.low) if candle is not None else None
+
+
+def _get_bias(klines: List[Kline], already_confirmed: bool = False) -> str:
     if not klines:
         return "صاعد"
     # 🔴 إصلاح جذري (اكتشاف جديد بمراجعة شاملة لكل البيانات): كانت الدالة تستخدم
@@ -717,19 +755,25 @@ def _get_bias(klines: List[Kline]) -> str:
     # فيقلب قرار الاتجاه الرئيسي (صاعد/هابط) بشكل غير مستقر بمجرد تذبذب طبيعي —
     # بالذات خطير عند نقاط الانعكاس، وهذا يأثر مباشرة على 3 استراتيجيات (فيبوناتشي،
     # السكالب، ICT). نستبعد الآن آخر شمعة، ونعتمد بس على الشموع **المكتملة فعلياً**.
-    confirmed_klines = klines[:-1] if len(klines) > 1 else klines
+    # 🔴 إصلاح إضافي (بطلب صريح، بعد اكتشاف باق "تشذيب مزدوج" حقيقي): كل
+    # الاستراتيجيات تستقبل بياناتها من scanner.py **مُشذَّبة أصلاً** (آخر شمعة
+    # ناقصة محذوفة قبل التمرير). لو استدعينا هالدالة من داخل استراتيجية بنفس
+    # الطريقة القديمة، نشذّب **مرتين** بالغلط — نفقد شمعة مكتملة إضافية حقيقية
+    # من حساب الاتجاه. `already_confirmed=True` تلغي التشذيب الداخلي لهالحالة.
+    confirmed_klines = klines if already_confirmed else (klines[:-1] if len(klines) > 1 else klines)
     closes = [k.close for k in confirmed_klines]
     # 📊 تحسين إضافي: استبدال EMA بـHull Moving Average — يحل تناقض "السرعة مقابل
     # الاستقرار" الكلاسيكي بـEMA (نفس النوع من عدم الاستقرار اللي اكتشفناه للتو).
     return _hma_bias_pair(closes)
 
 
-def daily_trend(klines_daily: List[Kline]) -> str:
+def daily_trend(klines_daily: List[Kline], already_confirmed: bool = False) -> str:
     if not klines_daily:
         return "صاعد"
     # نفس إصلاحي _get_bias: استبعاد آخر شمعة (قيد التكوين) + HMA بدل EMA + حماية
-    # من عدم اتساق الفترة لو البيانات غير كافية
-    confirmed = klines_daily[:-1] if len(klines_daily) > 1 else klines_daily
+    # من عدم اتساق الفترة لو البيانات غير كافية. already_confirmed=True لو
+    # المصدر (k_daily من داخل استراتيجية) مُشذَّب أصلاً من scanner.py.
+    confirmed = klines_daily if already_confirmed else (klines_daily[:-1] if len(klines_daily) > 1 else klines_daily)
     closes = [k.close for k in confirmed]
     return _hma_bias_pair(closes)
 

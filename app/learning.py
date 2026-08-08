@@ -23,6 +23,30 @@ from typing import Optional, Tuple
 from . import db
 
 
+def get_calibrated_probability(strategy_key: Optional[str], raw_probability: float, settings: dict) -> Tuple[float, Optional[str]]:
+    """🆕 معايرة حقيقية للاحتمالية (بطلب صريح، بعد اكتشاف إن رقم الاحتمالية
+    بكل الاستراتيجيات مجرد تقييم قواعدي ثابت — مو احتمالية إحصائية حقيقية،
+    وهذا فسّر التباعد الكبير بين الثقة المعلنة والنجاح الفعلي بكل التصديرات
+    اللي راجعناها). الفكرة: نبحث بالسجل التاريخي — صفقات **مغلقة فعلياً**
+    لنفس الاستراتيجية بنطاق احتمالية قريب — ونمزج الرقم الخام مع نسبة النجاح
+    الحقيقية المسجَّلة، بوزن يتزايد مع حجم العينة (يوصل حد أقصى 70%، يبقى
+    دايماً وزن احتياطي للتقييم الأصلي — عينة صغيرة نسبياً ما نثق فيها 100%).
+    يرجع (احتمالية نهائية، ملاحظة توضيحية أو None لو ما فيه بيانات كافية)."""
+    if not strategy_key or not settings.get("is_probability_calibration_enabled", False):
+        return raw_probability, None
+    min_samples = int(settings.get("probability_calibration_min_trades", 15))
+    calibration = db.get_calibration_win_rate(strategy_key, raw_probability, tolerance=8.0, min_samples=min_samples)
+    if calibration is None:
+        return raw_probability, None
+    actual = calibration["actual_win_rate"]
+    n = calibration["sample_size"]
+    weight = min(0.7, n / 50.0)  # وزن يتزايد مع العينة، سقف 70% — يبقى دايماً حد أدنى وزن للتقييم الأصلي
+    calibrated = raw_probability * (1 - weight) + actual * weight
+    note = (f"🔬 معايرة حقيقية: {raw_probability:.0f}% ← {calibrated:.0f}% "
+            f"(نسبة نجاح فعلية مسجَّلة {actual:.0f}% من {n} صفقة مغلقة مشابهة لنفس الاستراتيجية)")
+    return round(calibrated, 1), note
+
+
 def get_coin_strategy_adjustment(symbol: str, strategy_key: Optional[str], settings: dict) -> Tuple[int, Optional[str]]:
     """🆕 يرجع (مقدار التعديل، رسالة أو None) بناءً على أداء "هذي الاستراتيجية
     بالذات على هذي العملة بالذات" — يسد فجوة حقيقية بين تعلّم العملة عموماً

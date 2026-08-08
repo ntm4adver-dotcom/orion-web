@@ -60,6 +60,10 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "is_top_trader_filter_enabled": 0,  # 🆕 شرط عام (لكل الاستراتيجيات): رفض أي صفقة بدون توافق كبار المتداولين مع اتجاهها
     "min_top_trader_alignment": 0.1,  # 🆕 أقل انحياز مطلوب لكبار المتداولين (-1..1) لاعتبار التوافق كافياً
     "is_btc_dominance_filter_enabled": 0,  # 🆕 فلتر للألتكوينز فقط: رفض Long وقت استحواذ بيتكوين صاعد، ورفض Short وقت استحواذ هابط
+    "is_volume_profile_refinement_enabled": 0,  # 🆕 تحسين مركزي للوقف/الهدف بمرجعية بروفايل الفوليوم (POC/VAH/VAL) — يطبَّق على كل الاستراتيجيات
+    "is_probability_calibration_enabled": 0,  # 🆕 معايرة حقيقية للاحتمالية بناءً على نسبة النجاح الفعلية المسجَّلة لكل استراتيجية، بدل الرقم القواعدي الخام
+    "probability_calibration_min_trades": 15,  # 🆕 أقل عدد صفقات مغلقة مشابهة مطلوبة قبل الوثوق بالمعايرة
+    "mtf_fib_entry_level": 0.72,  # 🆕 نسبة التراجع المستهدفة لدخول فيبوناتشي الترند — 0.72 ليست مستوى كلاسيكي حقيقي (جرّب 0.618 أو 0.786)
     "min_btc_correlation": 0.35,  # الحد الأدنى لمعامل الارتباط بالبيتكوين قبل اعتبار العملة "فكّت الارتباط"
     "is_btc_decoupling_exception_enabled": 0,  # 🔴 بطلبك الصريح — فك الارتباط أحياناً مؤقت والسوق يجبر العملة ترجع تتبع البيتكوين لاحقاً، فنتجاهل الاستثناء دايماً
     "is_breakeven_stop_enabled": 1,  # نقل الوقف لنقطة الدخول تلقائياً عند تحقيق ربح 1R
@@ -155,7 +159,9 @@ def init_db():
                 actual_r_achieved REAL DEFAULT NULL,
                 partial_r_banked REAL DEFAULT 0,
                 okx_order_id TEXT DEFAULT '',
-                okx_inst_id TEXT DEFAULT ''
+                okx_inst_id TEXT DEFAULT '',
+                entry_strength_score REAL DEFAULT 20.0,
+                entry_strength_notes TEXT DEFAULT ''
             )
         """)
         # هجرة آمنة: إضافة عمود strategy لو قاعدة البيانات كانت موجودة قبل هذا التحديث
@@ -189,6 +195,10 @@ def init_db():
                 conn.execute("ALTER TABLE trade_signals ADD COLUMN okx_order_id TEXT DEFAULT ''")
             if "okx_inst_id" not in existing_cols:
                 conn.execute("ALTER TABLE trade_signals ADD COLUMN okx_inst_id TEXT DEFAULT ''")
+            if "entry_strength_score" not in existing_cols:
+                conn.execute("ALTER TABLE trade_signals ADD COLUMN entry_strength_score REAL DEFAULT 20.0")
+            if "entry_strength_notes" not in existing_cols:
+                conn.execute("ALTER TABLE trade_signals ADD COLUMN entry_strength_notes TEXT DEFAULT ''")
         except Exception:
             pass
         conn.execute("""
@@ -263,7 +273,7 @@ def get_settings() -> Dict[str, Any]:
                  "is_efficiency_filter_enabled", "is_market_alignment_filter_enabled",
                  "is_breakeven_stop_enabled", "is_auto_breakeven_half_target_enabled",
                  "is_split_targets_enabled", "is_market_regime_filter_enabled", "is_reverse_mode_enabled", "is_fixed_rr_enabled",
-                 "is_btc_decoupling_exception_enabled", "is_taker_pressure_filter_enabled", "is_coin_hard_block_enabled", "is_price_divergence_filter_enabled", "is_top_trader_filter_enabled", "is_btc_dominance_filter_enabled",
+                 "is_btc_decoupling_exception_enabled", "is_taker_pressure_filter_enabled", "is_coin_hard_block_enabled", "is_price_divergence_filter_enabled", "is_top_trader_filter_enabled", "is_btc_dominance_filter_enabled", "is_volume_profile_refinement_enabled", "is_probability_calibration_enabled",
                  "is_coin_quality_filter_enabled"):
         settings[bkey] = bool(int(settings.get(bkey, 0)))
     return settings
@@ -294,20 +304,24 @@ def add_signal(signal: Dict[str, Any]) -> int:
     split_enabled = bool(signal.get("split_targets_used", False))
     tp1_price = (entry_price + (take_profit - entry_price) * 0.5) if split_enabled else 0.0
 
+    entry_strength_score = signal.get("entry_strength_score", 20.0)
+    entry_strength_notes_json = json.dumps(signal.get("entry_strength_notes") or [], ensure_ascii=False)
+
     with _lock, _connect() as conn:
         cur = conn.execute("""
             INSERT INTO trade_signals
             (timestamp, symbol, side, entry_price, stop_loss, take_profit, rr, probability,
              quality, behavior, volume_analysis, status, update_timestamp, current_price,
              last_notified_status, strategy, initial_risk_pct, signal_score, score_breakdown,
-             tp1_price, split_targets_used)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             tp1_price, split_targets_used, entry_strength_score, entry_strength_notes)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             int(time.time() * 1000), signal["symbol"], signal["side"], entry_price,
             stop_loss, take_profit, signal["rr"], signal["probability"],
             signal["quality"], signal["behavior"], signal["volume_analysis"], "PENDING",
             int(time.time() * 1000), entry_price, "", signal.get("strategy", ""), initial_risk_pct,
             signal_score, score_breakdown_json, tp1_price, int(split_enabled),
+            entry_strength_score, entry_strength_notes_json,
         ))
         conn.commit()
         return cur.lastrowid
@@ -470,6 +484,26 @@ def get_signal_stats() -> Dict[str, Any]:
         "total_loss_r": round(-total_loss_r, 2),  # سالبة دائماً — كل خسارة = -1R بالتعريف
         "net_r": round(total_win_r - total_loss_r, 2),
     }
+
+
+def get_calibration_win_rate(strategy_key: str, declared_prob: float, tolerance: float = 8.0,
+                              min_samples: int = 8) -> Optional[dict]:
+    """🆕 يبحث عن صفقات **مغلقة فعلياً** لنفس الاستراتيجية، بنطاق قريب من
+    الاحتمالية المُعلَنة (±tolerance)، ويرجع نسبة النجاح **الحقيقية** المسجَّلة
+    فعلياً لهذا النطاق — أساس معايرة حقيقية بدل رقم قواعدي ثابت. يرجع None
+    لو العينة أقل من min_samples (بيانات غير كافية نعاير عليها بثقة)."""
+    lo, hi = declared_prob - tolerance, declared_prob + tolerance
+    with _lock, _connect() as conn:
+        rows = conn.execute("""
+            SELECT status FROM trade_signals
+            WHERE strategy = ? AND status IN ('HIT_TP','HIT_SL')
+                  AND probability BETWEEN ? AND ?
+        """, (strategy_key, lo, hi)).fetchall()
+    total = len(rows)
+    if total < min_samples:
+        return None
+    wins = sum(1 for r in rows if r["status"] == "HIT_TP")
+    return {"actual_win_rate": (wins / total) * 100.0, "sample_size": total}
 
 
 def get_probability_calibration() -> List[Dict[str, Any]]:
